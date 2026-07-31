@@ -1,0 +1,86 @@
+import type { Card, Phase } from "@yaniv/shared";
+import type { Result } from "./result.ts";
+
+/**
+ * Match-scoped player record. Note there is no hand here — hands are round-scoped and
+ * live in `RoundState`, so starting a new round cannot leave a stale one behind.
+ *
+ * `id` is a server-issued stable id, never a socket id: the domain model has no
+ * awareness of transport.
+ */
+export interface Player {
+  id: string;
+  name: string;
+  score: number;
+}
+
+/**
+ * Everything that resets between rounds. Replacing this whole object is the only way a
+ * round begins, which is what makes "forgot to clear a field" unrepresentable.
+ */
+export interface RoundState {
+  /** playerId -> hand. Keys always match the match's player ids. */
+  hands: Record<string, Card[]>;
+  drawPile: Card[];
+  /**
+   * The most recently discarded set. Only its first and last cards may be picked up,
+   * which is why this is a distinct field and not the tail of a flat array.
+   */
+  lastDiscard: Card[];
+  /** Previously discarded cards, out of play. Reshuffled when the draw pile empties. */
+  buried: Card[];
+  currentTurnPlayerId: string;
+  /** Seating order, fixed for the whole match. */
+  turnOrder: string[];
+}
+
+export interface PlayerRoundResult {
+  playerId: string;
+  hand: Card[];
+  handValue: number;
+  delta: number;
+  scoreAfter: number;
+}
+
+export interface RoundResult {
+  roundNumber: number;
+  callerId: string;
+  assaferId: string | null;
+  /** Starts the next round. The Assafer if there was one, else the caller. */
+  winnerId: string;
+  players: PlayerRoundResult[];
+}
+
+/**
+ * The server's complete view of one room. Contains every hand and the full draw pile
+ * order — it must never be sent to a client. Use `serializeStateForPlayer`.
+ */
+export interface GameState {
+  roomCode: string;
+  phase: Phase;
+  hostId: string;
+  players: Player[];
+  roundNumber: number;
+  /** Null in `lobby`. Present from the first deal onward. */
+  round: RoundState | null;
+  /** Null until a round has finished. */
+  lastRoundResult: RoundResult | null;
+  /** Null until `gameEnd`. Multiple ids on a tie for lowest score. */
+  winnerIds: string[] | null;
+}
+
+/** Shorthand for the return type of every state transition. */
+export type ActionResult = Result<GameState>;
+
+export function getPlayer(state: GameState, playerId: string): Player | undefined {
+  return state.players.find((p) => p.id === playerId);
+}
+
+/** Returns a new players array with one player's fields patched. */
+export function updatePlayer(
+  players: Player[],
+  playerId: string,
+  patch: Partial<Omit<Player, "id">>,
+): Player[] {
+  return players.map((p) => (p.id === playerId ? { ...p, ...patch } : p));
+}

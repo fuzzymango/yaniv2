@@ -1,0 +1,143 @@
+import { randomUUID } from "node:crypto";
+import {
+  MAX_PLAYERS,
+  ROOM_CODE_ALPHABET,
+  ROOM_CODE_LENGTH,
+} from "./config.ts";
+import { err, ok, type Result } from "./result.ts";
+import { randomInt, systemRng, type Rng } from "./rng.ts";
+import type { ActionResult, GameState, Player } from "./state.ts";
+
+const MAX_NAME_LENGTH = 20;
+const MAX_CODE_ATTEMPTS = 100;
+
+interface Room {
+  state: GameState;
+  /** Per-room rng, so one room's shuffles are reproducible independently. */
+  rng: Rng;
+}
+
+export interface RoomManagerOptions {
+  /** Source of randomness for room codes, and the seed source for each room. */
+  rng?: Rng;
+  /** Override for deterministic tests. Defaults to `crypto.randomUUID`. */
+  newPlayerId?: () => string;
+  /** Override to give each room a seeded rng in tests. */
+  newRoomRng?: () => Rng;
+}
+
+function normalizeName(name: string): string | null {
+  const trimmed = name.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_NAME_LENGTH) return null;
+  return trimmed;
+}
+
+/**
+ * Owns the live rooms. Each room code maps to one fully independent `GameState` plus
+ * its own rng. Storage is an in-memory Map: a server restart drops every game in
+ * progress. That is a known and accepted limitation, not an oversight.
+ */
+export class RoomManager {
+  private readonly rooms = new Map<string, Room>();
+  private readonly rng: Rng;
+  private readonly newPlayerId: () => string;
+  private readonly newRoomRng: () => Rng;
+
+  constructor(options: RoomManagerOptions = {}) {
+    this.rng = options.rng ?? systemRng;
+    this.newPlayerId = options.newPlayerId ?? (() => randomUUID());
+    this.newRoomRng = options.newRoomRng ?? (() => this.rng);
+  }
+
+  private generateRoomCode(): string {
+    for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
+      let code = "";
+      for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
+        code += ROOM_CODE_ALPHABET[randomInt(this.rng, ROOM_CODE_ALPHABET.length)]!;
+      }
+      if (!this.rooms.has(code)) return code;
+    }
+    // 32^4 ≈ 1M codes; exhausting 100 attempts means the server is far past capacity.
+    throw new Error("Unable to allocate an unused room code");
+  }
+
+  createRoom(
+    hostName: string,
+  ): Result<{ roomCode: string; playerId: string; state: GameState }> {
+    const name = normalizeName(hostName);
+    if (name === null) {
+      return err("INVALID_NAME", `Name must be 1-${MAX_NAME_LENGTH} characters`);
+    }
+
+    const roomCode = this.generateRoomCode();
+    const host: Player = { id: this.newPlayerId(), name, score: 0 };
+
+    const state: GameState = {
+      roomCode,
+      phase: "lobby",
+      hostId: host.id,
+      players: [host],
+      roundNumber: 0,
+      round: null,
+      lastRoundResult: null,
+      winnerIds: null,
+    };
+
+    this.rooms.set(roomCode, { state, rng: this.newRoomRng() });
+    return ok({ roomCode, playerId: host.id, state });
+  }
+
+  joinRoom(
+    roomCode: string,
+    playerName: string,
+  ): Result<{ playerId: string; state: GameState }> {
+    const room = this.rooms.get(roomCode);
+    if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
+
+    const name = normalizeName(playerName);
+    if (name === null) {
+      return err("INVALID_NAME", `Name must be 1-${MAX_NAME_LENGTH} characters`);
+    }
+    if (room.state.phase !== "lobby") {
+      return err("WRONG_PHASE", "That game has already started");
+    }
+    if (room.state.players.length >= MAX_PLAYERS) {
+      return err("ROOM_FULL", `Room is full (${MAX_PLAYERS} players)`);
+    }
+
+    const player: Player = { id: this.newPlayerId(), name, score: 0 };
+    room.state = { ...room.state, players: [...room.state.players, player] };
+    return ok({ playerId: player.id, state: room.state });
+  }
+
+  getState(roomCode: string): GameState | undefined {
+    return this.rooms.get(roomCode)?.state;
+  }
+
+  /**
+   * Run a state transition against a room and persist it if it succeeds. This is the
+   * seam the socket layer uses, so it never touches stored state directly and a
+   * rejected action can never leave a room half-updated.
+   */
+  apply(
+    roomCode: string,
+    transition: (state: GameState, rng: Rng) => ActionResult,
+  ): ActionResult {
+    const room = this.rooms.get(roomCode);
+    if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
+
+    const result = transition(room.state, room.rng);
+    if (result.ok) {
+      room.state = result.value;
+    }
+    return result;
+  }
+
+  removeRoom(roomCode: string): void {
+    this.rooms.delete(roomCode);
+  }
+
+  get roomCount(): number {
+    return this.rooms.size;
+  }
+}
