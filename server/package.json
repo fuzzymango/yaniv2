@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test \"test/**/*.test.ts\"",
-    "test:watch": "node --test --watch \"test/**/*.test.ts\""
+    "test:watch": "node --test --watch \"test/**/*.test.ts\"",
+    "demo": "node scripts/play.ts",
+    "play": "node scripts/play.ts --play"
   },
   "dependencies": {
     "@yaniv/shared": "*"

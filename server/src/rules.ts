@@ -1,11 +1,9 @@
-import type { Card, Rank } from "@yaniv/shared";
-import { RANKS } from "@yaniv/shared";
+import type { Card } from "@yaniv/shared";
+import { rankOrder } from "@yaniv/shared";
 
-/** Position of a rank in run order, Ace low. Jokers are not orderable. */
-export function rankOrder(rank: Rank): number | null {
-  const index = RANKS.indexOf(rank);
-  return index === -1 ? null : index;
-}
+// Rank ordering lives in shared so the client sorts hands the same way the engine
+// validates runs. Re-exported here because runs are a rules concern.
+export { rankOrder };
 
 export function handValue(hand: readonly Card[]): number {
   return hand.reduce((total, card) => total + card.value, 0);

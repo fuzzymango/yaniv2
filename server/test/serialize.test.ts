@@ -39,6 +39,35 @@ describe("serializeStateForPlayer", () => {
     assert.ok(!("hand" in opponent), "opponent view must not carry a hand key");
   });
 
+  it("delivers the viewer's hand in display order regardless of engine order", () => {
+    const state = makeState({
+      players: [{ id: "p1", name: "Ada" }, { id: "p2", name: "Grace" }],
+      hands: {
+        p1: ["spades-K", "hearts-5", "joker-1", "clubs-A", "diamonds-10"],
+        p2: ["clubs-9"],
+      },
+      lastDiscard: ["clubs-7"],
+    });
+    const view = serializeStateForPlayer(state, "p1");
+
+    assert.deepEqual(ids(view.you.hand), [
+      "joker-1",
+      "clubs-A",
+      "hearts-5",
+      "diamonds-10",
+      "spades-K",
+    ]);
+  });
+
+  it("sorts the view without disturbing the engine's own hand order", () => {
+    const state = makeState({
+      hands: { p1: ["spades-K", "clubs-A"], p2: ["clubs-9"] },
+      lastDiscard: ["clubs-7"],
+    });
+    serializeStateForPlayer(state, "p1");
+    assert.deepEqual(ids(state.round!.hands["p1"]!), ["spades-K", "clubs-A"]);
+  });
+
   it("reduces the draw pile to a count", () => {
     const view = serializeStateForPlayer(scenario(), "p1");
     assert.equal(view.drawPileCount, 2);

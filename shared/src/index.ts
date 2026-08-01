@@ -1,5 +1,5 @@
 export type { Suit, Rank, Card } from "./cards.ts";
-export { SUITS, RANKS } from "./cards.ts";
+export { SUITS, RANKS, rankOrder, compareCards, sortHand } from "./cards.ts";
 
 export type { GameErrorCode, GameError } from "./errors.ts";
 

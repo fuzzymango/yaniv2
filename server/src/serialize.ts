@@ -4,6 +4,7 @@ import type {
   RoundResultView,
   SelfView,
 } from "@yaniv/shared";
+import { sortHand } from "@yaniv/shared";
 import type { GameState, RoundResult } from "./state.ts";
 
 function toRoundResultView(
@@ -21,7 +22,7 @@ function toRoundResultView(
     players: result.players.map((p) => ({
       playerId: p.playerId,
       name: nameOf(p.playerId),
-      hand: p.hand,
+      hand: sortHand(p.hand),
       handValue: p.handValue,
       delta: p.delta,
       scoreAfter: p.scoreAfter,
@@ -59,7 +60,9 @@ export function serializeStateForPlayer(
     id: viewer.id,
     name: viewer.name,
     score: viewer.score,
-    hand: round?.hands[viewer.id] ?? [],
+    // Sorted here rather than in the engine: hand order is presentation, and this
+    // is the one place every client is guaranteed to go through.
+    hand: sortHand(round?.hands[viewer.id] ?? []),
   };
 
   const opponents: OpponentView[] = state.players
