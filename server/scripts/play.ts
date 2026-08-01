@@ -253,7 +253,12 @@ async function interactivePlay(playerCount: number, seed: number): Promise<void>
       const playerId = round.currentTurnPlayerId;
 
       if (playerId !== humanId) {
-        const hand = round.hands[playerId]!;
+        const hand = sortHand(round.hands[playerId]!);
+        // print the current bots hand (for debugging)
+        console.log(
+          `  ${nameOf(state, playerId).padEnd(8)} hand  ${hand.map((c, i) => `${dim(`${i + 1}:`)}${renderCard(c)}`).join("  ")}` +
+            dim(`   = ${handValue(hand)}`),
+        );
         if (handValue(hand) <= YANIV_THRESHOLD) {
           rooms.apply(roomCode, (s) => callYaniv(s, playerId));
           printRoundResult(rooms.getState(roomCode)!);
