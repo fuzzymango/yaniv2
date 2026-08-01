@@ -67,14 +67,33 @@ A discard is valid if it is one of:
 - **A single card.** Always valid.
 - **Two or more cards of the same rank.** (Two jokers count as a pair — both are rank
   Joker.)
-- **A run of three or more consecutive cards of the same suit.** For example
-  `4♥ 5♥ 6♥`. Ace is low, and runs do not wrap past King.
+- **A run of three or more consecutive cards of the same suit,** in which **jokers are
+  wild** and may stand in for any missing card. For example `4♥ 5♥ 6♥`, `7♥ 8♥ Joker`
+  (the joker playing as 6♥ or 9♥), or `5♥ Joker Joker 8♥`. Ace is low, and runs do not
+  wrap past King — `Q♥ K♥ A♥` is not a run.
 
-Jokers are **not wild** in this ruleset — a joker has no suit and so can never be part of
-a run, and can only pair with the other joker.
+Two further constraints on runs:
+
+- All the **non-joker** cards must share a suit. A joker has no suit and is exempt.
+- A run needs at least **two real cards** to anchor it, so `Joker Joker 5♥` is not a run.
+
+Jokers are wild in **runs only**. They do not complete a same-rank set: `7♥ 7♠ Joker` is
+not three of a kind. Two jokers together are still a valid pair, since both are rank Joker.
+
+### How a run is laid out
 
 Runs are stored in ascending rank order regardless of the order the player submitted them,
 so that "first and last card" is unambiguous. Same-rank sets keep the submitted order.
+
+A joker filling an interior gap has only one possible position. A joker that *extends* the
+run is ambiguous — `7♥ 8♥ Joker` could be 6-7-8 or 7-8-9 — and the player's own ordering
+decides it: **jokers placed before the first real card extend downwards, the rest extend
+upwards.** This matters because only the two end cards of a discard can be picked up, so
+the choice controls what the next player is offered.
+
+That preference is overridden only where the run would run off the end of the deck. A
+joker cannot sit below the ace or above the king, so `Q♥ K♥ Joker` is always stored as
+`Joker Q♥ K♥`, and `Joker A♥ 2♥` as `A♥ 2♥ Joker`.
 
 ---
 
@@ -136,7 +155,8 @@ These are common in other Yaniv rulesets and are deliberately **not** implemente
 would be added as an explicit rule flag, never as scattered special cases.
 
 - **100/50 halving** — landing exactly on 100 dropping you to 50.
-- **Wild jokers** — jokers substituting for a missing card in a run.
+- **Jokers wild in same-rank sets** — jokers are wild in runs (§4) but do not complete
+  three of a kind.
 - **Slapdown** — discarding a just-drawn matching card out of turn. This one also
   conflicts with the engine's atomic-turn model and would require revisiting it.
 - **Multi-deck play.**

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { RANKS } from "@yaniv/shared";
 import {
   canonicalizeSet,
   handValue,
@@ -98,8 +99,62 @@ describe("isValidSet", () => {
       assert.equal(isValidSet(cards("clubs-Q", "clubs-K", "clubs-A")), false);
     });
 
-    it("rejects a joker inside a run, since jokers are not wild", () => {
-      assert.equal(isValidSet(cards("hearts-4", "joker-1", "hearts-6")), false);
+    it("rejects a run whose gap is wider than the jokers can cover", () => {
+      // 5..9 needs three fillers, only one joker supplied.
+      assert.equal(isValidSet(cards("hearts-5", "hearts-9", "joker-1")), false);
+    });
+  });
+
+  describe("runs with wild jokers", () => {
+    it("lets a joker fill an interior gap", () => {
+      assert.equal(isValidSet(cards("hearts-4", "joker-1", "hearts-6")), true);
+    });
+
+    it("lets a joker extend a run at either end", () => {
+      assert.equal(isValidSet(cards("hearts-7", "hearts-8", "joker-1")), true);
+      assert.equal(isValidSet(cards("joker-1", "hearts-7", "hearts-8")), true);
+    });
+
+    it("accepts a joker alongside two already-consecutive cards", () => {
+      assert.equal(isValidSet(cards("hearts-10", "joker-1", "hearts-J")), true);
+    });
+
+    it("lets both jokers fill two separate gaps", () => {
+      assert.equal(
+        isValidSet(cards("hearts-5", "hearts-8", "joker-1", "joker-2")),
+        true,
+      );
+    });
+
+    it("ignores the joker's lack of suit when checking the suit match", () => {
+      assert.equal(isValidSet(cards("hearts-7", "spades-8", "joker-1")), false);
+    });
+
+    it("still refuses to wrap past the king", () => {
+      assert.equal(isValidSet(cards("hearts-A", "hearts-K", "joker-1")), false);
+      assert.equal(
+        isValidSet(cards("hearts-Q", "hearts-K", "joker-1", "hearts-A")),
+        false,
+      );
+    });
+
+    it("requires two real cards to anchor the run", () => {
+      assert.equal(isValidSet(cards("joker-1", "joker-2", "hearts-5")), false);
+    });
+
+    it("does not make a joker wild in a same-rank set", () => {
+      assert.equal(isValidSet(cards("hearts-7", "spades-7", "joker-1")), false);
+    });
+
+    it("still rejects a joker with a single card, which is too short for a run", () => {
+      assert.equal(isValidSet(cards("joker-1", "hearts-K")), false);
+    });
+
+    it("accepts a run of jokers plus reals at full hand size", () => {
+      assert.equal(
+        isValidSet(cards("hearts-4", "joker-1", "hearts-6", "joker-2", "hearts-8")),
+        true,
+      );
     });
   });
 });
@@ -124,6 +179,144 @@ describe("canonicalizeSet", () => {
     const input = cards("hearts-6", "hearts-4", "hearts-5");
     canonicalizeSet(input);
     assert.deepEqual(ids(input), ["hearts-6", "hearts-4", "hearts-5"]);
+  });
+
+  describe("placing wild jokers", () => {
+    it("seats a joker in the interior gap it fills", () => {
+      const result = canonicalizeSet(cards("hearts-9", "joker-1", "hearts-7"));
+      assert.deepEqual(ids(result), ["hearts-7", "joker-1", "hearts-9"]);
+    });
+
+    it("seats both jokers in the two gaps they fill", () => {
+      const result = canonicalizeSet(
+        cards("hearts-8", "joker-1", "hearts-5", "joker-2"),
+      );
+      assert.deepEqual(ids(result), [
+        "hearts-5",
+        "joker-1",
+        "joker-2",
+        "hearts-8",
+      ]);
+    });
+
+    it("extends upwards when the player laid the joker after their cards", () => {
+      const result = canonicalizeSet(cards("hearts-7", "hearts-8", "joker-1"));
+      assert.deepEqual(ids(result), ["hearts-7", "hearts-8", "joker-1"]);
+    });
+
+    it("extends downwards when the player laid the joker first", () => {
+      const result = canonicalizeSet(cards("joker-1", "hearts-7", "hearts-8"));
+      assert.deepEqual(ids(result), ["joker-1", "hearts-7", "hearts-8"]);
+    });
+
+    it("puts one joker at each end when the player laid one on each side", () => {
+      const result = canonicalizeSet(
+        cards("joker-1", "hearts-7", "hearts-8", "joker-2"),
+      );
+      assert.deepEqual(ids(result), [
+        "joker-1",
+        "hearts-7",
+        "hearts-8",
+        "joker-2",
+      ]);
+    });
+
+    it("forces a joker low when there is no rank above the king", () => {
+      const result = canonicalizeSet(cards("hearts-Q", "hearts-K", "joker-1"));
+      assert.deepEqual(ids(result), ["joker-1", "hearts-Q", "hearts-K"]);
+    });
+
+    it("forces a joker high when there is no rank below the ace", () => {
+      const result = canonicalizeSet(cards("joker-1", "hearts-A", "hearts-2"));
+      assert.deepEqual(ids(result), ["hearts-A", "hearts-2", "joker-1"]);
+    });
+
+    it("keeps a joker pair in submitted order, since it is not a run", () => {
+      assert.deepEqual(ids(canonicalizeSet(cards("joker-2", "joker-1"))), [
+        "joker-2",
+        "joker-1",
+      ]);
+    });
+
+    it("returns every submitted card exactly once", () => {
+      const input = cards("joker-1", "hearts-7", "hearts-8", "joker-2");
+      const result = canonicalizeSet(input);
+      assert.equal(result.length, input.length);
+      assert.deepEqual([...ids(result)].sort(), [...ids(input)].sort());
+    });
+  });
+});
+
+describe("canonicalizeSet — exhaustive run layout check", () => {
+  /** Every combination of `size` cards from `pool`. */
+  function* combinations<T>(pool: readonly T[], size: number): Generator<T[]> {
+    if (size === 0) return yield [];
+    for (let i = 0; i <= pool.length - size; i++) {
+      for (const rest of combinations(pool.slice(i + 1), size - 1)) {
+        yield [pool[i]!, ...rest];
+      }
+    }
+  }
+
+  it("lays out every legal run in the deck without losing or moving a card", () => {
+    const pool = cards(
+      ...RANKS.map((r) => `hearts-${r}`),
+      "spades-5",
+      "spades-6",
+      "spades-7",
+      "joker-1",
+      "joker-2",
+    );
+
+    let runsChecked = 0;
+    for (const size of [3, 4, 5]) {
+      for (const combo of combinations(pool, size)) {
+        if (!isValidSet(combo)) continue;
+        const laid = canonicalizeSet(combo);
+        const label = ids(combo).join(",");
+
+        assert.equal(laid.length, combo.length, `length changed for ${label}`);
+        assert.ok(
+          laid.every((c) => c !== undefined),
+          `undefined slot in ${label}`,
+        );
+        assert.deepEqual(
+          [...ids(laid)].sort(),
+          [...ids(combo)].sort(),
+          `cards changed for ${label}`,
+        );
+
+        // Same-rank sets are left alone; only runs get laid out.
+        const reals = laid.filter((c) => c.suit !== null);
+        if (reals.length < 2) continue;
+        const firstRealIndex = laid.findIndex((c) => c.suit !== null);
+        const firstRank = rankOrder(laid[firstRealIndex]!.rank);
+        if (firstRank === null) continue;
+        if (reals.every((c) => c.rank === reals[0]!.rank)) continue;
+
+        // Each real card must sit exactly as far along as its rank implies, which
+        // means the jokers occupy precisely the missing positions.
+        laid.forEach((card, index) => {
+          if (card.suit === null) return;
+          assert.equal(
+            rankOrder(card.rank)! - firstRank,
+            index - firstRealIndex,
+            `${label} laid out as ${ids(laid).join(",")} is not consecutive`,
+          );
+        });
+
+        // The implied run must fit inside the deck at both ends.
+        const start = firstRank - firstRealIndex;
+        assert.ok(start >= 0, `${label} runs below the ace`);
+        assert.ok(
+          start + laid.length - 1 <= RANKS.length - 1,
+          `${label} runs above the king`,
+        );
+        runsChecked++;
+      }
+    }
+
+    assert.ok(runsChecked > 200, `expected many runs, only checked ${runsChecked}`);
   });
 });
 

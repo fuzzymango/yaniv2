@@ -434,6 +434,126 @@ describe("takeTurn — picking up from the discard", () => {
   });
 });
 
+describe("takeTurn — wild jokers in runs", () => {
+  const base = (hand: string[]) =>
+    makeState({
+      hands: { p1: hand, p2: ["diamonds-8"] },
+      drawPile: ["spades-A"],
+      lastDiscard: ["clubs-7"],
+    });
+
+  it("accepts a run completed by a joker and shrinks the hand", () => {
+    const before = base(["hearts-7", "hearts-9", "joker-1", "spades-2"]);
+    const after = unwrap(
+      takeTurn(
+        before,
+        "p1",
+        {
+          discardCardIds: ["hearts-7", "hearts-9", "joker-1"],
+          draw: { source: "deck" },
+        },
+        rng(),
+      ),
+    );
+
+    assert.deepEqual(ids(after.round!.lastDiscard), [
+      "hearts-7",
+      "joker-1",
+      "hearts-9",
+    ]);
+    assert.equal(after.round!.hands["p1"]!.length, 2);
+    assert.deepEqual(allCardIds(after), allCardIds(before));
+  });
+
+  it("offers a joker for pickup when it sits at the end of the run", () => {
+    const afterP1 = unwrap(
+      takeTurn(
+        base(["hearts-7", "hearts-8", "joker-1", "spades-2"]),
+        "p1",
+        {
+          discardCardIds: ["hearts-7", "hearts-8", "joker-1"],
+          draw: { source: "deck" },
+        },
+        rng(),
+      ),
+    );
+    assert.deepEqual(ids(afterP1.round!.lastDiscard), [
+      "hearts-7",
+      "hearts-8",
+      "joker-1",
+    ]);
+
+    const afterP2 = unwrap(
+      takeTurn(
+        afterP1,
+        "p2",
+        {
+          discardCardIds: ["diamonds-8"],
+          draw: { source: "discard", cardId: "joker-1" },
+        },
+        rng(),
+      ),
+    );
+    assert.ok(ids(afterP2.round!.hands["p2"]!).includes("joker-1"));
+  });
+
+  it("withholds a joker that is buried inside the run", () => {
+    const state = makeState({
+      hands: { p1: ["hearts-3"], p2: ["diamonds-8"] },
+      drawPile: ["spades-A"],
+      lastDiscard: ["hearts-7", "joker-1", "hearts-9"],
+    });
+
+    expectErr(
+      takeTurn(
+        state,
+        "p1",
+        {
+          discardCardIds: ["hearts-3"],
+          draw: { source: "discard", cardId: "joker-1" },
+        },
+        rng(),
+      ),
+      "CARD_NOT_PICKUP_ELIGIBLE",
+    );
+  });
+
+  it("honours the player's choice to extend the run downwards", () => {
+    const after = unwrap(
+      takeTurn(
+        base(["hearts-7", "hearts-8", "joker-1", "spades-2"]),
+        "p1",
+        {
+          // Joker listed first, so it plays as 6♥ and the 8♥ end stays exposed.
+          discardCardIds: ["joker-1", "hearts-7", "hearts-8"],
+          draw: { source: "deck" },
+        },
+        rng(),
+      ),
+    );
+    assert.deepEqual(ids(after.round!.lastDiscard), [
+      "joker-1",
+      "hearts-7",
+      "hearts-8",
+    ]);
+  });
+
+  it("rejects a run the jokers cannot bridge", () => {
+    expectErr(
+      takeTurn(
+        base(["hearts-5", "hearts-9", "joker-1", "spades-2"]),
+        "p1",
+        {
+          discardCardIds: ["hearts-5", "hearts-9", "joker-1"],
+          draw: { source: "deck" },
+        },
+        rng(),
+      ),
+      "INVALID_SET",
+    );
+  });
+});
+
 describe("takeTurn — exhausting the draw pile", () => {
   it("reshuffles the buried cards while leaving the table set in place", () => {
     const state = makeState({

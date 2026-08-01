@@ -2,6 +2,15 @@
 
 export const HAND_SIZE = 5;
 
+/** Shortest legal run. docs/rules.md §4. */
+export const MIN_RUN_LENGTH = 3;
+
+/**
+ * A run must be anchored by at least this many non-joker cards. Two jokers plus a
+ * single card do not establish a sequence. docs/rules.md §4.
+ */
+export const MIN_RUN_REAL_CARDS = 2;
+
 /** Maximum hand value that permits calling Yaniv. docs/rules.md §6. */
 export const YANIV_THRESHOLD = 7;
 

@@ -168,7 +168,7 @@ export function takeTurn(
   if (!isValidSet(collected.cards)) {
     return err(
       "INVALID_SET",
-      "Discard must be one card, a set of equal ranks, or a same-suit run of 3+",
+      "Discard must be one card, a set of equal ranks, or a same-suit run of 3+ (jokers may fill gaps in a run)",
     );
   }
 
