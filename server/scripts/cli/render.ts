@@ -6,38 +6,11 @@
  * session tests assert on what a developer would have seen.
  */
 
-import type { Card, PlayerGameView, RoundResultView } from "@yaniv/shared";
-
-const SUIT_SYMBOL: Record<string, string> = {
-  hearts: "♥",
-  diamonds: "♦",
-  clubs: "♣",
-  spades: "♠",
-};
-
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
-const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
-const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
-const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
-const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
+import type { PlayerGameView, RoundResultView } from "@yaniv/shared";
+import { bold, cyan, dim, green, pad, red, renderCard, renderHand } from "../lib/cardDisplay.ts";
 
 /** Wide enough for the seated bots, whose names carry a "(bot)" suffix. */
 const NAME_WIDTH = 14;
-
-/** Pad to a *visible* width — padEnd would miscount the colour escapes. */
-function pad(text: string, width: number): string {
-  const visible = text.replace(/\x1b\[[0-9;]*m/g, "").length;
-  return text + " ".repeat(Math.max(0, width - visible));
-}
-
-export function renderCard(card: Card): string {
-  if (card.suit === null) return bold("Jk");
-  const face = `${card.rank}${SUIT_SYMBOL[card.suit]}`;
-  return card.suit === "hearts" || card.suit === "diamonds" ? red(face) : face;
-}
-
-export const renderHand = (cards: readonly Card[]) =>
-  cards.map(renderCard).join(" ");
 
 /**
  * The viewer's hand, numbered for selection.
