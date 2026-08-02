@@ -6,10 +6,15 @@
   "scripts": {
     "test": "node --test \"test/**/*.test.ts\"",
     "test:watch": "node --test --watch \"test/**/*.test.ts\"",
+    "serve": "node src/index.ts",
     "demo": "node scripts/play.ts",
     "play": "node scripts/play.ts --play"
   },
   "dependencies": {
-    "@yaniv/shared": "*"
+    "@yaniv/shared": "*",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
   }
 }
