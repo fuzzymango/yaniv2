@@ -33,7 +33,7 @@ export function playBotTurns(
   for (;;) {
     const state = rooms.getState(roomCode);
     // A phase other than `playing` means the round ended on the last action.
-    if (state?.phase !== "playing" || !state.round) return;
+    if (state?.phase !== "playing") return;
 
     const playerId = state.round.currentTurnPlayerId;
     if (!rooms.isBot(roomCode, playerId)) return;

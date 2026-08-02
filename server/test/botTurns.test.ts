@@ -37,7 +37,9 @@ describe("playBotTurns", () => {
 
     playBotTurns(rooms, roomCode, () => {});
 
-    const round = rooms.getState(roomCode)!.round!;
+    const state = rooms.getState(roomCode)!;
+    assert.equal(state.phase, "playing");
+    const round = state.round;
     assert.equal(round.currentTurnPlayerId, "human", "the turn came back to the human");
     assert.equal(round.hands["bot"]!.length, 2, "the bot discarded one and drew one");
   });
@@ -68,7 +70,9 @@ describe("playBotTurns", () => {
     playBotTurns(rooms, roomCode, (playerId) => played.push(playerId));
 
     assert.deepEqual(played, ["bot-1", "bot-2"]);
-    assert.equal(rooms.getState(roomCode)!.round!.currentTurnPlayerId, "human");
+    const state = rooms.getState(roomCode)!;
+    assert.equal(state.phase, "playing");
+    assert.equal(state.round.currentTurnPlayerId, "human");
   });
 
   it("calls Yaniv for a bot holding a low enough hand, ending the round", () => {

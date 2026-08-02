@@ -1,4 +1,4 @@
-import type { Card, Phase } from "@yaniv/shared";
+import type { Card } from "@yaniv/shared";
 import type { Result } from "./result.ts";
 
 /**
@@ -61,22 +61,49 @@ export interface RoundResult {
 }
 
 /**
- * The server's complete view of one room. Contains every hand and the full draw pile
- * order — it must never be sent to a client. Use `serializeStateForPlayer`.
+ * Fields that don't vary by phase. `lastRoundResult` and `winnerIds` live here rather
+ * than on one variant of the union below: `lastRoundResult` stays populated through the
+ * next `playing` round (not just at `roundEnd`), and `winnerIds` is only ever non-null at
+ * `gameEnd` — neither cleanly gates on the lobby/active split, so each keeps its own
+ * nullability, narrowed by its own checks where read.
  */
-export interface GameState {
+export interface GameStateBase {
   roomCode: string;
-  phase: Phase;
   hostId: string;
   players: Player[];
   roundNumber: number;
-  /** Null in `lobby`. Present from the first deal onward. */
-  round: RoundState | null;
   /** Null until a round has finished. */
   lastRoundResult: RoundResult | null;
   /** Null until `gameEnd`. Multiple ids on a tie for lowest score. */
   winnerIds: string[] | null;
 }
+
+/** A room before its first round: players may join, there is nothing to play yet. */
+export interface GameStateLobby extends GameStateBase {
+  phase: "lobby";
+  round: null;
+}
+
+/**
+ * A room with a dealt round. Spans `playing`, `roundEnd`, and `gameEnd` — the latter two
+ * still hold the just-finished round's hands and piles, revealed face up, until the host
+ * deals the next one or the match ends. "Active" names the round being populated, not "a
+ * turn is currently being taken." See `CONTEXT.md`.
+ */
+export interface GameStateActive extends GameStateBase {
+  phase: "playing" | "roundEnd" | "gameEnd";
+  round: RoundState;
+}
+
+/**
+ * The server's complete view of one room. Contains every hand and the full draw pile
+ * order — it must never be sent to a client. Use `serializeStateForPlayer`.
+ *
+ * A discriminated union on `phase`: `round` is `null` in `lobby` and a populated
+ * `RoundState` in every other phase, so narrowing on `phase` gives `round` its correct
+ * type for free, with no `!` assertion or `??` fallback needed downstream.
+ */
+export type GameState = GameStateLobby | GameStateActive;
 
 /** Shorthand for the return type of every state transition. */
 export type ActionResult = Result<GameState>;
