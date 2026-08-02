@@ -19,7 +19,7 @@ import { mulberry32 } from "../src/rng.ts";
 import { handValue, pickupCandidates } from "../src/rules.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState } from "../src/state.ts";
-import { decideTurn } from "./bot.ts";
+import { decideTurn } from "../src/bot.ts";
 
 // --- rendering --------------------------------------------------------------
 

@@ -22,8 +22,8 @@ tests. Don't let a rule exist only in code.
 ```
 shared/     Card/view/error types + the Socket.io event contract. No logic.
 server/
-  src/      The engine: deck, rules, pure state transitions, serialization, rooms.
-  scripts/  play.ts (CLI harness) and bot.ts (a simple opponent). Not shipped.
+  src/      The engine: deck, rules, pure state transitions, serialization, rooms, bot.
+  scripts/  play.ts (CLI harness). Not shipped.
   test/     node:test suites, one file per src/ module plus integration.test.ts.
 ```
 
@@ -52,18 +52,21 @@ contract can't drift between them.
 | `game.ts` | `startGame`, `takeTurn`, `callYaniv`, `startNextRound` — the pure state transitions |
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
+| `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
+
+`bot.ts` is shipped, not a dev tool: bot opponents are part of the real game, so the
+socket layer needs to call `decideTurn` in production to play a bot's turn. It decides
+only from a `PlayerGameView` (the same payload a real client gets), so it is structurally
+unable to see hidden hands or the draw pile.
 
 ### `server/scripts/`
 
-Not part of the shipped engine — a smoke-test harness and a demo opponent.
+Not part of the shipped engine — a smoke-test harness.
 
 - **`play.ts`** — `npm run play` (interactive, you vs. bots) or `npm run demo`
   (bots-only transcript). Both accept `--seed <n>` and `--players <n>`. Drives
   `RoomManager` and the pure transitions exactly the way a Socket.io layer eventually
   will, so it doubles as a sanity check on that seam.
-- **`bot.ts`** — a deliberately simple opponent. Decides only from a `PlayerGameView`
-  (the same payload a real client gets), so it is structurally unable to see hidden
-  hands or the draw pile. See "Bot architecture" below.
 
 ## Key decisions from the build
 
@@ -129,7 +132,7 @@ Split deliberately across two layers:
 - **`server/src/rules.ts`** owns what's *legal* — `legalDiscards` (every valid discard
   from a hand) and `canCallYaniv` (is the hand low enough). These are rules queries, not
   bot logic, and are also usable by a future client to highlight playable cards.
-- **`server/scripts/bot.ts`** owns *judgement* — `shouldCallYaniv`, `chooseDiscard`,
+- **`server/src/bot.ts`** owns *judgement* — `shouldCallYaniv`, `chooseDiscard`,
   `chooseDraw`, composed by `decideTurn`. It takes a `PlayerGameView`, never raw
   `GameState`, so it cannot cheat by construction.
 
