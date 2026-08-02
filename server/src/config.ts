@@ -23,6 +23,19 @@ export const MAX_SCORE = 100;
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 6;
 
+/**
+ * Names for the server-played seats, taken in order. Every one reads as a bot, so a
+ * player can never mistake one for another human at the table. Long enough to fill a
+ * table alongside a single human — see MAX_PLAYERS.
+ */
+export const BOT_NAMES = [
+  "Grace (bot)",
+  "Alan (bot)",
+  "Edsger (bot)",
+  "Barbara (bot)",
+  "Tony (bot)",
+];
+
 export const ROOM_CODE_LENGTH = 4;
 
 /** Room code alphabet, with visually ambiguous characters (O/0, I/1) removed. */
