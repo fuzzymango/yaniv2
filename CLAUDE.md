@@ -24,7 +24,8 @@ tests. Don't let a rule exist only in code.
 shared/     Card/view/error types + the Socket.io event contract. No logic.
 server/
   src/      The engine: deck, rules, pure state transitions, serialization, rooms, bots.
-  scripts/  play.ts (CLI harness). Not shipped.
+  scripts/  play.ts (bots-only, in process) + playSocket.ts & cli/ (human, over a
+            socket). Not shipped.
   test/     node:test suites, one file per src/ module plus integration.test.ts.
             socketServer.test.ts uses real socket.io-client connections.
 ```
@@ -66,12 +67,28 @@ unable to see hidden hands or the draw pile.
 
 ### `server/scripts/`
 
-Not part of the shipped engine — a smoke-test harness.
+Not part of the shipped engine — two smoke-test harnesses, split by what they exercise.
 
-- **`play.ts`** — `npm run play` (interactive, you vs. bots) or `npm run demo`
-  (bots-only transcript). Both accept `--seed <n>` and `--players <n>`. Drives
-  `RoomManager` and the pure transitions exactly the way a Socket.io layer eventually
-  will, so it doubles as a sanity check on that seam.
+- **`playSocket.ts`** — `npm run play`. A human against bots over a **real socket
+  connection** to a separately running server (`npm run serve` first). Accepts `--url`
+  and `--name`. Composition only, like `index.ts`: argv, stdin/stdout and a socket,
+  handed to `cli/`.
+  - **`cli/render.ts`** — `PlayerGameView` → a printable frame. Pure.
+  - **`cli/commands.ts`** — a typed line + the current view → a `Command`. Pure and
+    total; bad input returns `invalid`, never throws.
+  - **`cli/session.ts`** — the driver. Owns the socket, holds the loop, takes its input
+    and output injected so tests can drive it. **It imports nothing from `src/` except
+    types** — no `RoomManager`, no `GameState`. The moment it does, it stops being a
+    test of the transport and becomes a second copy of the server.
+- **`play.ts`** — `npm run demo`. Bots only, in process, no transport: drives
+  `RoomManager` and the pure transitions directly. Accepts `--seed <n>` and
+  `--players <n>`, and a whole match is reproducible from the seed alone — which is what
+  makes it the tool for judging bot play. Keep it that way; there is deliberately no
+  socket equivalent, since the server owns the rng and seats its own bots, and no client
+  event asks for a seed.
+
+The two are not redundant: `play.ts` answers "do the rules and the bot behave?", and
+`playSocket.ts` answers "does the wire work?".
 
 ## Key decisions from the build
 
@@ -297,11 +314,6 @@ picks up `test/helpers.ts` and any stray `.d.ts` files `tsc --build` emits into
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **A CLI that plays over the socket.** The whole event contract is wired now, and one
-  human can play a full match against bots end to end over a real connection. But
-  `scripts/play.ts` still drives `RoomManager` and the transitions **in process**, with
-  its own copy of the bot loop and its opponents seated as ordinary players via
-  `joinRoom` rather than as `isBot` seats. Pointing it at a socket instead is issue #6.
 - **Reconnect.** A dropped connection ends its room, full stop (see "Room lifecycle").
   `Player` has no `connected` field at all — deliberately absent rather than
   half-built. When reconnect lands, expect a lobby-phase case (easy: drop the player,
@@ -339,11 +351,21 @@ npm install
 npm test                                  # all workspaces, node:test
 npm run typecheck                         # tsc --build across the monorepo
 npm run serve --workspace=@yaniv/server   # start the socket server (PORT, default 3000)
-npm run play --workspace=@yaniv/server    # play interactively against bots
-npm run demo --workspace=@yaniv/server    # watch bots play a full match
+npm run demo --workspace=@yaniv/server    # watch bots play a full match, in process
 ```
 
-Both `play` and `demo` accept `-- --seed <n> --players <n>`.
+`demo` accepts `-- --seed <n> --players <n>`.
+
+Playing yourself takes two terminals, because the harness is a real client:
+
+```sh
+npm run serve --workspace=@yaniv/server   # terminal 1
+npm run play --workspace=@yaniv/server    # terminal 2 — connects to localhost:3000
+```
+
+`play` accepts `-- --url <url> --name <name>`. At the prompt: `1 3` discards those cards
+by hand position and draws from the deck, `t1`/`t2` on the end takes a face-up card
+instead (`1 3 t2`), `yaniv` calls, enter deals the next round, `q` or Ctrl-D quits.
 
 ## Agent skills
 
