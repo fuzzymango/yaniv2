@@ -1,0 +1,17 @@
+{
+  "name": "yaniv2",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "server"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "tsc --build --force"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  }
+}
