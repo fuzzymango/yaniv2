@@ -13,7 +13,7 @@
  */
 
 import type { Card, DrawAction, PlayerGameView, TurnAction } from "@yaniv/shared";
-import { canCallYaniv, handValue, legalDiscards, pickupCandidates } from "../src/rules.ts";
+import { canCallYaniv, handValue, legalDiscards, pickupCandidates } from "./rules.ts";
 
 /**
  * Highest face value the bot will take from the table instead of drawing blind.

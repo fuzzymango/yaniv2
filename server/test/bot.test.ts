@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { chooseDiscard, chooseDraw, decideTurn, shouldCallYaniv } from "../scripts/bot.ts";
+import { chooseDiscard, chooseDraw, decideTurn, shouldCallYaniv } from "../src/bot.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
 import { ids, makeState, type StateOptions } from "./helpers.ts";
 

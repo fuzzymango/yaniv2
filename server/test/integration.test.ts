@@ -38,7 +38,7 @@ function assertInvariants(state: GameState): void {
 }
 
 /**
- * A driver, not a player. This deliberately does *not* use scripts/bot.ts: its job is
+ * A driver, not a player. This deliberately does *not* use src/bot.ts: its job is
  * to push the engine through as many odd states as possible, and coupling it to the
  * real bot would mean any improvement there silently shrinks what this test explores.
  * It shares only `legalDiscards`, which is a rules query rather than a policy.
