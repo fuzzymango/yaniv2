@@ -241,3 +241,13 @@ npm run demo --workspace=@yaniv/server    # watch bots play a full match
 ```
 
 Both `play` and `demo` accept `-- --seed <n> --players <n>`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`fuzzymango/yaniv2`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context — `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
