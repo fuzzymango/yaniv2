@@ -11,7 +11,6 @@
  * over a real socket instead — see `playSocket.ts`.
  */
 
-import type { Card } from "@yaniv/shared";
 import { sortHand } from "@yaniv/shared";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
@@ -20,6 +19,7 @@ import { handValue } from "../src/rules.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState, RoundState } from "../src/state.ts";
 import { decideTurn } from "../src/bot.ts";
+import { bold, cyan, dim, green, pad, red, renderCard, renderHand } from "./lib/cardDisplay.ts";
 
 /** Narrow to the active round, or throw — every call site here follows a deal. */
 function activeRound(state: GameState): RoundState {
@@ -28,34 +28,6 @@ function activeRound(state: GameState): RoundState {
 }
 
 // --- rendering --------------------------------------------------------------
-
-const SUIT_SYMBOL: Record<string, string> = {
-  hearts: "♥",
-  diamonds: "♦",
-  clubs: "♣",
-  spades: "♠",
-};
-
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
-const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
-const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
-const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
-const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
-
-/** Pad to a visible width, ignoring the colour escapes that padEnd would miscount. */
-function pad(text: string, width: number): string {
-  // eslint-disable-next-line no-control-regex
-  const visible = text.replace(/\x1b\[[0-9;]*m/g, "").length;
-  return text + " ".repeat(Math.max(0, width - visible));
-}
-
-function renderCard(card: Card): string {
-  if (card.suit === null) return bold("Jk");
-  const face = `${card.rank}${SUIT_SYMBOL[card.suit]}`;
-  return card.suit === "hearts" || card.suit === "diamonds" ? red(face) : face;
-}
-
-const renderHand = (cards: readonly Card[]) => cards.map(renderCard).join(" ");
 
 function nameOf(state: GameState, playerId: string): string {
   return state.players.find((p) => p.id === playerId)?.name ?? playerId;
