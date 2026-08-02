@@ -10,6 +10,7 @@ import { createDeck, deal, shuffle } from "./deck.ts";
 import { err, ok } from "./result.ts";
 import type { Rng } from "./rng.ts";
 import {
+  canCallYaniv,
   canonicalizeSet,
   handValue,
   isValidSet,
@@ -257,8 +258,9 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
     return err("NOT_YOUR_TURN", "It is not your turn");
   }
 
-  const callerValue = handValue(round.hands[playerId] ?? []);
-  if (callerValue > YANIV_THRESHOLD) {
+  const callerHand = round.hands[playerId] ?? [];
+  const callerValue = handValue(callerHand);
+  if (!canCallYaniv(callerHand)) {
     return err(
       "YANIV_THRESHOLD_NOT_MET",
       `Hand must be worth ${YANIV_THRESHOLD} or less to call Yaniv (yours is ${callerValue})`,

@@ -13,12 +13,13 @@ import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import type { Card, DrawAction } from "@yaniv/shared";
 import { sortHand } from "@yaniv/shared";
-import { YANIV_THRESHOLD } from "../src/config.ts";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { handValue, isValidSet, pickupCandidates } from "../src/rules.ts";
+import { handValue, pickupCandidates } from "../src/rules.ts";
+import { serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState } from "../src/state.ts";
+import { decideTurn } from "./bot.ts";
 
 // --- rendering --------------------------------------------------------------
 
@@ -52,35 +53,6 @@ const renderHand = (cards: readonly Card[]) => cards.map(renderCard).join(" ");
 
 function nameOf(state: GameState, playerId: string): string {
   return state.players.find((p) => p.id === playerId)?.name ?? playerId;
-}
-
-// --- a deliberately simple bot ---------------------------------------------
-
-/** Every valid discard from a hand. Hands are at most 5 cards, so this is cheap. */
-function legalDiscards(hand: readonly Card[]): Card[][] {
-  const found: Card[][] = [];
-  for (let mask = 1; mask < 1 << hand.length; mask++) {
-    const subset = hand.filter((_, i) => (mask & (1 << i)) !== 0);
-    if (isValidSet(subset)) found.push(subset);
-  }
-  return found;
-}
-
-/** Shed as much value as possible, breaking ties toward shrinking the hand. */
-function botDiscard(hand: readonly Card[]): Card[] {
-  const score = (set: Card[]) => handValue(set) * 10 + set.length;
-  return legalDiscards(hand).reduce((best, o) => (score(o) > score(best) ? o : best));
-}
-
-/** Take a face-up card only when it is cheaper than the average unknown card. */
-function botDraw(lastDiscard: readonly Card[]): DrawAction {
-  const cheapest = pickupCandidates(lastDiscard)
-    .slice()
-    .sort((a, b) => a.value - b.value)[0];
-  if (cheapest && cheapest.value <= 3) {
-    return { source: "discard", cardId: cheapest.id };
-  }
-  return { source: "deck" };
 }
 
 // --- shared table state -----------------------------------------------------
@@ -179,30 +151,34 @@ function autoPlay(playerCount: number, seed: number): void {
 
     const round = state.round!;
     const playerId = round.currentTurnPlayerId;
-    const hand = round.hands[playerId]!;
 
-    if (handValue(hand) <= YANIV_THRESHOLD) {
+    // The bot decides from the same view a client would receive, never raw state.
+    const decision = decideTurn(serializeStateForPlayer(state, playerId));
+
+    if (decision.type === "yaniv") {
       const called = rooms.apply(roomCode, (s) => callYaniv(s, playerId));
       if (!called.ok) throw new Error(called.error.message);
       printRoundResult(rooms.getState(roomCode)!);
       continue;
     }
 
-    const discard = botDiscard(hand);
-    const draw = botDraw(round.lastDiscard);
-    const before = handValue(hand);
+    const { action } = decision;
+    const before = handValue(round.hands[playerId]!);
 
     const result = rooms.apply(roomCode, (s, rng) =>
-      takeTurn(s, playerId, { discardCardIds: discard.map((c) => c.id), draw }, rng),
+      takeTurn(s, playerId, action, rng),
     );
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
 
     const next = rooms.getState(roomCode)!.round!;
     const after = next.hands[playerId]!;
+    const draw = action.draw;
     const took =
       draw.source === "deck"
         ? dim("deck")
-        : `table ${renderCard(round.lastDiscard.find((c) => c.id === draw.cardId)!)}`;
+        : `table ${renderCard(
+            round.lastDiscard.find((c) => c.id === draw.cardId)!,
+          )}`;
     console.log(
       `  ${pad(nameOf(state, playerId), 8)} plays ` +
         // Show the canonical stored order, not the order the bot happened to submit.
@@ -259,25 +235,24 @@ async function interactivePlay(playerCount: number, seed: number): Promise<void>
           `  ${nameOf(state, playerId).padEnd(8)} hand  ${hand.map((c, i) => `${dim(`${i + 1}:`)}${renderCard(c)}`).join("  ")}` +
             dim(`   = ${handValue(hand)}`),
         );
-        if (handValue(hand) <= YANIV_THRESHOLD) {
-          rooms.apply(roomCode, (s) => callYaniv(s, playerId));
+        const decision = decideTurn(serializeStateForPlayer(state, playerId));
+
+        if (decision.type === "yaniv") {
+          const called = rooms.apply(roomCode, (s) => callYaniv(s, playerId));
+          if (!called.ok) throw new Error(called.error.message);
           printRoundResult(rooms.getState(roomCode)!);
           continue;
         }
-        const discard = botDiscard(hand);
-        rooms.apply(roomCode, (s, rng) =>
-          takeTurn(
-            s,
-            playerId,
-            {
-              discardCardIds: discard.map((c) => c.id),
-              draw: botDraw(round.lastDiscard),
-            },
-            rng,
-          ),
+
+        const played = rooms.apply(roomCode, (s, rng) =>
+          takeTurn(s, playerId, decision.action, rng),
         );
+        if (!played.ok) {
+          throw new Error(`${played.error.code}: ${played.error.message}`);
+        }
         console.log(
-          `  ${dim(nameOf(state, playerId).padEnd(8))} plays ${renderHand(discard)}`,
+          `  ${dim(nameOf(state, playerId).padEnd(8))} plays ` +
+            renderHand(rooms.getState(roomCode)!.round!.lastDiscard),
         );
         continue;
       }

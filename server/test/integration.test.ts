@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Card, DrawAction } from "@yaniv/shared";
-import { YANIV_THRESHOLD } from "../src/config.ts";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
-import { handValue, isValidSet } from "../src/rules.ts";
+import { canCallYaniv, handValue, legalDiscards } from "../src/rules.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState } from "../src/state.ts";
 import { mulberry32 } from "../src/rng.ts";
@@ -38,17 +37,12 @@ function assertInvariants(state: GameState): void {
   );
 }
 
-/** Every valid discard available from a hand. Hands are ≤5 cards, so this is cheap. */
-function legalDiscards(hand: readonly Card[]): Card[][] {
-  const found: Card[][] = [];
-  for (let mask = 1; mask < 1 << hand.length; mask++) {
-    const subset = hand.filter((_, i) => (mask & (1 << i)) !== 0);
-    if (isValidSet(subset)) found.push(subset);
-  }
-  return found;
-}
-
-/** Greedy bot: shed as much value as possible, preferring to shrink the hand. */
+/**
+ * A driver, not a player. This deliberately does *not* use scripts/bot.ts: its job is
+ * to push the engine through as many odd states as possible, and coupling it to the
+ * real bot would mean any improvement there silently shrinks what this test explores.
+ * It shares only `legalDiscards`, which is a rules query rather than a policy.
+ */
 function chooseDiscard(hand: readonly Card[]): Card[] {
   const options = legalDiscards(hand);
   assert.ok(options.length > 0, "a non-empty hand always has a legal discard");
@@ -90,7 +84,7 @@ function playMatch(seed: number): { final: GameState; turns: number } {
     const playerId = round.currentTurnPlayerId;
     const hand = round.hands[playerId]!;
 
-    if (handValue(hand) <= YANIV_THRESHOLD) {
+    if (canCallYaniv(hand)) {
       unwrap(rooms.apply(roomCode, (s) => callYaniv(s, playerId)));
       continue;
     }
@@ -183,7 +177,7 @@ describe("full match simulation", () => {
       const round = state.round!;
       const playerId = round.currentTurnPlayerId;
       const hand = round.hands[playerId]!;
-      if (handValue(hand) <= YANIV_THRESHOLD) break;
+      if (canCallYaniv(hand)) break;
 
       const discard = chooseDiscard(hand);
       unwrap(

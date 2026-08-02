@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { RANKS } from "@yaniv/shared";
 import {
+  canCallYaniv,
   canonicalizeSet,
   handValue,
   isValidSet,
+  legalDiscards,
   pickupCandidates,
   rankOrder,
 } from "../src/rules.ts";
@@ -317,6 +319,67 @@ describe("canonicalizeSet — exhaustive run layout check", () => {
     }
 
     assert.ok(runsChecked > 200, `expected many runs, only checked ${runsChecked}`);
+  });
+});
+
+describe("legalDiscards", () => {
+  it("offers nothing from an empty hand", () => {
+    assert.deepEqual(legalDiscards([]), []);
+  });
+
+  it("offers the single card of a one-card hand", () => {
+    const options = legalDiscards(cards("hearts-7"));
+    assert.equal(options.length, 1);
+    assert.deepEqual(ids(options[0]!), ["hearts-7"]);
+  });
+
+  it("offers every card individually plus any combinations", () => {
+    // 5♥ 5♠ K♦: three singles plus the pair.
+    const options = legalDiscards(cards("hearts-5", "spades-5", "diamonds-K"));
+    const rendered = options.map((o) => ids(o).join("+")).sort();
+    assert.deepEqual(rendered, [
+      "diamonds-K",
+      "hearts-5",
+      "hearts-5+spades-5",
+      "spades-5",
+    ]);
+  });
+
+  it("finds runs, including ones a joker completes", () => {
+    const options = legalDiscards(cards("hearts-7", "hearts-8", "joker-1"));
+    const rendered = options.map((o) => ids(o).join("+"));
+    assert.ok(rendered.includes("hearts-7+hearts-8+joker-1"));
+  });
+
+  it("never offers an illegal combination", () => {
+    const hand = cards("hearts-7", "spades-8", "diamonds-2", "clubs-K", "joker-1");
+    for (const option of legalDiscards(hand)) {
+      assert.ok(isValidSet(option), `offered an invalid set: ${ids(option).join("+")}`);
+    }
+  });
+
+  it("always gives a non-empty hand at least one option", () => {
+    const hand = cards("hearts-7", "spades-2", "diamonds-K", "clubs-4", "joker-1");
+    for (let size = 1; size <= hand.length; size++) {
+      assert.ok(legalDiscards(hand.slice(0, size)).length > 0, `empty at size ${size}`);
+    }
+  });
+});
+
+describe("canCallYaniv", () => {
+  it("permits a hand at or below the threshold", () => {
+    assert.equal(canCallYaniv(cards("hearts-5", "spades-2")), true);
+    assert.equal(canCallYaniv(cards("hearts-A")), true);
+    assert.equal(canCallYaniv([]), true);
+  });
+
+  it("refuses a hand above the threshold", () => {
+    assert.equal(canCallYaniv(cards("hearts-5", "spades-3")), false);
+    assert.equal(canCallYaniv(cards("hearts-K")), false);
+  });
+
+  it("counts jokers as free", () => {
+    assert.equal(canCallYaniv(cards("joker-1", "joker-2", "hearts-7")), true);
   });
 });
 

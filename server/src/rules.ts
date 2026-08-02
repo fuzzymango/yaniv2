@@ -1,6 +1,10 @@
 import type { Card } from "@yaniv/shared";
 import { RANKS, rankOrder } from "@yaniv/shared";
-import { MIN_RUN_LENGTH, MIN_RUN_REAL_CARDS } from "./config.ts";
+import {
+  MIN_RUN_LENGTH,
+  MIN_RUN_REAL_CARDS,
+  YANIV_THRESHOLD,
+} from "./config.ts";
 
 const HIGHEST_RANK_INDEX = RANKS.length - 1;
 
@@ -118,6 +122,36 @@ function layOutRun(cards: readonly Card[]): Card[] {
  */
 export function canonicalizeSet(cards: readonly Card[]): Card[] {
   return isRun(cards) ? layOutRun(cards) : cards.slice();
+}
+
+/**
+ * Every discard the rules permit from a hand, as subsets of it.
+ *
+ * Enumerates all non-empty subsets and asks `isValidSet` about each, so it stays
+ * correct automatically as the rules change. That is exponential in hand size, which
+ * is only acceptable because Yaniv caps hands at five cards — 31 combinations.
+ *
+ * A non-empty hand always yields at least one option, since a lone card is always a
+ * legal discard. Useful beyond the bot: a client can call this to highlight which
+ * cards are playable right now.
+ */
+export function legalDiscards(hand: readonly Card[]): Card[][] {
+  const found: Card[][] = [];
+  for (let mask = 1; mask < 1 << hand.length; mask++) {
+    const subset = hand.filter((_, i) => (mask & (1 << i)) !== 0);
+    if (isValidSet(subset)) found.push(subset);
+  }
+  return found;
+}
+
+/**
+ * Whether a hand is low enough to call Yaniv. docs/rules.md §6.
+ *
+ * This is the rule — "may I" — and deliberately says nothing about whether calling
+ * is a good idea, which is a player's or a bot's judgement.
+ */
+export function canCallYaniv(hand: readonly Card[]): boolean {
+  return handValue(hand) <= YANIV_THRESHOLD;
 }
 
 /** The cards of a discarded set that the next player may pick up: its two ends. */
