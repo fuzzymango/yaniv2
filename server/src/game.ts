@@ -19,6 +19,7 @@ import {
 import type {
   ActionResult,
   GameState,
+  GameStateActive,
   PlayerRoundResult,
   RoundResult,
   RoundState,
@@ -37,7 +38,7 @@ function dealRound(
   state: GameState,
   startingPlayerId: string,
   rng: Rng,
-): GameState {
+): GameStateActive {
   const turnOrder = state.players.map((p) => p.id);
   const dealt = deal(shuffle(createDeck(), rng), turnOrder.length, HAND_SIZE);
 
@@ -151,7 +152,7 @@ export function takeTurn(
   action: TurnAction,
   rng: Rng,
 ): ActionResult {
-  if (state.phase !== "playing" || state.round === null) {
+  if (state.phase !== "playing") {
     return err("WRONG_PHASE", "No round in progress");
   }
   if (!getPlayer(state, playerId)) {
@@ -247,7 +248,7 @@ function opponentsInTurnOrder(round: RoundState, callerId: string): string[] {
  * Assafer scores 0. docs/rules.md §6.
  */
 export function callYaniv(state: GameState, playerId: string): ActionResult {
-  if (state.phase !== "playing" || state.round === null) {
+  if (state.phase !== "playing") {
     return err("WRONG_PHASE", "No round in progress");
   }
   if (!getPlayer(state, playerId)) {

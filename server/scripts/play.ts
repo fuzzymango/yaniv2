@@ -18,8 +18,14 @@ import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { handValue } from "../src/rules.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
-import type { GameState } from "../src/state.ts";
+import type { GameState, RoundState } from "../src/state.ts";
 import { decideTurn } from "../src/bot.ts";
+
+/** Narrow to the active round, or throw — every call site here follows a deal. */
+function activeRound(state: GameState): RoundState {
+  if (state.phase === "lobby") throw new Error("expected a round in progress");
+  return state.round;
+}
 
 // --- rendering --------------------------------------------------------------
 
@@ -85,7 +91,7 @@ function setUp(playerCount: number, seed: number): Table {
 }
 
 function printDeal(state: GameState): void {
-  const round = state.round!;
+  const round = activeRound(state);
   console.log(`\n${bold(`── Round ${state.roundNumber} ${"─".repeat(46)}`)}`);
   for (const id of round.turnOrder) {
     const hand = sortHand(round.hands[id]!);
@@ -148,7 +154,7 @@ function autoPlay(playerCount: number, seed: number): void {
       continue;
     }
 
-    const round = state.round!;
+    const round = activeRound(state);
     const playerId = round.currentTurnPlayerId;
 
     // The bot decides from the same view a client would receive, never raw state.
@@ -169,7 +175,7 @@ function autoPlay(playerCount: number, seed: number): void {
     );
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
 
-    const next = rooms.getState(roomCode)!.round!;
+    const next = activeRound(rooms.getState(roomCode)!);
     const after = next.hands[playerId]!;
     const draw = action.draw;
     const took =

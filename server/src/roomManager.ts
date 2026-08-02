@@ -7,7 +7,7 @@ import {
 } from "./config.ts";
 import { err, ok, type Result } from "./result.ts";
 import { randomInt, systemRng, type Rng } from "./rng.ts";
-import type { ActionResult, GameState, Player } from "./state.ts";
+import type { ActionResult, GameState, GameStateLobby, Player } from "./state.ts";
 
 const MAX_NAME_LENGTH = 20;
 const MAX_CODE_ATTEMPTS = 100;
@@ -73,7 +73,7 @@ export class RoomManager {
     const roomCode = this.generateRoomCode();
     const host: Player = { id: this.newPlayerId(), name, score: 0, isBot: false };
 
-    const state: GameState = {
+    const state: GameStateLobby = {
       roomCode,
       phase: "lobby",
       hostId: host.id,

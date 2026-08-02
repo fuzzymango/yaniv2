@@ -65,7 +65,8 @@ describe("serializeStateForPlayer", () => {
       lastDiscard: ["clubs-7"],
     });
     serializeStateForPlayer(state, "p1");
-    assert.deepEqual(ids(state.round!.hands["p1"]!), ["spades-K", "clubs-A"]);
+    assert.equal(state.phase, "playing");
+    assert.deepEqual(ids(state.round.hands["p1"]!), ["spades-K", "clubs-A"]);
   });
 
   it("reduces the draw pile to a count", () => {
@@ -103,13 +104,14 @@ describe("serializeStateForPlayer", () => {
     );
     const wire = JSON.stringify(serializeStateForPlayer(state, "p1"));
 
+    assert.equal(state.phase, "playing");
     const visible = new Set([
-      ...state.round!.hands["p1"]!.map((c) => c.id),
-      ...state.round!.lastDiscard.map((c) => c.id),
+      ...state.round.hands["p1"]!.map((c) => c.id),
+      ...state.round.lastDiscard.map((c) => c.id),
     ]);
     for (const card of [
-      ...state.round!.hands["p2"]!,
-      ...state.round!.drawPile,
+      ...state.round.hands["p2"]!,
+      ...state.round.drawPile,
     ]) {
       if (visible.has(card.id)) continue;
       assert.ok(!wire.includes(card.id), `serialized view leaked ${card.id}`);

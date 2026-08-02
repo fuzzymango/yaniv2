@@ -206,8 +206,9 @@ describe("apply", () => {
 
     unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
 
-    assert.equal(rooms.getState(roomCode)!.phase, "playing");
-    assert.equal(rooms.getState(roomCode)!.round!.hands["player-1"]!.length, 5);
+    const state = rooms.getState(roomCode)!;
+    assert.equal(state.phase, "playing");
+    assert.equal(state.round.hands["player-1"]!.length, 5);
   });
 
   it("leaves the stored state untouched when the transition fails", () => {
