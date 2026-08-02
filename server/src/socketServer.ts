@@ -7,10 +7,15 @@
  */
 
 import type { Server as HttpServer } from "node:http";
-import type { ClientToServerEvents, ServerToClientEvents } from "@yaniv/shared";
+import type { Ack, ClientToServerEvents, ServerToClientEvents } from "@yaniv/shared";
 import { Server } from "socket.io";
+import { playBotTurns } from "./botTurns.ts";
+import { callYaniv, startGame, startNextRound, takeTurn } from "./game.ts";
 import { err } from "./result.ts";
 import type { RoomManager } from "./roomManager.ts";
+import type { Rng } from "./rng.ts";
+import { serializeStateForPlayer } from "./serialize.ts";
+import type { ActionResult, GameState } from "./state.ts";
 import { getPlayer } from "./state.ts";
 
 /**
@@ -43,6 +48,43 @@ export function createSocketServer(
   rooms: RoomManager,
 ): YanivServer {
   const io: YanivServer = new Server(httpServer);
+
+  /**
+   * Send every connection in a room its own view of the current state.
+   *
+   * Deliberately synchronous. `io.in(room).fetchSockets()` would be the idiomatic call,
+   * but it is async, and this has to be safe to invoke from inside a run of bot turns —
+   * by the time a promise resolved, the position it was meant to publish would already
+   * have been played past.
+   *
+   * Never `io.to(room).emit(state)`: the raw state holds every hand and the draw pile
+   * order. One send per socket, each through the serializer, is the only shape that
+   * cannot leak. See serialize.ts.
+   */
+  function broadcastState(roomCode: string): void {
+    const state = rooms.getState(roomCode);
+    if (!state) return;
+
+    for (const socketId of io.sockets.adapter.rooms.get(roomCode) ?? []) {
+      const socket = io.sockets.sockets.get(socketId);
+      const playerId = socket?.data.session?.playerId;
+      if (!socket || !playerId) continue;
+      socket.emit("gameStateUpdate", serializeStateForPlayer(state, playerId));
+    }
+  }
+
+  /**
+   * Play out any bot turns the last action handed over to, publishing each one as it
+   * happens. Bots have no connection of their own, so without this the table would
+   * deadlock the moment the turn left the player.
+   *
+   * No delay between moves: pacing a chain of bot turns for a human to watch is
+   * something the client does with the sequence of broadcasts, not something the
+   * server bakes into the wire.
+   */
+  function runBotTurns(roomCode: string): void {
+    playBotTurns(rooms, roomCode, () => broadcastState(roomCode));
+  }
 
   io.on("connection", (socket) => {
     const alreadySeated = () =>
@@ -94,6 +136,63 @@ export function createSocketServer(
       socket.to(roomCode).emit("playerJoined", seatedName);
 
       ack({ ok: true, value: { playerId } });
+    });
+
+    /**
+     * Every in-game action has the same shape: identify the caller from their session,
+     * run the transition, and — only if it stood — publish the new position and play
+     * out whatever bot turns it handed over to.
+     *
+     * A rejection acks the error and stops there. Nothing is published, so a refused
+     * action costs the player nothing: the turn is still theirs to take again.
+     */
+    function act(
+      ack: Ack<null>,
+      transition: (session: Session, state: GameState, rng: Rng) => ActionResult,
+    ): void {
+      const session = socket.data.session;
+      if (!session) {
+        ack(err("PLAYER_NOT_FOUND", "This connection is not in a room"));
+        return;
+      }
+
+      const result = rooms.apply(session.roomCode, (state, rng) =>
+        transition(session, state, rng),
+      );
+      if (!result.ok) {
+        ack({ ok: false, error: result.error });
+        return;
+      }
+
+      ack({ ok: true, value: null });
+      broadcastState(session.roomCode);
+      runBotTurns(session.roomCode);
+    }
+
+    socket.on("startGame", (ack) => {
+      // Seating the bots is the whole of opponent setup: a player creates a room and
+      // starts the game, and never manages bots. It happens inside the transition so a
+      // start that is then rejected — by someone who is not the host, say — discards the
+      // seating along with it, rather than filling the table off a refused call.
+      act(ack, (session, state, rng) =>
+        startGame(rooms.seatBots(state), session.playerId, rng),
+      );
+    });
+
+    socket.on("takeTurn", (action, ack) => {
+      act(ack, (session, state, rng) =>
+        takeTurn(state, session.playerId, action, rng),
+      );
+    });
+
+    socket.on("callYaniv", (ack) => {
+      act(ack, (session, state) => callYaniv(state, session.playerId));
+    });
+
+    socket.on("startNextRound", (ack) => {
+      act(ack, (session, state, rng) =>
+        startNextRound(state, session.playerId, rng),
+      );
     });
 
     /**

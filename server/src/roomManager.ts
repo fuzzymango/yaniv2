@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  BOT_NAMES,
   MAX_PLAYERS,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
@@ -70,7 +71,7 @@ export class RoomManager {
     }
 
     const roomCode = this.generateRoomCode();
-    const host: Player = { id: this.newPlayerId(), name, score: 0 };
+    const host: Player = { id: this.newPlayerId(), name, score: 0, isBot: false };
 
     const state: GameState = {
       roomCode,
@@ -105,9 +106,43 @@ export class RoomManager {
       return err("ROOM_FULL", `Room is full (${MAX_PLAYERS} players)`);
     }
 
-    const player: Player = { id: this.newPlayerId(), name, score: 0 };
+    const player: Player = { id: this.newPlayerId(), name, score: 0, isBot: false };
     room.state = { ...room.state, players: [...room.state.players, player] };
     return ok({ playerId: player.id, state: room.state });
+  }
+
+  /**
+   * `state` with a bot seated in every empty chair, each issued a player id exactly the
+   * way a human join is. This is the whole of a player's opponent setup: they create a
+   * room and start the game, and never manage bots. Letting them choose how many
+   * opponents they want is intended future work — see issue #2.
+   *
+   * Pure: nothing is stored. Callers fold it into a transition passed to `apply`, so a
+   * start that is then rejected discards the seating along with everything else, rather
+   * than leaving a table filled on the back of a refused call.
+   */
+  seatBots(state: GameState): GameState {
+    if (state.players.length >= MAX_PLAYERS) return state;
+
+    const players = [...state.players];
+    while (players.length < MAX_PLAYERS) {
+      // Safe to index directly: a table holds at most MAX_PLAYERS seats and its creator
+      // is human, so BOT_NAMES has a name for every seat a bot can occupy.
+      const taken = players.filter((p) => p.isBot).length;
+      players.push({
+        id: this.newPlayerId(),
+        name: BOT_NAMES[taken]!,
+        score: 0,
+        isBot: true,
+      });
+    }
+    return { ...state, players };
+  }
+
+  /** Whether the server plays this seat itself. False for an id it has never heard of. */
+  isBot(roomCode: string, playerId: string): boolean {
+    const room = this.rooms.get(roomCode);
+    return room?.state.players.find((p) => p.id === playerId)?.isBot ?? false;
   }
 
   getState(roomCode: string): GameState | undefined {

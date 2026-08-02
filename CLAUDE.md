@@ -23,7 +23,7 @@ tests. Don't let a rule exist only in code.
 ```
 shared/     Card/view/error types + the Socket.io event contract. No logic.
 server/
-  src/      The engine: deck, rules, pure state transitions, serialization, rooms, bot.
+  src/      The engine: deck, rules, pure state transitions, serialization, rooms, bots.
   scripts/  play.ts (CLI harness). Not shipped.
   test/     node:test suites, one file per src/ module plus integration.test.ts.
             socketServer.test.ts uses real socket.io-client connections.
@@ -55,6 +55,7 @@ contract can't drift between them.
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
 | `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
+| `botTurns.ts` | `playBotTurns` — runs the seats the server owns until the turn returns to a human |
 | `socketServer.ts` | `createSocketServer` — wires the event contract onto an `io` instance. Never calls `listen` |
 | `index.ts` | The entrypoint. Binds a port and composes the above. `npm run serve` |
 
@@ -129,9 +130,9 @@ visibly swap places between renders). **This has zero effect on engine state** �
 `serializeStateForPlayer`, which is the one place every client is guaranteed to pass
 through.
 
-### Bot architecture: "may I" vs "should I"
+### Bot architecture: "may I" vs "should I" vs "who plays it"
 
-Split deliberately across two layers:
+Split deliberately across three layers:
 
 - **`server/src/rules.ts`** owns what's *legal* — `legalDiscards` (every valid discard
   from a hand) and `canCallYaniv` (is the hand low enough). These are rules queries, not
@@ -139,11 +140,27 @@ Split deliberately across two layers:
 - **`server/src/bot.ts`** owns *judgement* — `shouldCallYaniv`, `chooseDiscard`,
   `chooseDraw`, composed by `decideTurn`. It takes a `PlayerGameView`, never raw
   `GameState`, so it cannot cheat by construction.
+- **`server/src/botTurns.ts`** owns *execution* — `playBotTurns` loops while the current
+  seat is bot-controlled, applying each decision through the same transitions a human
+  goes through, and calling back once per action. It knows nothing about sockets, so it
+  is testable without one, and takes its decision function as an argument (defaulting to
+  `decideTurn`) so a test can drive a deliberately broken bot.
 
 The bot is intentionally weak: it calls Yaniv the instant it's legal (no regard for
 opponents' hand sizes), and picks up an exposed card only by face value in isolation (no
 synergy with its own hand). This is a known, accepted limitation, not a bug — improving
 it is future work, not a defect to fix incidentally.
+
+**A bot's decision being rejected by the engine is a defect, not a rule violation.**
+`playBotTurns` throws when `apply` refuses a bot's own move. There is no client at fault
+to report it to, and swallowing it would wedge the table on a turn nobody can take — so
+it surfaces as the server bug it is. This is the one place in the server where a failed
+`Result` becomes a thrown error rather than an ack.
+
+**Which seats are bot-controlled is `Player.isBot`**, a required field on the domain
+model. The engine ignores it entirely — bots move through `takeTurn`/`callYaniv` exactly
+as humans do — it exists so the layer above knows whose turn it has to play. Required
+rather than optional so no construction can leave a seat ambiguously controlled.
 
 The integration test's fuzzer (`server/test/integration.test.ts`) has its **own**
 separate discard/draw logic and deliberately does not import from `bot.ts` — its job is
@@ -199,11 +216,25 @@ no connection able to act for them, and unrecoverable while reconnect is out of 
 
 ### Room lifecycle
 
-Lobby → host calls `startGame` (requires ≥2 players) → `playing` → `roundEnd` after a
-Yaniv call → host calls `startNextRound`, or `gameEnd` once someone busts past 100.
-2–6 players. `RoomManager` is an **in-memory `Map`** — a server restart drops every game
-in progress. This is a documented, accepted limitation, not an oversight; persistence is
-explicitly out of scope for now (see below).
+Lobby → host calls `startGame` → `playing` → `roundEnd` after a Yaniv call → host calls
+`startNextRound`, or `gameEnd` once someone busts past 100. 2–6 players. `RoomManager` is
+an **in-memory `Map`** — a server restart drops every game in progress. This is a
+documented, accepted limitation, not an oversight; persistence is explicitly out of scope
+for now (see below).
+
+**`startGame` fills every empty seat with bots**, so a player's whole setup is two steps:
+create a room, start the game. They are never asked how many opponents they want and
+never manage them. (Letting them choose is intended future work — see issue #2.) The
+engine's ≥2-player minimum therefore can't be hit from the socket layer any more; it
+still guards the transition itself.
+
+`RoomManager.seatBots(state)` is **pure** — it returns a filled state and stores nothing.
+The socket handler folds it into the `startGame` transition passed to `apply`, so a start
+that is then rejected (by someone who is not the host, say) discards the seating along
+with everything else. Seating first and checking after would fill a table off the back of
+a refused call, and the next player to try that lobby would find it full. There is
+deliberately **no client-callable event for adding a bot**; the shared event contract is
+unchanged by bots existing.
 
 **A disconnect removes the room outright**, unconditionally, for whichever connection
 drops. This is one-directional cleanup, not the start of reconnect support: with no way
@@ -225,6 +256,30 @@ the socket, never by asking `RoomManager`. Disconnect cleanup, for instance, is 
 a subsequent join being rejected with `ROOM_NOT_FOUND` — the way a real client would find
 out — rather than by inspecting the rooms map.
 
+### Broadcasting: one send per socket, one broadcast per move
+
+`broadcastState(roomCode)` loops the room's sockets and emits `serializeStateForPlayer`
+per connection. Never `io.to(room).emit(state)` — raw state holds every hand and the draw
+pile order (see "Serialization is the security boundary"). A wire-level test asserts that
+no card id outside the viewer's own hand and the face-up discard appears anywhere in a
+mid-round payload, and it has been mutation-tested by breaking the boundary on purpose.
+
+It is **deliberately synchronous**, walking `io.sockets.adapter.rooms` rather than the
+idiomatic `await io.in(room).fetchSockets()`. It has to be callable from inside a run of
+bot turns, and by the time a promise resolved, the position it was meant to publish would
+already have been played past.
+
+**Each bot action gets its own broadcast.** `playBotTurns` calls back per move and each
+callback publishes, so a chain of five bot turns is five updates in seating order, not
+one collapsed jump to the final position — a client can replay the chain move by move.
+There is **no artificial delay** between them; pacing that sequence for a human to watch
+is the client's job, and a test asserts the chain resolves without pauses.
+
+Every in-game handler shares one `act(ack, transition)` helper: identify the caller from
+their session, apply, and on success ack, broadcast, then run any bot turns. A rejection
+acks the error and publishes nothing, so a refused action costs the player nothing — the
+turn is still theirs.
+
 ### Tooling
 
 TypeScript runs **directly on Node 24 via native type stripping** — no build step, no
@@ -242,16 +297,22 @@ picks up `test/helpers.ts` and any stray `.d.ts` files `tsc --build` emits into
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **Gameplay over the socket.** `createRoom`/`joinRoom` are wired; `startGame`,
-  `takeTurn`, `callYaniv` and `startNextRound` are not yet. `scripts/play.ts` still
-  drives the engine in-process through the same seam.
+- **A CLI that plays over the socket.** The whole event contract is wired now, and one
+  human can play a full match against bots end to end over a real connection. But
+  `scripts/play.ts` still drives `RoomManager` and the transitions **in process**, with
+  its own copy of the bot loop and its opponents seated as ordinary players via
+  `joinRoom` rather than as `isBot` seats. Pointing it at a socket instead is issue #6.
 - **Reconnect.** A dropped connection ends its room, full stop (see "Room lifecycle").
   `Player` has no `connected` field at all — deliberately absent rather than
   half-built. When reconnect lands, expect a lobby-phase case (easy: drop the player,
   promote host if needed) and a mid-round case (harder: currently undecided — pausing
   on their turn vs. a timer vs. removal are all live options).
-- **More than one human per room.** The engine seats up to six and `joinRoom` works, but
-  the product flow being built is one human against bots.
+- **More than one human per room.** The engine seats up to six and `joinRoom` works, and
+  the socket layer serves each connection its own view — but `startGame` fills every
+  empty seat with bots, so in practice a second human has to join before the host starts.
+  The product flow being built is one human against bots.
+- **Choosing how many opponents you want.** `startGame` always fills to six. Adding bots
+  one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
 - **The client.** No React app yet; `shared/` exists specifically so the client can
   import the same types and event contract the server uses.

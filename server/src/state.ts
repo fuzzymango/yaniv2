@@ -12,6 +12,15 @@ export interface Player {
   id: string;
   name: string;
   score: number;
+  /**
+   * Whether the server plays this seat itself. Required rather than optional so a seat
+   * can never be ambiguously controlled — every construction has to say which it is.
+   *
+   * The engine ignores this entirely: bots take turns through exactly the same
+   * transitions a human does. It exists so the layer above can tell whose turn it has
+   * to play on their behalf.
+   */
+  isBot: boolean;
 }
 
 /**

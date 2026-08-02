@@ -19,7 +19,7 @@ export function cards(...ids: string[]): Card[] {
 
 export interface StateOptions {
   phase?: Phase;
-  players?: Array<{ id: string; name?: string; score?: number }>;
+  players?: Array<{ id: string; name?: string; score?: number; isBot?: boolean }>;
   /** playerId -> card ids. */
   hands?: Record<string, string[]>;
   drawPile?: string[];
@@ -36,6 +36,7 @@ export function makeState(options: StateOptions = {}): GameState {
     id: p.id,
     name: p.name ?? `Player ${i + 1}`,
     score: p.score ?? 0,
+    isBot: p.isBot ?? false,
   }));
   const turnOrder = players.map((p) => p.id);
   const phase = options.phase ?? "playing";
