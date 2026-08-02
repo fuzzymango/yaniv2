@@ -1,8 +1,9 @@
 # yaniv2
 
 Multiplayer [Yaniv](https://en.wikipedia.org/wiki/Yaniv_(card_game)), built top-down:
-engine first, fully unit tested, no transport layer yet. TypeScript, npm workspaces, zero
-runtime dependencies.
+engine first, fully unit tested, then transport. TypeScript, npm workspaces. `socket.io`
+is the only runtime dependency, and only the server has it — `shared/` is types and the
+event contract, so it stays dependency-free for the client's sake.
 
 ## Where the rules live
 
@@ -25,6 +26,7 @@ server/
   src/      The engine: deck, rules, pure state transitions, serialization, rooms, bot.
   scripts/  play.ts (CLI harness). Not shipped.
   test/     node:test suites, one file per src/ module plus integration.test.ts.
+            socketServer.test.ts uses real socket.io-client connections.
 ```
 
 ### `shared/src/`
@@ -53,6 +55,8 @@ contract can't drift between them.
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
 | `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
+| `socketServer.ts` | `createSocketServer` — wires the event contract onto an `io` instance. Never calls `listen` |
+| `index.ts` | The entrypoint. Binds a port and composes the above. `npm run serve` |
 
 `bot.ts` is shipped, not a dev tool: bot opponents are part of the real game, so the
 socket layer needs to call `decideTurn` in production to play a bot's turn. It decides
@@ -178,8 +182,20 @@ the serializer to confirm the leak tests actually fail).
 
 `Player.id` is a **server-issued stable id**, generated at `RoomManager.createRoom` /
 `joinRoom`, never a socket id. The domain model has zero transport awareness — matches
-the goal of keeping a future Socket.io layer thin. (The original sketch used `socket.id`
+the goal of keeping the Socket.io layer thin. (The original sketch used `socket.id`
 directly; that would make reconnect support a retrofit touching every fixture.)
+
+The socket layer bridges the two with a **session bound to the connection**: on a
+successful `createRoom`/`joinRoom`, `socket.data.session = { playerId, roomCode }`, and
+every later handler reads identity from there. A client-supplied player id is **never**
+trusted — a socket could otherwise act as any player just by saying so. The session is
+one optional object rather than two optional fields, so a half-bound connection is
+unrepresentable.
+
+A connection binds **once**. A second `createRoom`/`joinRoom` on an already-bound socket
+is rejected with `ALREADY_IN_ROOM` (the one error code that exists purely because there
+is a transport). Silently rebinding would orphan the first player — seated in a room with
+no connection able to act for them, and unrecoverable while reconnect is out of scope.
 
 ### Room lifecycle
 
@@ -188,6 +204,26 @@ Yaniv call → host calls `startNextRound`, or `gameEnd` once someone busts past
 2–6 players. `RoomManager` is an **in-memory `Map`** — a server restart drops every game
 in progress. This is a documented, accepted limitation, not an oversight; persistence is
 explicitly out of scope for now (see below).
+
+**A disconnect removes the room outright**, unconditionally, for whichever connection
+drops. This is one-directional cleanup, not the start of reconnect support: with no way
+to resume a session, a room whose player has gone can never be played again, so keeping
+it only leaks memory. It follows that this is only coherent while a room holds one human
+— revisit it alongside multi-human rooms, not before.
+
+### Socket layer: wiring is separate from listening
+
+`createSocketServer(httpServer, rooms)` attaches handlers and returns the `io` instance;
+it never calls `listen`. `index.ts` does that and nothing else. The split exists so tests
+can stand up a real server on an ephemeral port (`listen(0)`) without duplicating handler
+logic or racing for a fixed port — `test/socketServer.test.ts` drives real
+`socket.io-client` connections rather than a stub of the socket API, on the grounds that
+this layer's whole job *is* its wire behaviour.
+
+The same reasoning shapes how those tests verify: server-side facts are observed through
+the socket, never by asking `RoomManager`. Disconnect cleanup, for instance, is proven by
+a subsequent join being rejected with `ROOM_NOT_FOUND` — the way a real client would find
+out — rather than by inspecting the rooms map.
 
 ### Tooling
 
@@ -206,14 +242,16 @@ picks up `test/helpers.ts` and any stray `.d.ts` files `tsc --build` emits into
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **Socket.io transport.** Nothing wired up yet. `scripts/play.ts` exists specifically
-  to exercise the engine through the same seam (`RoomManager` + pure transitions) a
-  socket layer will use.
-- **Disconnect/reconnect handling.** `Player` has no `connected` field at all —
-  deliberately absent rather than half-built. When this lands, expect a lobby-phase
-  case (easy: drop the player, promote host if needed) and a mid-round case (harder:
-  currently undecided — pausing on their turn vs. a timer vs. removal are all live
-  options).
+- **Gameplay over the socket.** `createRoom`/`joinRoom` are wired; `startGame`,
+  `takeTurn`, `callYaniv` and `startNextRound` are not yet. `scripts/play.ts` still
+  drives the engine in-process through the same seam.
+- **Reconnect.** A dropped connection ends its room, full stop (see "Room lifecycle").
+  `Player` has no `connected` field at all — deliberately absent rather than
+  half-built. When reconnect lands, expect a lobby-phase case (easy: drop the player,
+  promote host if needed) and a mid-round case (harder: currently undecided — pausing
+  on their turn vs. a timer vs. removal are all live options).
+- **More than one human per room.** The engine seats up to six and `joinRoom` works, but
+  the product flow being built is one human against bots.
 - **Persistence.** Rooms are in-memory only.
 - **The client.** No React app yet; `shared/` exists specifically so the client can
   import the same types and event contract the server uses.
@@ -239,6 +277,7 @@ probably one of these:
 npm install
 npm test                                  # all workspaces, node:test
 npm run typecheck                         # tsc --build across the monorepo
+npm run serve --workspace=@yaniv/server   # start the socket server (PORT, default 3000)
 npm run play --workspace=@yaniv/server    # play interactively against bots
 npm run demo --workspace=@yaniv/server    # watch bots play a full match
 ```

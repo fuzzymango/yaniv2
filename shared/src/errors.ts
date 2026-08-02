@@ -9,6 +9,8 @@ export type GameErrorCode =
   | "ROOM_NOT_FOUND"
   | "ROOM_FULL"
   | "INVALID_NAME"
+  /** This connection already represents a seated player. Transport-only. */
+  | "ALREADY_IN_ROOM"
   | "PLAYER_NOT_FOUND"
   | "NOT_HOST"
   | "NOT_ENOUGH_PLAYERS"
