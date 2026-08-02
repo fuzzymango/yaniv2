@@ -8,7 +8,7 @@
     "test:watch": "node --test --watch \"test/**/*.test.ts\"",
     "serve": "node src/index.ts",
     "demo": "node scripts/play.ts",
-    "play": "node scripts/play.ts --play"
+    "play": "node scripts/playSocket.ts"
   },
   "dependencies": {
     "@yaniv/shared": "*",
