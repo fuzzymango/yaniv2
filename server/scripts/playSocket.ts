@@ -25,17 +25,22 @@ import { stdin, stdout } from "node:process";
 import { io as connectClient } from "socket.io-client";
 import { runSession, type YanivClientSocket } from "./cli/session.ts";
 
-function optionalFlag(name: string): string | undefined {
+function flag(name: string): string | undefined {
   const index = process.argv.indexOf(name);
   return index === -1 ? undefined : process.argv[index + 1];
 }
 
-const flag = (name: string, fallback: string) => optionalFlag(name) ?? fallback;
+const url = flag("--url") ?? `http://localhost:${process.env.PORT ?? 3000}`;
+const playerName = flag("--name") ?? "You";
 
-const url = flag("--url", `http://localhost:${process.env.PORT ?? 3000}`);
-const playerName = flag("--name", "You");
 // Absence is the whole meaning of this one: no code, no room to join, so create one.
-const joinRoomCode = optionalFlag("--join");
+// Which makes an empty `--join` a mistake rather than a default — silently opening a
+// brand new room is the one outcome a player who typed `--join` cannot have wanted.
+const joinRoomCode = flag("--join");
+if (process.argv.includes("--join") && joinRoomCode === undefined) {
+  console.error("\x1b[31m--join needs a room code, e.g. --join WXYZ\x1b[0m");
+  process.exit(1);
+}
 
 // `io()` is not generic in socket.io-client 4, so the event contract is applied here,
 // at the one point where an untyped socket enters the harness.

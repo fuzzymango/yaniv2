@@ -326,11 +326,9 @@ describe("runSession", () => {
       guest.some((frame) => /NOT_HOST/.test(frame)),
       "a guest who tries to start anyway is told why they cannot",
     );
-    assert.match(
-      guest.join("\n"),
-      /1:/,
-      "once the host starts, the guest is dealt a hand of their own",
-    );
+    // Both sides see the match begin, each holding cards only they can see.
+    assert.match(guest.join("\n"), /1:/, "the guest is dealt a hand of their own");
+    assert.match(host.join("\n"), /1:/, "and so is the host");
     assert.doesNotMatch(
       host.join("\n"),
       /NOT_HOST/,

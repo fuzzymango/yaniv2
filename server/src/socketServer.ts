@@ -112,9 +112,17 @@ export function createSocketServer(
       // before the client is told it is in.
       await socket.join(roomCode);
 
-      // Published before the ack, not after: the lobby is the host's first view of the
-      // room they are waiting in, and sending it ahead of the confirmation means a
-      // client that only starts listening once it is acked cannot miss it.
+      /*
+       * The lobby is a position like any other, so it is published rather than left for
+       * the client to infer from the ack — without this a host would sit in front of an
+       * empty screen until somebody else turned up.
+       *
+       * Published *before* the ack, unlike `act()`, which acks first. An event with no
+       * listener is dropped, so this ordering settles what a client that only subscribes
+       * once it is acked sees: nothing. It cannot arrive a beat later and be mistaken
+       * for the position that client is actually waiting on. A client that wants the
+       * lobby — the harness does — subscribes before it emits, and gets it.
+       */
       broadcastState(roomCode);
       ack({ ok: true, value: { roomCode, playerId } });
     });
@@ -144,6 +152,7 @@ export function createSocketServer(
       // says who turned up, this is the table they turned up to. Ordered ahead of the
       // ack for the same reason as in `createRoom`.
       broadcastState(roomCode);
+
       ack({ ok: true, value: { playerId } });
     });
 

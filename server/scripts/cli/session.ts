@@ -77,17 +77,17 @@ export async function runSession(
   }> = [];
 
   /**
-   * Every broadcast is rendered the moment it lands. That is the point of the harness:
-   * a chain of bot turns arrives as one update per move, so printing on arrival shows
-   * them as separate moves rather than a single jump to the final position.
-   */
-  /**
    * The one thing the server tells us that is not a position. The roster arrives right
    * behind it as a fresh view, so this is only the nudge — without it an arrival is easy
    * to miss among the frames.
    */
   socket.on("playerJoined", (name) => io.output(dim(`  ${name} joined`)));
 
+  /**
+   * Every broadcast is rendered the moment it lands. That is the point of the harness:
+   * a chain of bot turns arrives as one update per move, so printing on arrival shows
+   * them as separate moves rather than a single jump to the final position.
+   */
   socket.on("gameStateUpdate", (view) => {
     const position = { view, version: (current?.version ?? 0) + 1 };
     current = position;
