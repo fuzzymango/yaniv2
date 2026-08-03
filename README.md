@@ -31,18 +31,25 @@ There's no client yet, but there are two terminal harnesses. They answer differe
 questions, so neither replaces the other.
 
 **Play a match yourself (`play`).** A real socket client, so it needs a server running.
-Two terminals:
+Start the server first:
 
 ```sh
 npm run serve --workspace=@yaniv/server   # terminal 1 — PORT, default 3000
-npm run play --workspace=@yaniv/server    # terminal 2
 ```
 
-You create a room, the server fills the empty seats with bots, and you play through to a
-winner. At the prompt:
+Then, one or more players join in their own terminals (up to 6 total):
+
+```sh
+npm run play --workspace=@yaniv/server                  # creates a room, shows its code
+npm run play --workspace=@yaniv/server -- --join WXYZ  # another player joins that room
+```
+
+The host (first player) types `start` once everyone has joined. Any remaining empty seats
+are filled with bots. Everyone plays through to a winner. At the prompt:
 
 | Input | Meaning |
 |---|---|
+| `start` | (host only) begin the match once everyone has arrived |
 | `1` or `2 3 4` | discard those cards by hand position, drawing from the deck |
 | `1 3 t2` | the same, but take face-up card 2 off the table instead |
 | `yaniv` | call Yaniv |
@@ -52,7 +59,8 @@ winner. At the prompt:
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot
 move arrives as its own update, so a chain of five bot turns prints as five positions
-rather than one jump. Accepts `-- --url <url> --name <name>`.
+rather than one jump. Accepts `-- --url <url> --name <name>`. The room code is
+case-insensitive when joining (type it however you heard it).
 
 Because it talks to the server the way a browser will, it doubles as a worked reference
 for the connection flow the eventual client has to implement.
@@ -89,5 +97,5 @@ npm run demo --workspace=@yaniv/server -- --seed 42 --players 4
 
 ## Not yet built
 
-Socket.io transport, disconnect/reconnect handling, persistence (rooms are in-memory, so a
-restart drops games in progress), and the React client.
+Disconnect/reconnect handling (dropping a connection currently ends the room for everyone),
+persistence (rooms are in-memory, so a restart drops games in progress), and the React client.
