@@ -567,6 +567,172 @@ describe("runSession", () => {
     });
   });
 
+  /**
+   * Leaving a lobby without dropping the connection. Both sides are real sessions
+   * against one real server, and what each player is told is read off their own screen.
+   */
+  describe("exiting a lobby to the main menu", () => {
+    /** The most recent frame that lists a room and who is sitting in it. */
+    const lastRoster = (screen: string[]) =>
+      [...screen].map(plain).reverse().find((frame) => /room \w{4}/.test(frame));
+
+    it("frees a guest's seat and leaves the lobby startable by the host", async () => {
+      const server = await startServer(7);
+      const hostScreen: string[] = [];
+      const guestScreen: string[] = [];
+      let guestPrompts = 0;
+
+      try {
+        const hostSocket = await server.connect();
+        let hostPrompts = 0;
+        const hostSession = runSession(
+          hostSocket,
+          {
+            ask: async () => {
+              hostPrompts += 1;
+              if (hostPrompts > 1) return null;
+              // Hold the lobby open across Grace's whole visit: she arrives, then
+              // leaves again, and only then does the host start the match. Her arrival
+              // is read off the whole screen rather than the latest roster, since she
+              // may well have left again before this is next looked at.
+              await waitUntil("Grace to turn up", () =>
+                plain(hostScreen.join("\n")).includes("Grace"),
+              );
+              await waitUntil("Grace's seat to be freed", () => {
+                const roster = lastRoster(hostScreen) ?? "";
+                return roster.includes("Ada") && !roster.includes("Grace");
+              });
+              return "start";
+            },
+            output: (text) => hostScreen.push(text),
+          },
+          { playerName: "Ada", entry: { kind: "create" } },
+        );
+
+        const roomCode = await readRoomCode(hostScreen);
+
+        const guestSocket = await server.connect();
+        const guestSession = runSession(
+          guestSocket,
+          {
+            ask: async () => {
+              guestPrompts += 1;
+              // Leave the lobby, and then the harness itself — two separate actions,
+              // which is the whole point of `menu` existing alongside `q`.
+              if (guestPrompts === 1) return "menu";
+              return "quit";
+            },
+            output: (text) => guestScreen.push(text),
+          },
+          { playerName: "Grace", entry: { kind: "join", roomCode } },
+        );
+
+        await Promise.all([hostSession, guestSession]);
+      } finally {
+        await server.close();
+      }
+
+      const host = hostScreen.map(plain);
+      assert.ok(
+        host.some((frame) => /Grace left/.test(frame)),
+        "the host is told the moment someone leaves",
+      );
+      assert.match(
+        host.join("\n"),
+        /1:/,
+        "the lobby is still the host's to start once Grace has gone",
+      );
+      assert.doesNotMatch(
+        host.join("\n"),
+        /✗/,
+        "nothing the host did was refused",
+      );
+
+      assert.equal(guestPrompts, 2, "the guest lands at a menu rather than the session ending");
+      const guest = guestScreen.map(plain);
+      assert.ok(
+        guest.some((frame) => /join <code>/.test(frame)),
+        "and that menu is the main menu",
+      );
+    });
+
+    // Timed out rather than left to `waitUntil`'s guard: the guest below sits at a
+    // prompt that stays unanswered until they are booted, so a session that never gets
+    // them back to the menu would hang the suite instead of failing it.
+    it("closes the lobby for everyone when the host is the one who leaves", { timeout: 10_000 }, async () => {
+      const server = await startServer(7);
+      const hostScreen: string[] = [];
+      const guestScreen: string[] = [];
+      let guestPrompts = 0;
+
+      try {
+        const hostSocket = await server.connect();
+        let hostPrompts = 0;
+        const hostSession = runSession(
+          hostSocket,
+          {
+            ask: async () => {
+              hostPrompts += 1;
+              if (hostPrompts > 1) return "quit";
+              await waitUntil("Grace to be seated", () =>
+                (lastRoster(hostScreen) ?? "").includes("Grace"),
+              );
+              return "menu";
+            },
+            output: (text) => hostScreen.push(text),
+          },
+          { playerName: "Ada", entry: { kind: "create" } },
+        );
+
+        const roomCode = await readRoomCode(hostScreen);
+
+        const guestSocket = await server.connect();
+        const guestSession = runSession(
+          guestSocket,
+          {
+            /**
+             * A terminal, not a script: a prompt is answered when the person in front
+             * of it types something, which here is only once they have been told the
+             * lobby is gone. Being booted therefore has to reach them at the prompt
+             * rather than waiting on a keystroke that is not coming.
+             */
+            ask: async () => {
+              guestPrompts += 1;
+              if (guestPrompts > 1) return null;
+              await waitUntil("Grace to be told the room closed", () =>
+                plain(guestScreen.join("\n")).includes("room closed"),
+              );
+              // Whatever they type next goes to the menu they were dropped at — and
+              // opens a room on the same connection, which a socket still bound to the
+              // old one could not do.
+              return "create";
+            },
+            output: (text) => guestScreen.push(text),
+          },
+          { playerName: "Grace", entry: { kind: "join", roomCode } },
+        );
+
+        await Promise.all([hostSession, guestSession]);
+      } finally {
+        await server.close();
+      }
+
+      const guest = guestScreen.map(plain);
+      assert.ok(
+        guest.some((frame) => /host left/i.test(frame)),
+        "the guest is told why the lobby went away",
+      );
+      assert.doesNotMatch(guest.join("\n"), /ALREADY_IN_ROOM/);
+      // Two prompts, not three: the one they were already sitting in front of was
+      // carried over to the menu. A second prompt issued alongside it would take the
+      // line they type and leave the menu still waiting.
+      assert.equal(guestPrompts, 2, "the abandoned prompt is not left to swallow a line");
+
+      const codes = [...new Set(guest.join("\n").match(/room ([A-Z0-9]{4})\b/g) ?? [])];
+      assert.equal(codes.length, 2, `a second room opened on the same socket, saw ${codes}`);
+    });
+  });
+
   it("plays a full match through to a winner", async () => {
     const server = await startServer(7);
     const printed: string[] = [];

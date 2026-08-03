@@ -113,6 +113,14 @@ describe("parseCommand", () => {
     );
   });
 
+  it("reads 'menu' as leaving the lobby, distinct from quitting the harness", () => {
+    assert.deepEqual(parseCommand("menu", lobbyView()), { kind: "menu" });
+    assert.deepEqual(parseCommand("q", lobbyView()), { kind: "quit" });
+    // Mid-round there is no leaving without dropping the connection, so the word is
+    // just another unreadable line.
+    assert.equal(parseCommand("menu", midRoundView()).kind, "invalid");
+  });
+
   it("still quits from the lobby, and ignores a stray enter there", () => {
     assert.deepEqual(parseCommand("q", lobbyView()), { kind: "quit" });
     assert.deepEqual(parseCommand("", lobbyView()), { kind: "noop" });

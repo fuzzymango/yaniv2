@@ -67,6 +67,9 @@ function renderLobby(view: PlayerGameView): string[] {
         : "  waiting for the host to start",
     ),
   );
+  // Said to everyone, because everyone may leave — what it costs the rest of the table
+  // is the server's decision, so the line does not promise one outcome or the other.
+  lines.push(dim("  or menu to leave the room"));
   return lines;
 }
 

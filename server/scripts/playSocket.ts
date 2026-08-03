@@ -102,6 +102,7 @@ await new Promise<void>((resolve) => socket.on("connect", () => resolve()));
 
 console.log(
   "\x1b[2mcommands: 'start' begins the match once everyone has joined · " +
+    "'menu' leaves the lobby without quitting · " +
     "'1 3' discards those cards and draws from the deck · " +
     "add 't1'/'t2' to take a face-up card instead · 'yaniv' to call · 'q' to quit\x1b[0m",
 );

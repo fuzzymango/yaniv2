@@ -92,6 +92,17 @@ describe("renderView", () => {
     );
   });
 
+  it("offers the way out of the lobby to everyone sitting in it", () => {
+    // Leaving is not the host's privilege the way starting is, so both screens say so.
+    for (const viewer of ["p1", "p2"]) {
+      assert.match(
+        plain(renderView(lobbyView(viewer))),
+        /menu/i,
+        `${viewer} should be told they can leave`,
+      );
+    }
+  });
+
   it("numbers the viewer's own hand so it can be selected by position", () => {
     const view = serializeStateForPlayer(
       makeState({

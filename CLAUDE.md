@@ -417,9 +417,11 @@ Everyone else joins by code, up to six players. The host types `start` to begin,
 every seat still empty is filled with a bot.
 
 At the prompt: `start` begins the match (host only — anyone else is told `NOT_HOST`),
-`1 3` discards those cards by hand position and draws from the deck, `t1`/`t2` on the
-end takes a face-up card instead (`1 3 t2`), `yaniv` calls, enter deals the next round,
-`q` or Ctrl-D quits. Note that any player disconnecting still ends the room for
+`menu` leaves the lobby for the main menu without dropping the connection (a guest frees
+their seat; the host closes the lobby, and everyone else is told why and returned to their
+own menu), `1 3` discards those cards by hand position and draws from the deck, `t1`/`t2`
+on the end takes a face-up card instead (`1 3 t2`), `yaniv` calls, enter deals the next
+round, `q` or Ctrl-D quits. Note that any player disconnecting still ends the room for
 everyone — see "Room lifecycle".
 
 ## Agent skills
