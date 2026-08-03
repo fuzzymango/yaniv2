@@ -24,9 +24,16 @@ import { stdin, stdout } from "node:process";
 import { io as connectClient } from "socket.io-client";
 import { runSession, type YanivClientSocket } from "./cli/session.ts";
 
+/**
+ * A value that itself looks like a flag is treated as absent, not as the value — a typo
+ * like `--name --join WXYZ` (name's argument omitted) would otherwise silently read
+ * "--join" as the player's name instead of surfacing as a missing value.
+ */
 function flag(name: string): string | undefined {
   const index = process.argv.indexOf(name);
-  return index === -1 ? undefined : process.argv[index + 1];
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  return value?.startsWith("--") ? undefined : value;
 }
 
 const url = flag("--url") ?? `http://localhost:${process.env.PORT ?? 3000}`;
