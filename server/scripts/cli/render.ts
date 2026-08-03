@@ -9,8 +9,39 @@
 import type { PlayerGameView, RoundResultView } from "@yaniv/shared";
 import { bold, cyan, dim, green, pad, red, renderCard, renderHand } from "../lib/cardDisplay.ts";
 
-/** Wide enough for the seated bots, whose names carry a "(bot)" suffix. */
+/** The narrowest a name column goes: wide enough for a bot's "(bot)"-suffixed name. */
 const NAME_WIDTH = 14;
+
+/**
+ * How wide the name column has to be for the frame being rendered.
+ *
+ * A name is bounded — 20 characters server-side, plus at most " (you) (host)" added
+ * here — but sizing every column to that worst case would leave an ordinary table of
+ * short names trailing empty space. So a column takes the width of the longest name
+ * actually on it, floored at `NAME_WIDTH` so the usual table looks as it always has.
+ */
+const columnWidth = (names: readonly string[]) =>
+  Math.max(NAME_WIDTH, ...names.map((n) => n.length));
+
+/**
+ * The name a viewer reads for a seat, marked when the seat is one of theirs.
+ *
+ * "(bot)" arrives already baked into the name from the server, because a bot is a bot
+ * whoever is looking. "(you)" can only be added here: who "you" is depends on which
+ * screen the frame is bound for, so it is never stored or sent over the wire.
+ *
+ * `hostId` is passed only where being host is worth showing — the lobby, where starting
+ * the match is the one thing a host does that nobody else can.
+ */
+function seatName(
+  name: string,
+  id: string,
+  viewerId: string,
+  hostId?: string,
+): string {
+  const marks = [id === viewerId ? "(you)" : "", id === hostId ? "(host)" : ""];
+  return [name, ...marks.filter(Boolean)].join(" ");
+}
 
 /**
  * An open lobby: the code to read aloud, who has arrived so far, and what happens next.
@@ -25,10 +56,8 @@ function renderLobby(view: PlayerGameView): string[] {
 
   // Seating order, so every player's screen lists the table the same way round.
   for (const id of view.turnOrder) {
-    const marks = [id === view.hostId ? "(host)" : "", id === view.you.id ? "← you" : ""]
-      .filter(Boolean)
-      .join(" ");
-    lines.push(`  ${pad(byId.get(id)?.name ?? id, NAME_WIDTH)} ${dim(marks)}`);
+    const name = byId.get(id)?.name ?? id;
+    lines.push(`  ${seatName(name, id, view.you.id, view.hostId)}`);
   }
 
   lines.push(
@@ -57,8 +86,9 @@ function renderOwnHand(view: PlayerGameView): string {
 
 /** Opponents, one per line: what you know about them is a count and a score. */
 function renderOpponents(view: PlayerGameView): string[] {
+  const width = columnWidth(view.opponents.map((o) => o.name));
   return view.opponents.map((o) =>
-    dim(`  ${o.name.padEnd(NAME_WIDTH)} ${o.handSize} cards · ${o.score} pts`),
+    dim(`  ${o.name.padEnd(width)} ${o.handSize} cards · ${o.score} pts`),
   );
 }
 
@@ -76,22 +106,29 @@ function renderTable(view: PlayerGameView): string {
  * The hands come straight from the view — the server reveals them only at `roundEnd`
  * and `gameEnd`, so there is nothing here the harness has to decide about disclosure.
  */
-function renderRoundResult(result: RoundResultView): string[] {
-  const caller = result.players.find((p) => p.playerId === result.callerId);
-  const assafer =
+function renderRoundResult(result: RoundResultView, viewerId: string): string[] {
+  const named = (id: string) => {
+    const player = result.players.find((p) => p.playerId === id);
+    return seatName(player?.name ?? id, id, viewerId);
+  };
+  const verdict =
     result.assaferId === null
-      ? null
-      : result.players.find((p) => p.playerId === result.assaferId);
-
-  const verdict = assafer === null ? green("succeeds") : red(`ASSAF by ${assafer?.name}`);
+      ? green("succeeds")
+      : red(`ASSAF by ${named(result.assaferId)}`);
   const lines = [
-    `\n  ${bold(caller?.name ?? result.callerId)} calls ${cyan("YANIV")} — ${verdict}`,
+    `\n  ${bold(named(result.callerId))} calls ${cyan("YANIV")} — ${verdict}`,
   ];
 
-  for (const p of result.players) {
+  const rows = result.players.map((p) => ({
+    ...p,
+    name: seatName(p.name, p.playerId, viewerId),
+  }));
+  const width = columnWidth(rows.map((r) => r.name));
+
+  for (const p of rows) {
     const delta = `${p.delta > 0 ? "+" : ""}${p.delta}`.padStart(4);
     lines.push(
-      `    ${p.name.padEnd(NAME_WIDTH)} ${pad(renderHand(p.hand), 22)} ` +
+      `    ${p.name.padEnd(width)} ${pad(renderHand(p.hand), 22)} ` +
         dim(`${String(p.handValue).padStart(3)} `) +
         `${delta}  ${dim(`total ${p.scoreAfter}`)}`,
     );
@@ -101,11 +138,14 @@ function renderRoundResult(result: RoundResultView): string[] {
 
 /** Final standings, lowest score first — in Yaniv, least is best. */
 function renderStandings(view: PlayerGameView): string[] {
-  const everyone = [view.you, ...view.opponents].sort((a, b) => a.score - b.score);
+  const rows = [view.you, ...view.opponents]
+    .sort((a, b) => a.score - b.score)
+    .map((p) => ({ id: p.id, score: p.score, name: seatName(p.name, p.id, view.you.id) }));
+  const width = columnWidth(rows.map((r) => r.name));
   const lines = [`\n${bold("══ Match over ══════════════════════════════════")}`];
 
-  for (const p of everyone) {
-    const line = `  ${p.name.padEnd(NAME_WIDTH)} ${String(p.score).padStart(4)}`;
+  for (const p of rows) {
+    const line = `  ${p.name.padEnd(width)} ${String(p.score).padStart(4)}`;
     lines.push(view.winnerIds?.includes(p.id) ? green(`${line}  ← winner`) : line);
   }
   return lines;
@@ -116,11 +156,14 @@ export function renderView(view: PlayerGameView): string {
 
   if (view.phase === "gameEnd") {
     // Both: the round that ended it, then where everyone finished.
-    const result = view.roundResult ? renderRoundResult(view.roundResult) : [];
+    const result = view.roundResult
+      ? renderRoundResult(view.roundResult, view.you.id)
+      : [];
     return [...result, ...renderStandings(view)].join("\n");
   }
 
-  if (view.roundResult) return renderRoundResult(view.roundResult).join("\n");
+  if (view.roundResult)
+    return renderRoundResult(view.roundResult, view.you.id).join("\n");
 
   return [...renderOpponents(view), renderTable(view), renderOwnHand(view)].join(
     "\n",
