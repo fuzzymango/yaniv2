@@ -71,8 +71,8 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
 
 - **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
   their own terminals, over a **real socket connection** to a separately running server
-  (`npm run serve` first). Accepts `--url`, `--name` and `--join <code>`. Composition
-  only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
+  (`npm run serve` first). Requires `--name`; also accepts `--url` and `--join <code>`.
+  Composition only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
   - **`cli/render.ts`** — `PlayerGameView` → a printable frame. Pure.
   - **`cli/commands.ts`** — a typed line + the current view → a `Command`. Pure and
     total; bad input returns `invalid`, never throws.
@@ -361,14 +361,15 @@ npm run demo --workspace=@yaniv/server    # watch bots play a full match, in pro
 Playing yourself takes two terminals, because the harness is a real client:
 
 ```sh
-npm run serve --workspace=@yaniv/server   # terminal 1
-npm run play --workspace=@yaniv/server    # terminal 2 — connects to localhost:3000
+npm run serve --workspace=@yaniv/server              # terminal 1
+npm run play --workspace=@yaniv/server -- --name Ada # terminal 2 — connects to localhost:3000
 ```
 
-`play` accepts `-- --url <url> --name <name> --join <code>`. Without `--join` you create
-a room and are shown its 4-character code; everyone else joins it from their own
-terminal with `-- --join <code>` (case-insensitive), up to six players. The host types
-`start` to begin, and every seat still empty is filled with a bot.
+`play` requires `-- --name <name>` and also accepts `--url <url>` and `--join <code>`.
+Without `--join` you create a room and are shown its 4-character code; everyone else
+joins it from their own terminal with `-- --name <name> --join <code>`
+(case-insensitive), up to six players. The host types `start` to begin, and every seat
+still empty is filled with a bot.
 
 At the prompt: `start` begins the match (host only — anyone else is told `NOT_HOST`),
 `1 3` discards those cards by hand position and draws from the deck, `t1`/`t2` on the

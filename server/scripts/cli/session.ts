@@ -41,7 +41,12 @@ const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 
 export interface SessionOptions {
-  playerName?: string;
+  /**
+   * Required, and deliberately without a default: a placeholder name here would be
+   * stored by the server as this player's real name, and everyone else at the table
+   * would see it. Whoever binds argv has to ask for one.
+   */
+  playerName: string;
   /**
    * Join this room instead of creating one. Case-insensitive: a code is read aloud and
    * typed back in, so it should not matter how it arrives.
@@ -52,9 +57,9 @@ export interface SessionOptions {
 export async function runSession(
   socket: YanivClientSocket,
   io: SessionIo,
-  options: SessionOptions = {},
+  options: SessionOptions,
 ): Promise<void> {
-  const playerName = options.playerName ?? "You";
+  const { playerName } = options;
 
   /**
    * A view plus how many broadcasts had arrived when it did.

@@ -40,9 +40,12 @@ npm run serve --workspace=@yaniv/server   # terminal 1 — PORT, default 3000
 Then, one or more players join in their own terminals (up to 6 total):
 
 ```sh
-npm run play --workspace=@yaniv/server                  # creates a room, shows its code
-npm run play --workspace=@yaniv/server -- --join WXYZ  # another player joins that room
+npm run play --workspace=@yaniv/server -- --name Ada      # creates a room, shows its code
+npm run play --workspace=@yaniv/server -- --name Grace --join WXYZ   # join that room
 ```
+
+`--name` is required — it is what everyone else at the table sees you as, so the harness
+refuses to connect without one.
 
 The host (first player) types `start` once everyone has joined. Any remaining empty seats
 are filled with bots. Everyone plays through to a winner. At the prompt:
@@ -59,8 +62,9 @@ are filled with bots. Everyone plays through to a winner. At the prompt:
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot
 move arrives as its own update, so a chain of five bot turns prints as five positions
-rather than one jump. Accepts `-- --url <url> --name <name>`. The room code is
-case-insensitive when joining (type it however you heard it).
+rather than one jump. Requires `-- --name <name>`; also accepts `--url <url>` and
+`--join <code>`. The room code is case-insensitive when joining (type it however you
+heard it).
 
 Because it talks to the server the way a browser will, it doubles as a worked reference
 for the connection flow the eventual client has to implement.

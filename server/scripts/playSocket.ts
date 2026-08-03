@@ -3,10 +3,9 @@
  *
  * Start a server in one terminal (`npm run serve`), then this in another:
  *
- *   node scripts/playSocket.ts                       connect to localhost:3000
- *   node scripts/playSocket.ts --url http://host:80  connect somewhere else
- *   node scripts/playSocket.ts --name Ada            pick your display name
- *   node scripts/playSocket.ts --join WXYZ           join the room with that code
+ *   node scripts/playSocket.ts --name Ada                  connect to localhost:3000
+ *   node scripts/playSocket.ts --name Ada --url http://h   connect somewhere else
+ *   node scripts/playSocket.ts --name Ada --join WXYZ      join the room with that code
  *
  * Without `--join` you create a room and are shown its code; read it out and whoever
  * else wants to play passes it to their own `--join`. Every empty seat is filled with a
@@ -31,7 +30,15 @@ function flag(name: string): string | undefined {
 }
 
 const url = flag("--url") ?? `http://localhost:${process.env.PORT ?? 3000}`;
-const playerName = flag("--name") ?? "You";
+
+// Required rather than defaulted: this name is what the rest of the table sees, and a
+// placeholder would be stored by the server as the player's real name. Refusing here
+// keeps that out of the session driver too — see `SessionOptions` in `cli/session.ts`.
+const playerName = flag("--name");
+if (playerName === undefined) {
+  console.error("\x1b[31m--name is required, e.g. --name Ada\x1b[0m");
+  process.exit(1);
+}
 
 // Absence is the whole meaning of this one: no code, no room to join, so create one.
 // Which makes an empty `--join` a mistake rather than a default — silently opening a

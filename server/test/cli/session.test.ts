@@ -110,12 +110,16 @@ describe("runSession", () => {
 
     try {
       const socket = await server.connect();
-      await runSession(socket, {
-        // Ctrl-D at the first prompt after the start: enough to prove the whole setup
-        // flow ran, including a host starting with nobody else having joined.
-        ask: hostAsk(async () => null),
-        output: (text) => printed.push(text),
-      });
+      await runSession(
+        socket,
+        {
+          // Ctrl-D at the first prompt after the start: enough to prove the whole setup
+          // flow ran, including a host starting with nobody else having joined.
+          ask: hostAsk(async () => null),
+          output: (text) => printed.push(text),
+        },
+        { playerName: "Ada" },
+      );
     } finally {
       await server.close();
     }
@@ -142,15 +146,19 @@ describe("runSession", () => {
         view = v;
       });
 
-      await runSession(socket, {
-        ask: hostAsk(async () => {
-          promptedAfter.push(frames.length);
-          if (promptedAfter.length > 2) return null;
-          // Any single card is a legal discard; the last is the highest.
-          return String(view!.you.hand.length);
-        }),
-        output: (text) => frames.push(text),
-      });
+      await runSession(
+        socket,
+        {
+          ask: hostAsk(async () => {
+            promptedAfter.push(frames.length);
+            if (promptedAfter.length > 2) return null;
+            // Any single card is a legal discard; the last is the highest.
+            return String(view!.you.hand.length);
+          }),
+          output: (text) => frames.push(text),
+        },
+        { playerName: "Ada" },
+      );
     } finally {
       await server.close();
     }
@@ -179,15 +187,19 @@ describe("runSession", () => {
         if (openingHandValue === 0) openingHandValue = handValue(view.you.hand);
       });
 
-      await runSession(socket, {
-        ask: hostAsk(async () => {
-          prompts += 1;
-          // A five-card opening hand is far over the threshold, so the server must
-          // refuse this — the harness has to survive being told no.
-          return prompts === 1 ? "yaniv" : null;
-        }),
-        output: (text) => printed.push(text),
-      });
+      await runSession(
+        socket,
+        {
+          ask: hostAsk(async () => {
+            prompts += 1;
+            // A five-card opening hand is far over the threshold, so the server must
+            // refuse this — the harness has to survive being told no.
+            return prompts === 1 ? "yaniv" : null;
+          }),
+          output: (text) => printed.push(text),
+        },
+        { playerName: "Ada" },
+      );
     } finally {
       await server.close();
     }
@@ -216,17 +228,21 @@ describe("runSession", () => {
         view = v;
       });
 
-      await runSession(socket, {
-        ask: hostAsk(async () => {
-          const current = view!;
-          seenAtPrompt.push(
-            `${current.drawPileCount}|${current.you.hand.map((c) => c.id).join(",")}`,
-          );
-          if (seenAtPrompt.length > 3) return null;
-          return String(current.you.hand.length);
-        }),
-        output: (text) => printed.push(text),
-      });
+      await runSession(
+        socket,
+        {
+          ask: hostAsk(async () => {
+            const current = view!;
+            seenAtPrompt.push(
+              `${current.drawPileCount}|${current.you.hand.map((c) => c.id).join(",")}`,
+            );
+            if (seenAtPrompt.length > 3) return null;
+            return String(current.you.hand.length);
+          }),
+          output: (text) => printed.push(text),
+        },
+        { playerName: "Ada" },
+      );
     } finally {
       await server.close();
     }
@@ -377,18 +393,22 @@ describe("runSession", () => {
         view = v;
       });
 
-      await runSession(socket, {
-        // A developer who always sheds their highest card and draws from the deck.
-        // Never good enough to call Yaniv — the bots end the rounds, and someone
-        // eventually busts past the score limit, which is what ends the match.
-        ask: hostAsk(async () => {
-          prompts += 1;
-          if (prompts > GUARD) return null;
-          const current = view!;
-          return current.phase === "roundEnd" ? "" : String(current.you.hand.length);
-        }),
-        output: (text) => printed.push(text),
-      });
+      await runSession(
+        socket,
+        {
+          // A developer who always sheds their highest card and draws from the deck.
+          // Never good enough to call Yaniv — the bots end the rounds, and someone
+          // eventually busts past the score limit, which is what ends the match.
+          ask: hostAsk(async () => {
+            prompts += 1;
+            if (prompts > GUARD) return null;
+            const current = view!;
+            return current.phase === "roundEnd" ? "" : String(current.you.hand.length);
+          }),
+          output: (text) => printed.push(text),
+        },
+        { playerName: "Ada" },
+      );
     } finally {
       await server.close();
     }
