@@ -31,6 +31,20 @@ function midRoundView() {
   );
 }
 
+/** A view of an open lobby, seen by its host, with one other player seated. */
+function lobbyView() {
+  return serializeStateForPlayer(
+    makeState({
+      phase: "lobby",
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace" },
+      ],
+    }),
+    "p1",
+  );
+}
+
 describe("parseCommand", () => {
   it("reads hand positions as a discard, drawing from the deck by default", () => {
     const command = parseCommand("2 3", midRoundView());
@@ -78,6 +92,30 @@ describe("parseCommand", () => {
     const command = parseCommand("2 3 t3", midRoundView());
 
     assert.equal(command.kind, "invalid");
+  });
+
+  it("reads 'start' as the host's go-ahead, but only while the lobby is open", () => {
+    assert.deepEqual(parseCommand("start", lobbyView()), { kind: "start" });
+    // Mid-round the word means nothing: there is no lobby left to start.
+    assert.equal(parseCommand("start", midRoundView()).kind, "invalid");
+  });
+
+  it("turns down anything else typed in the lobby, without mentioning cards", () => {
+    const command = parseCommand("banana", lobbyView());
+
+    assert.equal(command.kind, "invalid");
+    const message = command.kind === "invalid" ? command.message : "";
+    assert.match(message, /start/, "the lobby tells you the one thing you can do");
+    assert.doesNotMatch(
+      message,
+      /number/,
+      "nobody holds a hand yet, so hand positions are not the advice to give",
+    );
+  });
+
+  it("still quits from the lobby, and ignores a stray enter there", () => {
+    assert.deepEqual(parseCommand("q", lobbyView()), { kind: "quit" });
+    assert.deepEqual(parseCommand("", lobbyView()), { kind: "noop" });
   });
 
   it("reads a bare enter as 'deal the next round', but only once one has ended", () => {

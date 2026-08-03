@@ -1,11 +1,15 @@
 /**
- * Play a match against bots over a real socket connection.
+ * Play a match — against bots, or against other people — over a real socket connection.
  *
  * Start a server in one terminal (`npm run serve`), then this in another:
  *
- *   node scripts/playSocket.ts                       connect to localhost:3000
- *   node scripts/playSocket.ts --url http://host:80  connect somewhere else
- *   node scripts/playSocket.ts --name Ada            pick your display name
+ *   node scripts/playSocket.ts --name Ada                  connect to localhost:3000
+ *   node scripts/playSocket.ts --name Ada --url http://h   connect somewhere else
+ *   node scripts/playSocket.ts --name Ada --join WXYZ      join the room with that code
+ *
+ * Without `--join` you create a room and are shown its code; read it out and whoever
+ * else wants to play passes it to their own `--join`. Every empty seat is filled with a
+ * bot when you start, so playing alone needs no extra ceremony.
  *
  * This is a debugging tool and a worked reference for the connection flow a real
  * client will need — deliberately disposable, not a preview of any final UI.
@@ -20,14 +24,37 @@ import { stdin, stdout } from "node:process";
 import { io as connectClient } from "socket.io-client";
 import { runSession, type YanivClientSocket } from "./cli/session.ts";
 
-function flag(name: string, fallback: string): string {
+/**
+ * A value that itself looks like a flag is treated as absent, not as the value — a typo
+ * like `--name --join WXYZ` (name's argument omitted) would otherwise silently read
+ * "--join" as the player's name instead of surfacing as a missing value.
+ */
+function flag(name: string): string | undefined {
   const index = process.argv.indexOf(name);
-  const value = index === -1 ? undefined : process.argv[index + 1];
-  return value ?? fallback;
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  return value?.startsWith("--") ? undefined : value;
 }
 
-const url = flag("--url", `http://localhost:${process.env.PORT ?? 3000}`);
-const playerName = flag("--name", "You");
+const url = flag("--url") ?? `http://localhost:${process.env.PORT ?? 3000}`;
+
+// Required rather than defaulted: this name is what the rest of the table sees, and a
+// placeholder would be stored by the server as the player's real name. Refusing here
+// keeps that out of the session driver too — see `SessionOptions` in `cli/session.ts`.
+const playerName = flag("--name");
+if (playerName === undefined) {
+  console.error("\x1b[31m--name is required, e.g. --name Ada\x1b[0m");
+  process.exit(1);
+}
+
+// Absence is the whole meaning of this one: no code, no room to join, so create one.
+// Which makes an empty `--join` a mistake rather than a default — silently opening a
+// brand new room is the one outcome a player who typed `--join` cannot have wanted.
+const joinRoomCode = flag("--join");
+if (process.argv.includes("--join") && joinRoomCode === undefined) {
+  console.error("\x1b[31m--join needs a room code, e.g. --join WXYZ\x1b[0m");
+  process.exit(1);
+}
 
 // `io()` is not generic in socket.io-client 4, so the event contract is applied here,
 // at the one point where an untyped socket enters the harness.
@@ -58,12 +85,19 @@ const ask = async (prompt: string): Promise<string | null> => {
 await new Promise<void>((resolve) => socket.on("connect", () => resolve()));
 
 console.log(
-  "\x1b[2mcommands: '1 3' discards those cards and draws from the deck · " +
+  "\x1b[2mcommands: 'start' begins the match once everyone has joined · " +
+    "'1 3' discards those cards and draws from the deck · " +
     "add 't1'/'t2' to take a face-up card instead · 'yaniv' to call · 'q' to quit\x1b[0m",
 );
 
 try {
-  await runSession(socket, { ask, output: (text) => console.log(text) }, { playerName });
+  await runSession(
+    socket,
+    { ask, output: (text) => console.log(text) },
+    // Spread rather than passed as `undefined`: an absent flag has to arrive as an
+    // absent option, which is what the session reads as "create a room".
+    { playerName, ...(joinRoomCode === undefined ? {} : { joinRoomCode }) },
+  );
 } finally {
   rl.close();
   socket.disconnect();

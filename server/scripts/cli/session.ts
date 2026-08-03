@@ -41,15 +41,25 @@ const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 
 export interface SessionOptions {
-  playerName?: string;
+  /**
+   * Required, and deliberately without a default: a placeholder name here would be
+   * stored by the server as this player's real name, and everyone else at the table
+   * would see it. Whoever binds argv has to ask for one.
+   */
+  playerName: string;
+  /**
+   * Join this room instead of creating one. Case-insensitive: a code is read aloud and
+   * typed back in, so it should not matter how it arrives.
+   */
+  joinRoomCode?: string;
 }
 
 export async function runSession(
   socket: YanivClientSocket,
   io: SessionIo,
-  options: SessionOptions = {},
+  options: SessionOptions,
 ): Promise<void> {
-  const playerName = options.playerName ?? "You";
+  const { playerName } = options;
 
   /**
    * A view plus how many broadcasts had arrived when it did.
@@ -70,6 +80,13 @@ export async function runSession(
     matches: (position: Position) => boolean;
     resolve: (position: Position) => void;
   }> = [];
+
+  /**
+   * The one thing the server tells us that is not a position. The roster arrives right
+   * behind it as a fresh view, so this is only the nudge — without it an arrival is easy
+   * to miss among the frames.
+   */
+  socket.on("playerJoined", (name) => io.output(dim(`  ${name} joined`)));
 
   /**
    * Every broadcast is rendered the moment it lands. That is the point of the harness:
@@ -95,25 +112,48 @@ export async function runSession(
       else waiters.push({ matches, resolve });
     });
 
-  const created = await new Promise<AckResult<{ roomCode: string; playerId: string }>>(
-    (resolve) => socket.emit("createRoom", playerName, resolve),
-  );
-  if (!created.ok) {
-    io.output(red(`✗ ${created.error.code}: ${created.error.message}`));
+  /**
+   * Get a seat: a room of our own, or the one whose code was read out to us. The code
+   * is upper-cased on the way out so it can be typed in however it was heard.
+   *
+   * A join is acked with a player id only, so the code we asked for is the code we are
+   * in — there is nowhere else the server could have put us.
+   */
+  const enterRoom = (): Promise<AckResult<{ roomCode: string; playerId: string }>> => {
+    const joining = options.joinRoomCode?.toUpperCase();
+    if (joining === undefined) {
+      return new Promise((resolve) => socket.emit("createRoom", playerName, resolve));
+    }
+    return new Promise((resolve) =>
+      socket.emit("joinRoom", joining, playerName, (result) =>
+        resolve(
+          result.ok
+            ? { ok: true, value: { roomCode: joining, playerId: result.value.playerId } }
+            : result,
+        ),
+      ),
+    );
+  };
+
+  const entered = await enterRoom();
+  if (!entered.ok) {
+    io.output(red(`✗ ${entered.error.code}: ${entered.error.message}`));
     return;
   }
-  const { roomCode, playerId } = created.value;
+  const { roomCode, playerId } = entered.value;
   io.output(dim(`room ${roomCode} · you are ${playerName}`));
 
-  const started = await send((ack) => socket.emit("startGame", ack));
-  if (!started.ok) {
-    io.output(red(`✗ ${started.error.code}: ${started.error.message}`));
-    return;
-  }
-
-  // The turn is ours, the round is over, or the match is — anything else is a bot
-  // moving, which the broadcast handler has already shown.
+  /**
+   * A position worth prompting at: the lobby we are waiting in, our turn, or a round
+   * or match that has ended. Anything else is somebody else moving, which the broadcast
+   * handler has already shown.
+   *
+   * The lobby counts for every player, not just the host. Only the host's `start` will
+   * be accepted, but everyone still needs a prompt to quit from — and being told
+   * `NOT_HOST` is how a guest finds out the rule, rather than the harness guessing at it.
+   */
   const isOurMove = (view: PlayerGameView) =>
+    view.phase === "lobby" ||
     view.currentTurnPlayerId === playerId ||
     view.phase === "roundEnd" ||
     view.phase === "gameEnd";
@@ -122,15 +162,26 @@ export async function runSession(
   let actedOn = 0;
 
   for (;;) {
-    const { view, version } = await waitFor(
+    const prompted = await waitFor(
       (position) => position.version > actedOn && isOurMove(position.view),
     );
-    if (view.phase === "gameEnd") return;
+    if (prompted.view.phase === "gameEnd") return;
 
     const prompt =
-      view.phase === "roundEnd" ? dim("  [enter] for the next round ") : "  > ";
+      prompted.view.phase === "roundEnd"
+        ? dim("  [enter] for the next round ")
+        : "  > ";
     const line = await io.ask(prompt);
     if (line === null) return;
+
+    /**
+     * Read the line against the newest position, not the one that prompted for it. With
+     * another human at the table the board can move while a player is typing — the host
+     * starting the match, or dealing the next round — and a typed line should mean what
+     * the screen in front of them says it means. Mid-round the two are the same
+     * position anyway: nobody else can act while the turn is ours.
+     */
+    const { view, version } = current ?? prompted;
 
     const command = parseCommand(line, view);
     if (command.kind === "quit") return;
@@ -143,6 +194,7 @@ export async function runSession(
     const result = await send((ack) => {
       if (command.kind === "turn") socket.emit("takeTurn", command.action, ack);
       else if (command.kind === "yaniv") socket.emit("callYaniv", ack);
+      else if (command.kind === "start") socket.emit("startGame", ack);
       else socket.emit("startNextRound", ack);
     });
 

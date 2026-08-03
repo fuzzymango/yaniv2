@@ -111,6 +111,19 @@ export function createSocketServer(
       // a game can address it by code directly. Awaited so membership is established
       // before the client is told it is in.
       await socket.join(roomCode);
+
+      /*
+       * The lobby is a position like any other, so it is published rather than left for
+       * the client to infer from the ack — without this a host would sit in front of an
+       * empty screen until somebody else turned up.
+       *
+       * Published *before* the ack, unlike `act()`, which acks first. An event with no
+       * listener is dropped, so this ordering settles what a client that only subscribes
+       * once it is acked sees: nothing. It cannot arrive a beat later and be mistaken
+       * for the position that client is actually waiting on. A client that wants the
+       * lobby — the harness does — subscribes before it emits, and gets it.
+       */
+      broadcastState(roomCode);
       ack({ ok: true, value: { roomCode, playerId } });
     });
 
@@ -134,6 +147,11 @@ export function createSocketServer(
       const seatedName = getPlayer(state, playerId)?.name ?? playerName;
       // `socket.to` excludes the sender: an arrival is news to everyone but the arriver.
       socket.to(roomCode).emit("playerJoined", seatedName);
+
+      // Everyone, the arriver included, gets the new roster — the announcement above
+      // says who turned up, this is the table they turned up to. Ordered ahead of the
+      // ack for the same reason as in `createRoom`.
+      broadcastState(roomCode);
 
       ack({ ok: true, value: { playerId } });
     });
