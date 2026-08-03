@@ -13,6 +13,35 @@ import { bold, cyan, dim, green, pad, red, renderCard, renderHand } from "../lib
 const NAME_WIDTH = 14;
 
 /**
+ * An open lobby: the code to read aloud, who has arrived so far, and what happens next.
+ *
+ * Shares nothing with the mid-round frame — there is no hand, no table and no deck yet.
+ * The host marker is display only; who may actually start is the server's call, and it
+ * says so by rejecting anyone else with `NOT_HOST`.
+ */
+function renderLobby(view: PlayerGameView): string[] {
+  const byId = new Map([view.you, ...view.opponents].map((p) => [p.id, p]));
+  const lines = [`\n  ${bold(`room ${view.roomCode}`)}`];
+
+  // Seating order, so every player's screen lists the table the same way round.
+  for (const id of view.turnOrder) {
+    const marks = [id === view.hostId ? "(host)" : "", id === view.you.id ? "← you" : ""]
+      .filter(Boolean)
+      .join(" ");
+    lines.push(`  ${pad(byId.get(id)?.name ?? id, NAME_WIDTH)} ${dim(marks)}`);
+  }
+
+  lines.push(
+    dim(
+      view.hostId === view.you.id
+        ? "  type start when everyone has joined"
+        : "  waiting for the host to start",
+    ),
+  );
+  return lines;
+}
+
+/**
  * The viewer's hand, numbered for selection.
  *
  * The numbers index `view.you.hand` directly, which the serializer has already put in
@@ -83,6 +112,8 @@ function renderStandings(view: PlayerGameView): string[] {
 }
 
 export function renderView(view: PlayerGameView): string {
+  if (view.phase === "lobby") return renderLobby(view).join("\n");
+
   if (view.phase === "gameEnd") {
     // Both: the round that ended it, then where everyone finished.
     const result = view.roundResult ? renderRoundResult(view.roundResult) : [];

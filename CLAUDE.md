@@ -69,10 +69,10 @@ unable to see hidden hands or the draw pile.
 
 Not part of the shipped engine — two smoke-test harnesses, split by what they exercise.
 
-- **`playSocket.ts`** — `npm run play`. A human against bots over a **real socket
-  connection** to a separately running server (`npm run serve` first). Accepts `--url`
-  and `--name`. Composition only, like `index.ts`: argv, stdin/stdout and a socket,
-  handed to `cli/`.
+- **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
+  their own terminals, over a **real socket connection** to a separately running server
+  (`npm run serve` first). Accepts `--url`, `--name` and `--join <code>`. Composition
+  only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
   - **`cli/render.ts`** — `PlayerGameView` → a printable frame. Pure.
   - **`cli/commands.ts`** — a typed line + the current view → a `Command`. Pure and
     total; bad input returns `invalid`, never throws.
@@ -256,8 +256,10 @@ unchanged by bots existing.
 **A disconnect removes the room outright**, unconditionally, for whichever connection
 drops. This is one-directional cleanup, not the start of reconnect support: with no way
 to resume a session, a room whose player has gone can never be played again, so keeping
-it only leaks memory. It follows that this is only coherent while a room holds one human
-— revisit it alongside multi-human rooms, not before.
+it only leaks memory. That reasoning holds only while a room holds one human, and rooms
+can now hold several (see `play --join`), so a player dropping out takes everyone else's
+match down with them. Known and deliberately not fixed here — it belongs with reconnect,
+which is the next thing on the out-of-scope list, not bolted onto the join flow.
 
 ### Socket layer: wiring is separate from listening
 
@@ -319,10 +321,10 @@ Not oversights — deferred on purpose, in this order of likely next work:
   half-built. When reconnect lands, expect a lobby-phase case (easy: drop the player,
   promote host if needed) and a mid-round case (harder: currently undecided — pausing
   on their turn vs. a timer vs. removal are all live options).
-- **More than one human per room.** The engine seats up to six and `joinRoom` works, and
-  the socket layer serves each connection its own view — but `startGame` fills every
-  empty seat with bots, so in practice a second human has to join before the host starts.
-  The product flow being built is one human against bots.
+- **Starting a match with seats still open for latecomers.** Several humans can share a
+  room now — each joins by code from their own terminal (`play --join`) and the host
+  starts when everyone is in — but `startGame` still fills every remaining seat with
+  bots, so anyone who has not joined by then is playing the next match, not this one.
 - **Choosing how many opponents you want.** `startGame` always fills to six. Adding bots
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
@@ -363,9 +365,16 @@ npm run serve --workspace=@yaniv/server   # terminal 1
 npm run play --workspace=@yaniv/server    # terminal 2 — connects to localhost:3000
 ```
 
-`play` accepts `-- --url <url> --name <name>`. At the prompt: `1 3` discards those cards
-by hand position and draws from the deck, `t1`/`t2` on the end takes a face-up card
-instead (`1 3 t2`), `yaniv` calls, enter deals the next round, `q` or Ctrl-D quits.
+`play` accepts `-- --url <url> --name <name> --join <code>`. Without `--join` you create
+a room and are shown its 4-character code; everyone else joins it from their own
+terminal with `-- --join <code>` (case-insensitive), up to six players. The host types
+`start` to begin, and every seat still empty is filled with a bot.
+
+At the prompt: `start` begins the match (host only — anyone else is told `NOT_HOST`),
+`1 3` discards those cards by hand position and draws from the deck, `t1`/`t2` on the
+end takes a face-up card instead (`1 3 t2`), `yaniv` calls, enter deals the next round,
+`q` or Ctrl-D quits. Note that any player disconnecting still ends the room for
+everyone — see "Room lifecycle".
 
 ## Agent skills
 

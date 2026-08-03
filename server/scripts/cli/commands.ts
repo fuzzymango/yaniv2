@@ -16,6 +16,8 @@ export type Command =
   | { kind: "turn"; action: TurnAction }
   | { kind: "yaniv" }
   | { kind: "quit" }
+  /** Begin the match. Only meaningful in the lobby, and only the host may do it. */
+  | { kind: "start" }
   /** Deal the next round. What a bare enter means once a round has ended. */
   | { kind: "next" }
   /** Nothing to do; prompt again. */
@@ -24,8 +26,24 @@ export type Command =
 
 export function parseCommand(input: string, view: PlayerGameView): Command {
   const line = input.trim().toLowerCase();
-  if (line === "yaniv") return { kind: "yaniv" };
   if (line === "q" || line === "quit") return { kind: "quit" };
+
+  /**
+   * In the lobby nobody holds a hand and nothing is on the table, so none of the card
+   * commands below can mean anything: the one move available is the host's go-ahead.
+   * Handled before them so a mistyped card command is turned down with advice that
+   * applies, rather than being told to pick a card by number.
+   *
+   * Whether the typist is actually the host is not checked here — the server owns that,
+   * and answers `NOT_HOST`. A second opinion in the harness could only ever disagree.
+   */
+  if (view.phase === "lobby") {
+    if (line === "start") return { kind: "start" };
+    if (line === "") return { kind: "noop" };
+    return { kind: "invalid", message: "waiting in the lobby — 'start' begins the match" };
+  }
+
+  if (line === "yaniv") return { kind: "yaniv" };
 
   // A bare enter is the only input whose meaning depends on the phase: it deals the
   // next round when one has just ended, and is a stray keystroke otherwise.

@@ -111,6 +111,11 @@ export function createSocketServer(
       // a game can address it by code directly. Awaited so membership is established
       // before the client is told it is in.
       await socket.join(roomCode);
+
+      // Published before the ack, not after: the lobby is the host's first view of the
+      // room they are waiting in, and sending it ahead of the confirmation means a
+      // client that only starts listening once it is acked cannot miss it.
+      broadcastState(roomCode);
       ack({ ok: true, value: { roomCode, playerId } });
     });
 
@@ -135,6 +140,10 @@ export function createSocketServer(
       // `socket.to` excludes the sender: an arrival is news to everyone but the arriver.
       socket.to(roomCode).emit("playerJoined", seatedName);
 
+      // Everyone, the arriver included, gets the new roster — the announcement above
+      // says who turned up, this is the table they turned up to. Ordered ahead of the
+      // ack for the same reason as in `createRoom`.
+      broadcastState(roomCode);
       ack({ ok: true, value: { playerId } });
     });
 

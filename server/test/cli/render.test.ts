@@ -17,7 +17,45 @@ import { makeState, unwrap } from "../helpers.ts";
 /** Colour is presentation; assertions read the text underneath it. */
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
+/** An open lobby with three players seated, as seen by `viewerId`. */
+function lobbyView(viewerId: string) {
+  return serializeStateForPlayer(
+    makeState({
+      phase: "lobby",
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace" },
+        { id: "p3", name: "Alan" },
+      ],
+    }),
+    viewerId,
+  );
+}
+
 describe("renderView", () => {
+  it("shows the lobby's code and everyone seated in it, host marked", () => {
+    const frame = plain(renderView(lobbyView("p2")));
+
+    // The code is what the host reads aloud for anyone else to type in.
+    assert.match(frame, /TEST/);
+    for (const name of ["Ada", "Grace", "Alan"]) {
+      assert.match(frame, new RegExp(name), `${name} is seated and should be listed`);
+    }
+    assert.match(frame, /Ada.*host/i, "the host is distinguishable from the rest");
+  });
+
+  it("tells the host to start, and everyone else that they are waiting", () => {
+    assert.match(plain(renderView(lobbyView("p1"))), /type start/i);
+
+    const guest = plain(renderView(lobbyView("p2")));
+    assert.match(guest, /waiting/i);
+    assert.doesNotMatch(
+      guest,
+      /type start/i,
+      "only the host can start, so only the host is told to",
+    );
+  });
+
   it("numbers the viewer's own hand so it can be selected by position", () => {
     const view = serializeStateForPlayer(
       makeState({

@@ -62,6 +62,47 @@ async function startServer(seed: number): Promise<Harness> {
   };
 }
 
+type Ask = (prompt: string) => Promise<string | null>;
+
+/**
+ * A host's script, with the go-ahead prepended.
+ *
+ * The harness waits in the lobby rather than starting the moment it has a room, so
+ * every host now types `start` before anything else. Wrapping it keeps each test's own
+ * script — and its prompt counting — about the match it is there to exercise.
+ */
+function hostAsk(script: Ask): Ask {
+  let started = false;
+  return (prompt) => {
+    if (started) return script(prompt);
+    started = true;
+    return Promise.resolve("start");
+  };
+}
+
+/** Poll until `ready`, so a wedged expectation fails the test instead of hanging it. */
+async function waitUntil(what: string, ready: () => boolean): Promise<void> {
+  const deadline = Date.now() + 2000;
+  while (!ready()) {
+    if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/**
+ * The room code as it appears on screen. That printed line is the whole of the sharing
+ * story: the host reads it aloud and another player types it in, so a test that learned
+ * the code any other way would not be proving the flow works.
+ */
+async function readRoomCode(screen: string[]): Promise<string> {
+  let found: RegExpMatchArray | null = null;
+  await waitUntil("the room code to be printed", () => {
+    found = plain(screen.join("\n")).match(/room ([A-Z0-9]{4})/);
+    return found !== null;
+  });
+  return found![1]!;
+}
+
 describe("runSession", () => {
   it("creates a room, starts the match, and shows the developer their hand", async () => {
     const server = await startServer(7);
@@ -70,8 +111,9 @@ describe("runSession", () => {
     try {
       const socket = await server.connect();
       await runSession(socket, {
-        // Ctrl-D at the first prompt: enough to prove the whole setup flow ran.
-        ask: async () => null,
+        // Ctrl-D at the first prompt after the start: enough to prove the whole setup
+        // flow ran, including a host starting with nobody else having joined.
+        ask: hostAsk(async () => null),
         output: (text) => printed.push(text),
       });
     } finally {
@@ -101,12 +143,12 @@ describe("runSession", () => {
       });
 
       await runSession(socket, {
-        ask: async () => {
+        ask: hostAsk(async () => {
           promptedAfter.push(frames.length);
           if (promptedAfter.length > 2) return null;
           // Any single card is a legal discard; the last is the highest.
           return String(view!.you.hand.length);
-        },
+        }),
         output: (text) => frames.push(text),
       });
     } finally {
@@ -138,12 +180,12 @@ describe("runSession", () => {
       });
 
       await runSession(socket, {
-        ask: async () => {
+        ask: hostAsk(async () => {
           prompts += 1;
           // A five-card opening hand is far over the threshold, so the server must
           // refuse this — the harness has to survive being told no.
           return prompts === 1 ? "yaniv" : null;
-        },
+        }),
         output: (text) => printed.push(text),
       });
     } finally {
@@ -175,14 +217,14 @@ describe("runSession", () => {
       });
 
       await runSession(socket, {
-        ask: async () => {
+        ask: hostAsk(async () => {
           const current = view!;
           seenAtPrompt.push(
             `${current.drawPileCount}|${current.you.hand.map((c) => c.id).join(",")}`,
           );
           if (seenAtPrompt.length > 3) return null;
           return String(current.you.hand.length);
-        },
+        }),
         output: (text) => printed.push(text),
       });
     } finally {
@@ -204,6 +246,125 @@ describe("runSession", () => {
     );
   });
 
+  /**
+   * Two terminals, one table. Both sides are real sessions against one real server, and
+   * every fact is read off the screen the player in front of it would have been looking
+   * at — the roster, the log line, the refusal, the deal.
+   */
+  it("seats a second player who joins by code, and waits for the host to start", async () => {
+    const server = await startServer(7);
+    const hostScreen: string[] = [];
+    const guestScreen: string[] = [];
+    let guestView: PlayerGameView | null = null;
+
+    try {
+      const hostSocket = await server.connect();
+      let hostPrompts = 0;
+      const hostSession = runSession(
+        hostSocket,
+        {
+          ask: async () => {
+            hostPrompts += 1;
+            if (hostPrompts > 1) return null;
+            // The host holds the lobby open until the guest has arrived — and has been
+            // turned away from starting it themselves.
+            await waitUntil("Grace to be refused a start", () =>
+              plain(guestScreen.join("\n")).includes("NOT_HOST"),
+            );
+            return "start";
+          },
+          output: (text) => hostScreen.push(text),
+        },
+        { playerName: "Ada" },
+      );
+
+      const roomCode = await readRoomCode(hostScreen);
+
+      const guestSocket = await server.connect();
+      guestSocket.on("gameStateUpdate", (v) => {
+        guestView = v;
+      });
+      let guestPrompts = 0;
+      const guestSession = runSession(
+        guestSocket,
+        {
+          ask: async () => {
+            guestPrompts += 1;
+            // Only the host may begin: the server, not the harness, says so.
+            if (guestPrompts === 1) return "start";
+            await waitUntil("the match to be dealt", () => guestView?.phase === "playing");
+            return null;
+          },
+          output: (text) => guestScreen.push(text),
+        },
+        // Typed the way it was heard, not the way it was generated.
+        { playerName: "Grace", joinRoomCode: roomCode.toLowerCase() },
+      );
+
+      await Promise.all([hostSession, guestSession]);
+    } finally {
+      await server.close();
+    }
+
+    const host = hostScreen.map(plain);
+    const guest = guestScreen.map(plain);
+    /** A lobby frame is the one that lists the room alongside who is sitting in it. */
+    const roster = (screen: string[], ...names: string[]) =>
+      screen.some((frame) => names.every((n) => frame.includes(n)) && /room \w{4}/.test(frame));
+
+    assert.ok(
+      host.some((frame) => /Grace joined/.test(frame)),
+      "the host is told the moment someone arrives",
+    );
+    assert.ok(roster(host, "Ada", "Grace"), "the host's roster grows to include Grace");
+    assert.ok(roster(guest, "Ada", "Grace"), "and the guest sees the same table");
+    assert.ok(
+      guest.some((frame) => /waiting for the host/i.test(frame)),
+      "a guest is told the ball is not in their court",
+    );
+    assert.ok(
+      guest.some((frame) => /NOT_HOST/.test(frame)),
+      "a guest who tries to start anyway is told why they cannot",
+    );
+    assert.match(
+      guest.join("\n"),
+      /1:/,
+      "once the host starts, the guest is dealt a hand of their own",
+    );
+    assert.doesNotMatch(
+      host.join("\n"),
+      /NOT_HOST/,
+      "the host's own start is not refused",
+    );
+  });
+
+  it("says why a join failed rather than sitting at a prompt", async () => {
+    const server = await startServer(7);
+    const printed: string[] = [];
+    let prompts = 0;
+
+    try {
+      const socket = await server.connect();
+      await runSession(
+        socket,
+        {
+          ask: async () => {
+            prompts += 1;
+            return null;
+          },
+          output: (text) => printed.push(text),
+        },
+        // Nothing has been created on this server, so no code can resolve.
+        { playerName: "Grace", joinRoomCode: "ZZZZ" },
+      );
+    } finally {
+      await server.close();
+    }
+
+    assert.match(plain(printed.join("\n")), /ROOM_NOT_FOUND/);
+    assert.equal(prompts, 0, "there is no table to sit at, so nothing is asked for");
+  });
+
   it("plays a full match through to a winner", async () => {
     const server = await startServer(7);
     const printed: string[] = [];
@@ -222,12 +383,12 @@ describe("runSession", () => {
         // A developer who always sheds their highest card and draws from the deck.
         // Never good enough to call Yaniv — the bots end the rounds, and someone
         // eventually busts past the score limit, which is what ends the match.
-        ask: async () => {
+        ask: hostAsk(async () => {
           prompts += 1;
           if (prompts > GUARD) return null;
           const current = view!;
           return current.phase === "roundEnd" ? "" : String(current.you.hand.length);
-        },
+        }),
         output: (text) => printed.push(text),
       });
     } finally {
