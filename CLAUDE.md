@@ -71,11 +71,15 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
 
 - **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
   their own terminals, over a **real socket connection** to a separately running server
-  (`npm run serve` first). Requires `--name`; also accepts `--url` and `--join <code>`.
+  (`npm run serve` first). Requires `--name`; also accepts `--url`, `--join <code>`, and
+  `--create`. Bare `--name` (neither `--join` nor `--create`) opens an interactive main
+  menu — `create` / `join <code>` / `q`/`quit` — rather than silently creating a room.
   Composition only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
-  - **`cli/render.ts`** — `PlayerGameView` → a printable frame. Pure.
-  - **`cli/commands.ts`** — a typed line + the current view → a `Command`. Pure and
-    total; bad input returns `invalid`, never throws.
+  - **`cli/render.ts`** — `PlayerGameView` → a printable frame, plus the one screen that
+    isn't a view: the main menu, rendered before any room exists. Pure.
+  - **`cli/commands.ts`** — a typed line + the current view → a `Command`, and a
+    separate `parseMainMenuCommand` for the view-less main menu. Both pure and total;
+    bad input returns `invalid`, never throws.
   - **`cli/session.ts`** — the driver. Owns the socket, holds the loop, takes its input
     and output injected so tests can drive it. **It imports nothing from `src/` except
     types** — no `RoomManager`, no `GameState`. The moment it does, it stops being a
@@ -365,11 +369,18 @@ npm run serve --workspace=@yaniv/server              # terminal 1
 npm run play --workspace=@yaniv/server -- --name Ada # terminal 2 — connects to localhost:3000
 ```
 
-`play` requires `-- --name <name>` and also accepts `--url <url>` and `--join <code>`.
-Without `--join` you create a room and are shown its 4-character code; everyone else
-joins it from their own terminal with `-- --name <name> --join <code>`
-(case-insensitive), up to six players. The host types `start` to begin, and every seat
-still empty is filled with a bot.
+`play` requires `-- --name <name>` and also accepts `--url <url>`, `--join <code>`, and
+`--create`. Three ways to enter:
+
+- `-- --name Ada` alone opens an interactive main menu — `create` a room, `join <CODE>`
+  one by code, or `q`/`quit` to exit. A bad or expired code typed here shows the error
+  and returns to the menu rather than ending the session.
+- `-- --name Ada --create` creates a room immediately and shows its 4-character code —
+  the same outcome the bare main menu's `create` gives you, without the extra prompt.
+- `-- --name Grace --join <code>` (case-insensitive) joins that room immediately.
+
+Everyone else joins by code, up to six players. The host types `start` to begin, and
+every seat still empty is filled with a bot.
 
 At the prompt: `start` begins the match (host only — anyone else is told `NOT_HOST`),
 `1 3` discards those cards by hand position and draws from the deck, `t1`/`t2` on the

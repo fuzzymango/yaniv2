@@ -118,7 +118,7 @@ describe("runSession", () => {
           ask: hostAsk(async () => null),
           output: (text) => printed.push(text),
         },
-        { playerName: "Ada" },
+        { playerName: "Ada", entry: { kind: "create" } },
       );
     } finally {
       await server.close();
@@ -157,7 +157,7 @@ describe("runSession", () => {
           }),
           output: (text) => frames.push(text),
         },
-        { playerName: "Ada" },
+        { playerName: "Ada", entry: { kind: "create" } },
       );
     } finally {
       await server.close();
@@ -198,7 +198,7 @@ describe("runSession", () => {
           }),
           output: (text) => printed.push(text),
         },
-        { playerName: "Ada" },
+        { playerName: "Ada", entry: { kind: "create" } },
       );
     } finally {
       await server.close();
@@ -241,7 +241,7 @@ describe("runSession", () => {
           }),
           output: (text) => printed.push(text),
         },
-        { playerName: "Ada" },
+        { playerName: "Ada", entry: { kind: "create" } },
       );
     } finally {
       await server.close();
@@ -291,7 +291,7 @@ describe("runSession", () => {
           },
           output: (text) => hostScreen.push(text),
         },
-        { playerName: "Ada" },
+        { playerName: "Ada", entry: { kind: "create" } },
       );
 
       const roomCode = await readRoomCode(hostScreen);
@@ -314,7 +314,7 @@ describe("runSession", () => {
           output: (text) => guestScreen.push(text),
         },
         // Typed the way it was heard, not the way it was generated.
-        { playerName: "Grace", joinRoomCode: roomCode.toLowerCase() },
+        { playerName: "Grace", entry: { kind: "join", roomCode: roomCode.toLowerCase() } },
       );
 
       await Promise.all([hostSession, guestSession]);
@@ -369,7 +369,7 @@ describe("runSession", () => {
           output: (text) => printed.push(text),
         },
         // Nothing has been created on this server, so no code can resolve.
-        { playerName: "Grace", joinRoomCode: "ZZZZ" },
+        { playerName: "Grace", entry: { kind: "join", roomCode: "ZZZZ" } },
       );
     } finally {
       await server.close();
@@ -377,6 +377,194 @@ describe("runSession", () => {
 
     assert.match(plain(printed.join("\n")), /ROOM_NOT_FOUND/);
     assert.equal(prompts, 0, "there is no table to sit at, so nothing is asked for");
+  });
+
+  /**
+   * Omitting `entry` is what a bare `--name` now means: the interactive main menu,
+   * rather than the old implicit "create a room". `--join`/`--create` bypass it
+   * entirely — those paths are covered by the tests above, which all pass `entry`.
+   */
+  describe("the interactive main menu", () => {
+    it("is shown by default, and 'create' opens a room from it", async () => {
+      const server = await startServer(7);
+      const printed: string[] = [];
+      let prompts = 0;
+
+      try {
+        const socket = await server.connect();
+        await runSession(
+          socket,
+          {
+            ask: async () => {
+              prompts += 1;
+              if (prompts === 1) return "create";
+              if (prompts === 2) return "start";
+              return null;
+            },
+            output: (text) => printed.push(text),
+          },
+          { playerName: "Ada" },
+        );
+      } finally {
+        await server.close();
+      }
+
+      const screen = plain(printed.join("\n"));
+      assert.match(screen, /create/, "the menu is shown before any room exists");
+      assert.match(screen, /room [A-Z0-9]{4,}/i, "'create' opens a room, same as --create");
+    });
+
+    it("joins a room by typing its code, exactly as --join would", async () => {
+      const server = await startServer(7);
+      const hostScreen: string[] = [];
+      const guestScreen: string[] = [];
+
+      try {
+        const hostSocket = await server.connect();
+        let hostPrompts = 0;
+        const hostSession = runSession(
+          hostSocket,
+          {
+            ask: async () => {
+              hostPrompts += 1;
+              if (hostPrompts > 1) return null;
+              await waitUntil("Grace to join from the menu", () =>
+                plain(guestScreen.join("\n")).includes("Grace"),
+              );
+              return "start";
+            },
+            output: (text) => hostScreen.push(text),
+          },
+          { playerName: "Ada", entry: { kind: "create" } },
+        );
+
+        const roomCode = await readRoomCode(hostScreen);
+
+        const guestSocket = await server.connect();
+        let guestPrompts = 0;
+        const guestSession = runSession(
+          guestSocket,
+          {
+            ask: async () => {
+              guestPrompts += 1;
+              // Typed the way it was heard, not the way it was generated.
+              if (guestPrompts === 1) return `join ${roomCode.toLowerCase()}`;
+              return null;
+            },
+            output: (text) => guestScreen.push(text),
+          },
+          { playerName: "Grace" },
+        );
+
+        await Promise.all([hostSession, guestSession]);
+      } finally {
+        await server.close();
+      }
+
+      const guest = guestScreen.map(plain);
+      assert.ok(
+        guest.some((frame) => /room \w{4}/i.test(frame)),
+        "'join <code>' at the menu seats the guest at the host's table",
+      );
+    });
+
+    it("quits without ever creating or joining a room", async () => {
+      const server = await startServer(7);
+      const printed: string[] = [];
+      let prompts = 0;
+
+      try {
+        const socket = await server.connect();
+        await runSession(
+          socket,
+          {
+            ask: async () => {
+              prompts += 1;
+              return "quit";
+            },
+            output: (text) => printed.push(text),
+          },
+          { playerName: "Ada" },
+        );
+      } finally {
+        await server.close();
+      }
+
+      assert.equal(prompts, 1, "quitting from the menu is immediate");
+      assert.doesNotMatch(
+        plain(printed.join("\n")),
+        /room [A-Z0-9]{4,}/i,
+        "no room was ever created or joined",
+      );
+    });
+
+    it("shows a bad code's error and returns to the menu, rather than ending the session", async () => {
+      const server = await startServer(7);
+      const printed: string[] = [];
+      let prompts = 0;
+
+      try {
+        const socket = await server.connect();
+        await runSession(
+          socket,
+          {
+            ask: async () => {
+              prompts += 1;
+              if (prompts === 1) return "join ZZZZ";
+              if (prompts === 2) return "quit";
+              return null;
+            },
+            output: (text) => printed.push(text),
+          },
+          // Nothing has been created on this server, so no code can resolve — unlike
+          // the flag-based version of this failure above, this one was typed at a menu
+          // the session can fall back to.
+          { playerName: "Grace" },
+        );
+      } finally {
+        await server.close();
+      }
+
+      const screen = plain(printed.join("\n"));
+      assert.match(screen, /ROOM_NOT_FOUND/, "the existing error is shown");
+      assert.equal(
+        prompts,
+        2,
+        "the menu is offered again rather than the session ending",
+      );
+    });
+
+    it("survives nonsense typed at the menu instead of crashing", async () => {
+      const server = await startServer(7);
+      const printed: string[] = [];
+      let prompts = 0;
+
+      try {
+        const socket = await server.connect();
+        await runSession(
+          socket,
+          {
+            ask: async () => {
+              prompts += 1;
+              if (prompts === 1) return "banana";
+              if (prompts === 2) return "quit";
+              return null;
+            },
+            output: (text) => printed.push(text),
+          },
+          { playerName: "Grace" },
+        );
+      } finally {
+        await server.close();
+      }
+
+      assert.match(plain(printed.join("\n")), /didn't understand/i);
+      assert.equal(
+        prompts,
+        2,
+        "the menu reprompts rather than crashing or ending the session",
+      );
+    });
   });
 
   it("plays a full match through to a winner", async () => {
@@ -407,7 +595,7 @@ describe("runSession", () => {
           }),
           output: (text) => printed.push(text),
         },
-        { playerName: "Ada" },
+        { playerName: "Ada", entry: { kind: "create" } },
       );
     } finally {
       await server.close();

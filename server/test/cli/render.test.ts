@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { callYaniv } from "../../src/game.ts";
 import { serializeStateForPlayer } from "../../src/serialize.ts";
-import { renderView } from "../../scripts/cli/render.ts";
+import { renderMainMenu, renderView } from "../../scripts/cli/render.ts";
 import { makeState, unwrap } from "../helpers.ts";
 
 /** Colour is presentation; assertions read the text underneath it. */
@@ -196,5 +196,15 @@ describe("renderView", () => {
     assert.match(frame, /Ada \(you\)\s+0\s+← winner/, "the viewer's own placing");
     assert.match(frame, /Grace\s+115/);
     assert.doesNotMatch(frame, /Grace \(you\)/, "and nobody else's");
+  });
+});
+
+describe("renderMainMenu", () => {
+  it("names the three options a player has before any room exists", () => {
+    const frame = plain(renderMainMenu());
+
+    assert.match(frame, /create/);
+    assert.match(frame, /join/i);
+    assert.match(frame, /quit|q\b/i);
   });
 });

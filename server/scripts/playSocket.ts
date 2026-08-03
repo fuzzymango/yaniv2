@@ -3,13 +3,16 @@
  *
  * Start a server in one terminal (`npm run serve`), then this in another:
  *
- *   node scripts/playSocket.ts --name Ada                  connect to localhost:3000
- *   node scripts/playSocket.ts --name Ada --url http://h   connect somewhere else
+ *   node scripts/playSocket.ts --name Ada                  open the interactive main menu
+ *   node scripts/playSocket.ts --name Ada --create         create a room immediately
  *   node scripts/playSocket.ts --name Ada --join WXYZ      join the room with that code
+ *   node scripts/playSocket.ts --name Ada --url http://h   connect somewhere else
  *
- * Without `--join` you create a room and are shown its code; read it out and whoever
- * else wants to play passes it to their own `--join`. Every empty seat is filled with a
- * bot when you start, so playing alone needs no extra ceremony.
+ * Bare `--name` lands on a main menu (`create` / `join <code>` / `q`), rather than
+ * silently creating a room. `--join`/`--create` skip straight past it, same as always.
+ * Whoever creates a room is shown its code; read it out and everyone else joins it,
+ * either with `--join` or by typing `join <code>` at their own menu. Every empty seat is
+ * filled with a bot when the host starts, so playing alone needs no extra ceremony.
  *
  * This is a debugging tool and a worked reference for the connection flow a real
  * client will need — deliberately disposable, not a preview of any final UI.
@@ -22,7 +25,7 @@
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { io as connectClient } from "socket.io-client";
-import { runSession, type YanivClientSocket } from "./cli/session.ts";
+import { runSession, type EntryMode, type YanivClientSocket } from "./cli/session.ts";
 
 /**
  * A value that itself looks like a flag is treated as absent, not as the value — a typo
@@ -47,14 +50,27 @@ if (playerName === undefined) {
   process.exit(1);
 }
 
-// Absence is the whole meaning of this one: no code, no room to join, so create one.
-// Which makes an empty `--join` a mistake rather than a default — silently opening a
-// brand new room is the one outcome a player who typed `--join` cannot have wanted.
+// An empty `--join` is a mistake rather than a default — silently falling through to
+// the main menu is the one outcome a player who typed `--join` cannot have wanted.
 const joinRoomCode = flag("--join");
 if (process.argv.includes("--join") && joinRoomCode === undefined) {
   console.error("\x1b[31m--join needs a room code, e.g. --join WXYZ\x1b[0m");
   process.exit(1);
 }
+
+if (process.argv.includes("--join") && process.argv.includes("--create")) {
+  console.error("\x1b[31m--join and --create cannot both be given\x1b[0m");
+  process.exit(1);
+}
+
+// Neither flag: the interactive main menu decides, rather than the old implicit
+// "bare --name creates a room" behavior.
+const entry: EntryMode | undefined =
+  joinRoomCode !== undefined
+    ? { kind: "join", roomCode: joinRoomCode }
+    : process.argv.includes("--create")
+      ? { kind: "create" }
+      : undefined;
 
 // `io()` is not generic in socket.io-client 4, so the event contract is applied here,
 // at the one point where an untyped socket enters the harness.
@@ -95,8 +111,8 @@ try {
     socket,
     { ask, output: (text) => console.log(text) },
     // Spread rather than passed as `undefined`: an absent flag has to arrive as an
-    // absent option, which is what the session reads as "create a room".
-    { playerName, ...(joinRoomCode === undefined ? {} : { joinRoomCode }) },
+    // absent option, which is what the session reads as "open the main menu".
+    { playerName, ...(entry === undefined ? {} : { entry }) },
   );
 } finally {
   rl.close();

@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { callYaniv } from "../../src/game.ts";
 import { serializeStateForPlayer } from "../../src/serialize.ts";
-import { parseCommand } from "../../scripts/cli/commands.ts";
+import { parseCommand, parseMainMenuCommand } from "../../scripts/cli/commands.ts";
 import { makeState, unwrap } from "../helpers.ts";
 
 /** A view whose owner holds Jk 5♣ 7♦, with 8♥ 9♥ face up to pick from. */
@@ -140,5 +140,47 @@ describe("parseCommand", () => {
     });
     // Mid-round the same keystroke is just an accident: do nothing, ask again.
     assert.deepEqual(parseCommand("", midRoundView()), { kind: "noop" });
+  });
+});
+
+describe("parseMainMenuCommand", () => {
+  it("reads 'create' as opening a new room", () => {
+    assert.deepEqual(parseMainMenuCommand("create"), { kind: "create" });
+  });
+
+  it("reads 'join <code>' as joining that room, case-insensitively", () => {
+    assert.deepEqual(parseMainMenuCommand("join WXYZ"), {
+      kind: "join",
+      roomCode: "WXYZ",
+    });
+    assert.deepEqual(parseMainMenuCommand("JOIN wxyz"), {
+      kind: "join",
+      roomCode: "wxyz",
+    });
+  });
+
+  it("recognises q and quit as leaving the application", () => {
+    assert.deepEqual(parseMainMenuCommand("q"), { kind: "quit" });
+    assert.deepEqual(parseMainMenuCommand("quit"), { kind: "quit" });
+  });
+
+  it("treats a bare enter as nothing to do", () => {
+    assert.deepEqual(parseMainMenuCommand(""), { kind: "noop" });
+  });
+
+  it("explains itself rather than crashing on a line it cannot read", () => {
+    const command = parseMainMenuCommand("banana");
+
+    assert.equal(command.kind, "invalid");
+    assert.match(
+      command.kind === "invalid" ? command.message : "",
+      /create|join|quit/,
+      "an invalid command points at what the menu actually accepts",
+    );
+  });
+
+  it("rejects a bare 'join' with no code, rather than joining nothing", () => {
+    assert.equal(parseMainMenuCommand("join").kind, "invalid");
+    assert.equal(parseMainMenuCommand("join ").kind, "invalid");
   });
 });

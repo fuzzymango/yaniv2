@@ -151,6 +151,19 @@ function renderStandings(view: PlayerGameView): string[] {
   return lines;
 }
 
+/**
+ * The screen before any room exists — no `PlayerGameView` to render, since there is no
+ * game yet.
+ */
+export function renderMainMenu(): string {
+  return [
+    `\n  ${bold("yaniv")}`,
+    dim("  create           start a new room"),
+    dim("  join <code>      join a room by its code"),
+    dim("  q                quit"),
+  ].join("\n");
+}
+
 export function renderView(view: PlayerGameView): string {
   if (view.phase === "lobby") return renderLobby(view).join("\n");
 

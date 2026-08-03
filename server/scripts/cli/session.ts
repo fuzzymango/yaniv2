@@ -20,8 +20,8 @@ import type {
   ServerToClientEvents,
 } from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
-import { parseCommand } from "./commands.ts";
-import { renderView } from "./render.ts";
+import { parseCommand, parseMainMenuCommand } from "./commands.ts";
+import { renderMainMenu, renderView } from "./render.ts";
 
 export type YanivClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -40,6 +40,15 @@ const send = (emit: (ack: Ack<null>) => void) =>
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 
+/** How a room gets entered — chosen either at the main menu or by an argv flag. */
+export type EntryMode =
+  | { kind: "create" }
+  /**
+   * Case-insensitive: a code is read aloud and typed back in, so it should not matter
+   * how it arrives.
+   */
+  | { kind: "join"; roomCode: string };
+
 export interface SessionOptions {
   /**
    * Required, and deliberately without a default: a placeholder name here would be
@@ -48,10 +57,11 @@ export interface SessionOptions {
    */
   playerName: string;
   /**
-   * Join this room instead of creating one. Case-insensitive: a code is read aloud and
-   * typed back in, so it should not matter how it arrives.
+   * How to enter a room the very first time through the session loop — supplied by
+   * `--join`/`--create`. Omitted means open the interactive main menu instead, which is
+   * the only source of an entry mode on every pass after the first (see `runSession`).
    */
-  joinRoomCode?: string;
+  entry?: EntryMode;
 }
 
 export async function runSession(
@@ -113,17 +123,19 @@ export async function runSession(
     });
 
   /**
-   * Get a seat: a room of our own, or the one whose code was read out to us. The code
-   * is upper-cased on the way out so it can be typed in however it was heard.
+   * Get a seat: a room of our own, or the one whose code we were given. The code is
+   * upper-cased on the way out so it can be typed in however it was heard.
    *
    * A join is acked with a player id only, so the code we asked for is the code we are
    * in — there is nowhere else the server could have put us.
    */
-  const enterRoom = (): Promise<AckResult<{ roomCode: string; playerId: string }>> => {
-    const joining = options.joinRoomCode?.toUpperCase();
-    if (joining === undefined) {
+  const enterRoom = (
+    mode: EntryMode,
+  ): Promise<AckResult<{ roomCode: string; playerId: string }>> => {
+    if (mode.kind === "create") {
       return new Promise((resolve) => socket.emit("createRoom", playerName, resolve));
     }
+    const joining = mode.roomCode.toUpperCase();
     return new Promise((resolve) =>
       socket.emit("joinRoom", joining, playerName, (result) =>
         resolve(
@@ -135,79 +147,124 @@ export async function runSession(
     );
   };
 
-  const entered = await enterRoom();
-  if (!entered.ok) {
-    io.output(red(`✗ ${entered.error.code}: ${entered.error.message}`));
-    return;
-  }
-  const { roomCode, playerId } = entered.value;
-  io.output(dim(`room ${roomCode} · you are ${playerName}`));
-
   /**
-   * A position worth prompting at: the lobby we are waiting in, our turn, or a round
-   * or match that has ended. Anything else is somebody else moving, which the broadcast
-   * handler has already shown.
-   *
-   * The lobby counts for every player, not just the host. Only the host's `start` will
-   * be accepted, but everyone still needs a prompt to quit from — and being told
-   * `NOT_HOST` is how a guest finds out the rule, rather than the harness guessing at it.
+   * The screen before any room exists. Reprompts through a blank line or nonsense on
+   * its own — only `create`, `join <code>` and quitting ever return from here — so a
+   * caller never has to loop on `noop`/`invalid` itself.
    */
-  const isOurMove = (view: PlayerGameView) =>
-    view.phase === "lobby" ||
-    view.currentTurnPlayerId === playerId ||
-    view.phase === "roundEnd" ||
-    view.phase === "gameEnd";
+  const promptMainMenu = async (): Promise<EntryMode | { kind: "quit" }> => {
+    for (;;) {
+      io.output(renderMainMenu());
+      const line = await io.ask("  > ");
+      if (line === null) return { kind: "quit" };
 
-  /** The position we last successfully acted on; we never act on it twice. */
-  let actedOn = 0;
+      const command = parseMainMenuCommand(line);
+      if (command.kind === "noop") continue;
+      if (command.kind === "invalid") {
+        io.output(red(`  ✗ ${command.message}`));
+        continue;
+      }
+      if (command.kind === "quit") return { kind: "quit" };
+      return command.kind === "create"
+        ? { kind: "create" }
+        : { kind: "join", roomCode: command.roomCode };
+    }
+  };
+
+  // Only the very first pass through this loop can be driven by an argv-supplied entry
+  // mode (`--join`/`--create`); every later pass — today, reachable only by a bad code
+  // typed at the menu — always goes through the interactive menu, since there is no
+  // flag to fall back on a second time.
+  let pendingEntry = options.entry;
 
   for (;;) {
-    const prompted = await waitFor(
-      (position) => position.version > actedOn && isOurMove(position.view),
-    );
-    if (prompted.view.phase === "gameEnd") return;
+    const interactive = pendingEntry === undefined;
+    const mode = pendingEntry ?? (await promptMainMenu());
+    pendingEntry = undefined;
 
-    const prompt =
-      prompted.view.phase === "roundEnd"
-        ? dim("  [enter] for the next round ")
-        : "  > ";
-    const line = await io.ask(prompt);
-    if (line === null) return;
+    if (mode.kind === "quit") return;
+
+    const entered = await enterRoom(mode);
+    if (!entered.ok) {
+      io.output(red(`✗ ${entered.error.code}: ${entered.error.message}`));
+      // A code mistyped at the menu is worth a second try; one that arrived on the
+      // command line is not — the flag itself was wrong, and silently retrying it
+      // would hide that rather than surface it.
+      if (interactive) continue;
+      return;
+    }
+    const { roomCode, playerId } = entered.value;
+    io.output(dim(`room ${roomCode} · you are ${playerName}`));
 
     /**
-     * Read the line against the newest position, not the one that prompted for it. With
-     * another human at the table the board can move while a player is typing — the host
-     * starting the match, or dealing the next round — and a typed line should mean what
-     * the screen in front of them says it means. Mid-round the two are the same
-     * position anyway: nobody else can act while the turn is ours.
+     * A position worth prompting at: the lobby we are waiting in, our turn, or a round
+     * or match that has ended. Anything else is somebody else moving, which the
+     * broadcast handler has already shown.
+     *
+     * The lobby counts for every player, not just the host. Only the host's `start`
+     * will be accepted, but everyone still needs a prompt to quit from — and being told
+     * `NOT_HOST` is how a guest finds out the rule, rather than the harness guessing at
+     * it.
      */
-    const { view, version } = current ?? prompted;
+    const isOurMove = (view: PlayerGameView) =>
+      view.phase === "lobby" ||
+      view.currentTurnPlayerId === playerId ||
+      view.phase === "roundEnd" ||
+      view.phase === "gameEnd";
 
-    const command = parseCommand(line, view);
-    if (command.kind === "quit") return;
-    if (command.kind === "noop") continue;
-    if (command.kind === "invalid") {
-      io.output(red(`  ✗ ${command.message}`));
-      continue;
+    /** The position we last successfully acted on; we never act on it twice. */
+    let actedOn = 0;
+
+    for (;;) {
+      const prompted = await waitFor(
+        (position) => position.version > actedOn && isOurMove(position.view),
+      );
+      // Nothing yet returns to the menu from here — `gameEnd` still ends the session,
+      // as it always has — but a screen that can send us back is a later ticket's job.
+      if (prompted.view.phase === "gameEnd") return;
+
+      const prompt =
+        prompted.view.phase === "roundEnd"
+          ? dim("  [enter] for the next round ")
+          : "  > ";
+      const line = await io.ask(prompt);
+      if (line === null) return;
+
+      /**
+       * Read the line against the newest position, not the one that prompted for it.
+       * With another human at the table the board can move while a player is typing —
+       * the host starting the match, or dealing the next round — and a typed line
+       * should mean what the screen in front of them says it means. Mid-round the two
+       * are the same position anyway: nobody else can act while the turn is ours.
+       */
+      const { view, version } = current ?? prompted;
+
+      const command = parseCommand(line, view);
+      if (command.kind === "quit") return;
+      if (command.kind === "noop") continue;
+      if (command.kind === "invalid") {
+        io.output(red(`  ✗ ${command.message}`));
+        continue;
+      }
+
+      const result = await send((ack) => {
+        if (command.kind === "turn") socket.emit("takeTurn", command.action, ack);
+        else if (command.kind === "yaniv") socket.emit("callYaniv", ack);
+        else if (command.kind === "start") socket.emit("startGame", ack);
+        else socket.emit("startNextRound", ack);
+      });
+
+      /**
+       * A refused action is news, not a crash. The server published nothing, so the
+       * position is unchanged and the turn is still ours — print the code and prompt
+       * again.
+       */
+      if (!result.ok) {
+        io.output(red(`  ✗ ${result.error.code}: ${result.error.message}`));
+        continue;
+      }
+
+      actedOn = version;
     }
-
-    const result = await send((ack) => {
-      if (command.kind === "turn") socket.emit("takeTurn", command.action, ack);
-      else if (command.kind === "yaniv") socket.emit("callYaniv", ack);
-      else if (command.kind === "start") socket.emit("startGame", ack);
-      else socket.emit("startNextRound", ack);
-    });
-
-    /**
-     * A refused action is news, not a crash. The server published nothing, so the
-     * position is unchanged and the turn is still ours — print the code and prompt
-     * again.
-     */
-    if (!result.ok) {
-      io.output(red(`  ✗ ${result.error.code}: ${result.error.message}`));
-      continue;
-    }
-
-    actedOn = version;
   }
 }

@@ -37,15 +37,27 @@ Start the server first:
 npm run serve --workspace=@yaniv/server   # terminal 1 — PORT, default 3000
 ```
 
-Then, one or more players join in their own terminals (up to 6 total):
+Then, one or more players join in their own terminals (up to 6 total). Bare `--name`
+opens an interactive main menu rather than committing to anything yet:
 
 ```sh
-npm run play --workspace=@yaniv/server -- --name Ada      # creates a room, shows its code
-npm run play --workspace=@yaniv/server -- --name Grace --join WXYZ   # join that room
+npm run play --workspace=@yaniv/server -- --name Ada                 # opens the main menu
+npm run play --workspace=@yaniv/server -- --name Ada --create        # creates a room, shows its code
+npm run play --workspace=@yaniv/server -- --name Grace --join WXYZ   # joins that room directly
 ```
 
 `--name` is required — it is what everyone else at the table sees you as, so the harness
-refuses to connect without one.
+refuses to connect without one. `--join` and `--create` skip the main menu and go
+straight into a room; without either, the menu offers the same two choices interactively:
+
+| Input at the menu | Meaning |
+|---|---|
+| `create` | open a new room and show its code |
+| `join <code>` | join the room with that code (case-insensitive) |
+| `q` or `quit` | quit the application |
+
+A bad or expired code typed at the menu shows the error and returns you to the menu to
+try again, rather than ending the session.
 
 The host (first player) types `start` once everyone has joined. Any remaining empty seats
 are filled with bots. Everyone plays through to a winner. At the prompt:
@@ -62,9 +74,9 @@ are filled with bots. Everyone plays through to a winner. At the prompt:
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot
 move arrives as its own update, so a chain of five bot turns prints as five positions
-rather than one jump. Requires `-- --name <name>`; also accepts `--url <url>` and
-`--join <code>`. The room code is case-insensitive when joining (type it however you
-heard it).
+rather than one jump. Requires `-- --name <name>`; also accepts `--url <url>`,
+`--join <code>`, and `--create`. The room code is case-insensitive when joining, whether
+given as a flag or typed at the main menu.
 
 Because it talks to the server the way a browser will, it doubles as a worked reference
 for the connection flow the eventual client has to implement.

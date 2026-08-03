@@ -82,3 +82,30 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
     action: { discardCardIds: picked.map((card) => card!.id), draw },
   };
 }
+
+export type MainMenuCommand =
+  | { kind: "create" }
+  | { kind: "join"; roomCode: string }
+  | { kind: "quit" }
+  | { kind: "noop" }
+  | { kind: "invalid"; message: string };
+
+/**
+ * What a typed line means at the main menu — before any room exists, so unlike
+ * `parseCommand` there is no view to read it against.
+ */
+export function parseMainMenuCommand(input: string): MainMenuCommand {
+  const line = input.trim();
+  const lower = line.toLowerCase();
+  if (lower === "") return { kind: "noop" };
+  if (lower === "q" || lower === "quit") return { kind: "quit" };
+  if (lower === "create") return { kind: "create" };
+
+  const joinMatch = line.match(/^join\s+(\S+)$/i);
+  if (joinMatch) return { kind: "join", roomCode: joinMatch[1]! };
+
+  return {
+    kind: "invalid",
+    message: "didn't understand that — try 'create', 'join <code>', or 'quit'",
+  };
+}
