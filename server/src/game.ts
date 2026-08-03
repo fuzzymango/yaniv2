@@ -8,7 +8,7 @@ import {
 } from "./config.ts";
 import { createDeck, deal, shuffle } from "./deck.ts";
 import { err, ok } from "./result.ts";
-import type { Rng } from "./rng.ts";
+import { randomInt, type Rng } from "./rng.ts";
 import {
   canCallYaniv,
   canonicalizeSet,
@@ -66,7 +66,11 @@ function dealRound(
   };
 }
 
-/** Host starts the match from the lobby. The host takes the first turn. */
+/**
+ * The host starts the match from the lobby, but does not necessarily take the first
+ * turn: the opening player is chosen uniformly at random from the seated players —
+ * see ADR-0001.
+ */
 export function startGame(
   state: GameState,
   requesterId: string,
@@ -84,7 +88,8 @@ export function startGame(
       `Need at least ${MIN_PLAYERS} players to start`,
     );
   }
-  return ok(dealRound(state, state.hostId, rng));
+  const starter = state.players[randomInt(rng, state.players.length)]!.id;
+  return ok(dealRound(state, starter, rng));
 }
 
 /** Host deals the next round. The previous round's winner takes the first turn. */

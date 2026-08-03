@@ -22,12 +22,23 @@ describe("startGame", () => {
     assert.equal(state.round.drawPile.length, 54 - 10 - 1);
   });
 
-  it("gives the host the first turn", () => {
-    const state = unwrap(
-      startGame(makeState({ phase: "lobby", roundNumber: 0 }), "p1", rng()),
+  it("picks the opening player at random, not always the host", () => {
+    const starters = new Set<string>();
+    for (let seed = 0; seed < 100; seed++) {
+      const state = unwrap(
+        startGame(
+          makeState({ phase: "lobby", roundNumber: 0 }),
+          "p1",
+          mulberry32(seed),
+        ),
+      );
+      assert.equal(state.phase, "playing");
+      starters.add(state.round.currentTurnPlayerId);
+    }
+    assert.ok(
+      starters.has("p1") && starters.has("p2"),
+      `expected both seats to open at least once across 100 seeds, got: ${[...starters]}`,
     );
-    assert.equal(state.phase, "playing");
-    assert.equal(state.round.currentTurnPlayerId, "p1");
   });
 
   it("puts all 54 cards into play exactly once", () => {
