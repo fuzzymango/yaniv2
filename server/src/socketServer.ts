@@ -292,12 +292,19 @@ export function createSocketServer(
         ack(err("ROOM_NOT_FOUND", `No room with code ${session.roomCode}`));
         return;
       }
-      if (state.phase !== "lobby" && state.phase !== "gameEnd") {
-        ack(err("WRONG_PHASE", "You can only leave from the lobby or a finished match"));
-        return;
-      }
-
       if (session.playerId === state.hostId) {
+        /*
+         * The host's leave is put to the same transition as everyone else's — it owns
+         * which phases a player may leave from, and repeating that rule here would give
+         * it two homes to drift between. Only the answer differs: the roster it hands
+         * back is thrown away, and the room closed instead.
+         */
+        const allowed = removePlayer(state, session.playerId);
+        if (!allowed.ok) {
+          ack({ ok: false, error: allowed.error });
+          return;
+        }
+
         closeRoom(session.roomCode, "the host left the room", socket);
         ack({ ok: true, value: null });
         return;

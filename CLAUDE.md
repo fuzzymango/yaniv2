@@ -295,8 +295,9 @@ whose code a later room could be issued.
 
 **`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a
 table that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS` rather than
-quietly refilled. That rejection is unreachable over the wire today — `startGame` fills to
-six and only humans can leave — so it is proven in `game.test.ts`, not on the socket.
+quietly refilled. Reaching that over the wire takes a table that was six humans to begin
+with — `startGame` only fills seats nobody is in, and a bot never leaves — so five of them
+exiting is the one way a host is left with nobody to play against.
 
 ### Socket layer: wiring is separate from listening
 

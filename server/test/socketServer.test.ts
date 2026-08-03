@@ -889,6 +889,23 @@ describe("play again and exit to menu", () => {
       assert.equal(expectError(result).code, "WRONG_PHASE");
     });
 
+    /**
+     * Only reachable at a table that was all humans to begin with: `startGame` fills any
+     * empty seat with a bot, and a bot never leaves. Six players, five of whom exit, is
+     * the one way the host can be left with nobody to play against.
+     */
+    it("rejects a restart once too few players are left to play", async () => {
+      const { seats } = await openLobby(["Ada", "Grace", "Alan", "Tony", "Edsger", "Barbara"]);
+      const [host, ...guests] = seats;
+      expectOk(await ask(host!.client, "startGame"));
+      await playToGameEnd(seats);
+
+      for (const guest of guests) expectOk(await ask(guest.client, "exitToMenu"));
+      const result = await ask(host!.client, "playAgain");
+
+      assert.equal(expectError(result).code, "NOT_ENOUGH_PLAYERS");
+    });
+
     it("rejects a restart from a connection that is not in a room", async () => {
       const stranger = await table.connect();
 
@@ -1014,13 +1031,21 @@ describe("play again and exit to menu", () => {
       expectOk(await ask(host!.client, "joinRoom", opened.roomCode, "Ada"));
     });
 
+    // Host and guest are turned away by the same rule, but reach it down different
+    // paths — the host's leave is checked before the room would be closed, the guest's
+    // by the transition that would have freed their seat.
     it("refuses to leave mid-match, where quitting is still a disconnect", async () => {
-      const { seats } = await openLobby(["Ada"]);
+      const { seats } = await openLobby(["Ada", "Grace"]);
       expectOk(await ask(seats[0]!.client, "startGame"));
 
-      const result = await ask(seats[0]!.client, "exitToMenu");
-
-      assert.equal(expectError(result).code, "WRONG_PHASE");
+      assert.equal(
+        expectError(await ask(seats[0]!.client, "exitToMenu")).code,
+        "WRONG_PHASE",
+      );
+      assert.equal(
+        expectError(await ask(seats[1]!.client, "exitToMenu")).code,
+        "WRONG_PHASE",
+      );
     });
 
     it("rejects a leave from a connection that is not in a room", async () => {
