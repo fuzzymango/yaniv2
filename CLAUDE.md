@@ -52,7 +52,7 @@ contract can't drift between them.
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
 | `deck.ts` | `createDeck`, `shuffle`, `deal` — pure functions, no class |
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `handValue` — the rulebook, used by both the engine and the bot |
-| `game.ts` | `startGame`, `takeTurn`, `callYaniv`, `startNextRound` — the pure state transitions |
+| `game.ts` | `startGame`, `takeTurn`, `callYaniv`, `startNextRound`, `playAgain`, `removePlayer` — the pure state transitions |
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
 | `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
@@ -264,6 +264,39 @@ it only leaks memory. That reasoning holds only while a room holds one human, an
 can now hold several (see `play --join`), so a player dropping out takes everyone else's
 match down with them. Known and deliberately not fixed here — it belongs with reconnect,
 which is the next thing on the out-of-scope list, not bolted onto the join flow.
+
+### Leaving a room without dropping the connection
+
+`exitToMenu` is the one exit that is not a disconnect, and `playAgain` is the one way out
+of `gameEnd` other than closing the room. Both are allowed only where the table is not
+mid-round — the lobby and `gameEnd` — for the same reason mid-match leaving is out of
+scope: a hand and a turn order the round is still being played against.
+
+Who invokes `exitToMenu` decides what it costs everyone else, and the caller does not get
+to choose: **a non-host frees only their own seat** (the room plays on for whoever
+remains, who are told by `playerLeft` and then handed the shrunk roster), while **the host
+closes the room outright** (everyone else gets `roomClosed(reason)` — there is no longer a
+state to publish, so this is the last thing they hear about that room). Identical in both
+phases, deliberately: "a non-host leaving a finished match ends it, since the match is
+over anyway" was the plausible drift, and one rule for both was chosen instead.
+
+The split across layers mirrors bot seating. `removePlayer` in `game.ts` is a pure
+transition that filters a player out; "the room must be destroyed" is not a `GameState` it
+could return, so that branch lives in `socketServer.ts`, where rooms and connections are
+owned — which is also why the `exitToMenu` handler is not `act()`-shaped.
+
+Leaving **clears `socket.data.session` and calls `socket.leave(roomCode)`**. Clearing the
+session is what stops `ALREADY_IN_ROOM` meaning "for the life of this connection": a
+sessionless socket is indistinguishable from a fresh one, so the same connection can go
+straight into another room. It also keeps the departing socket out of the next broadcast,
+which `broadcastState` skips it from — the serializer would refuse to build a view for a
+player no longer seated. The `leave` keeps a socket from lingering in a Socket.io room
+whose code a later room could be issued.
+
+**`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a
+table that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS` rather than
+quietly refilled. That rejection is unreachable over the wire today — `startGame` fills to
+six and only humans can leave — so it is proven in `game.test.ts`, not on the socket.
 
 ### Socket layer: wiring is separate from listening
 

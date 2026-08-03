@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
+import {
+  callYaniv,
+  playAgain,
+  removePlayer,
+  startGame,
+  startNextRound,
+  takeTurn,
+} from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { allCardIds, expectErr, ids, makeState, unwrap } from "./helpers.ts";
 
@@ -840,5 +847,169 @@ describe("startNextRound", () => {
 
   it("rejects advancing mid-round", () => {
     expectErr(startNextRound(makeState(), "p1", rng()), "WRONG_PHASE");
+  });
+});
+
+describe("playAgain", () => {
+  /** A match played to a bust, which is the only position play again is offered from. */
+  const finishedMatch = (
+    players = [
+      { id: "p1", score: 10 },
+      { id: "p2", score: 95 },
+    ],
+  ) => {
+    const state = makeState({
+      players,
+      hands: { p1: ["hearts-A"], p2: ["spades-K", "clubs-K"] },
+      roundNumber: 7,
+    });
+    // p1 calls with 1 and is unopposed; p2 takes 20 and busts past 100.
+    const after = unwrap(callYaniv(state, "p1"));
+    assert.equal(after.phase, "gameEnd");
+    return after;
+  };
+
+  it("deals a fresh round immediately, with no stop in the lobby", () => {
+    const again = unwrap(playAgain(finishedMatch(), "p1", rng()));
+
+    assert.equal(again.phase, "playing");
+    assert.equal(again.round.hands["p1"]!.length, 5);
+    assert.equal(again.round.hands["p2"]!.length, 5);
+    assert.equal(again.round.lastDiscard.length, 1);
+    assert.equal(again.round.buried.length, 0);
+    assert.equal(allCardIds(again).length, 54);
+  });
+
+  it("resets every score and the round number", () => {
+    const again = unwrap(playAgain(finishedMatch(), "p1", rng()));
+
+    assert.deepEqual(
+      again.players.map((p) => p.score),
+      [0, 0],
+    );
+    assert.equal(again.roundNumber, 1);
+    assert.equal(again.lastRoundResult, null);
+    assert.equal(again.winnerIds, null);
+  });
+
+  it("keeps the same room, host and seats", () => {
+    const finished = finishedMatch();
+    const again = unwrap(playAgain(finished, "p1", rng()));
+
+    assert.equal(again.roomCode, finished.roomCode);
+    assert.equal(again.hostId, finished.hostId);
+    assert.deepEqual(
+      again.players.map((p) => p.id),
+      finished.players.map((p) => p.id),
+    );
+  });
+
+  it("picks the opening player at random, not always the host", () => {
+    const starters = new Set<string>();
+    for (let seed = 0; seed < 100; seed++) {
+      const again = unwrap(playAgain(finishedMatch(), "p1", mulberry32(seed)));
+      assert.equal(again.phase, "playing");
+      starters.add(again.round.currentTurnPlayerId);
+    }
+    assert.ok(
+      starters.has("p1") && starters.has("p2"),
+      `expected both seats to open at least once across 100 seeds, got: ${[...starters]}`,
+    );
+  });
+
+  it("leaves the finished match untouched", () => {
+    const finished = finishedMatch();
+    const before = JSON.stringify(finished);
+
+    unwrap(playAgain(finished, "p1", rng()));
+
+    assert.equal(JSON.stringify(finished), before);
+  });
+
+  it("rejects a non-host", () => {
+    expectErr(playAgain(finishedMatch(), "p2", rng()), "NOT_HOST");
+  });
+
+  it("rejects a restart from any phase but a finished match", () => {
+    expectErr(playAgain(makeState({ phase: "lobby" }), "p1", rng()), "WRONG_PHASE");
+    expectErr(playAgain(makeState({ phase: "playing" }), "p1", rng()), "WRONG_PHASE");
+    expectErr(playAgain(makeState({ phase: "roundEnd" }), "p1", rng()), "WRONG_PHASE");
+  });
+
+  /**
+   * Seats emptied by an exit to the menu stay empty — they are never backfilled with a
+   * bot — so a table can be talked down below the minimum before the host plays again.
+   */
+  it("rejects a restart once too few players remain", () => {
+    const alone = unwrap(removePlayer(finishedMatch(), "p2"));
+
+    expectErr(playAgain(alone, "p1", rng()), "NOT_ENOUGH_PLAYERS");
+  });
+});
+
+describe("removePlayer", () => {
+  it("frees the seat of a player leaving the lobby", () => {
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      roundNumber: 0,
+    });
+
+    const after = unwrap(removePlayer(lobby, "p2"));
+
+    assert.deepEqual(
+      after.players.map((p) => p.id),
+      ["p1", "p3"],
+    );
+  });
+
+  it("frees the seat of a player leaving a finished match", () => {
+    const finished = makeState({
+      phase: "gameEnd",
+      players: [
+        { id: "p1", score: 40 },
+        { id: "p2", score: 105 },
+      ],
+    });
+
+    const after = unwrap(removePlayer(finished, "p2"));
+
+    assert.equal(after.phase, "gameEnd");
+    assert.deepEqual(
+      after.players.map((p) => p.id),
+      ["p1"],
+    );
+    assert.equal(after.players[0]!.score, 40, "whoever stays keeps their standing");
+  });
+
+  /**
+   * The host is not special here: closing the room is not a `GameState` this function
+   * could return, so that branch belongs to the layer that owns rooms.
+   */
+  it("removes the host like anyone else", () => {
+    const after = unwrap(removePlayer(makeState({ phase: "lobby" }), "p1"));
+
+    assert.deepEqual(
+      after.players.map((p) => p.id),
+      ["p2"],
+    );
+  });
+
+  it("rejects a player who is not seated", () => {
+    expectErr(removePlayer(makeState({ phase: "lobby" }), "ghost"), "PLAYER_NOT_FOUND");
+  });
+
+  it("rejects leaving mid-match", () => {
+    expectErr(removePlayer(makeState({ phase: "playing" }), "p1"), "WRONG_PHASE");
+    expectErr(removePlayer(makeState({ phase: "roundEnd" }), "p1"), "WRONG_PHASE");
+  });
+
+  it("leaves the input state untouched", () => {
+    const lobby = makeState({ phase: "lobby" });
+    const before = JSON.stringify(lobby);
+
+    unwrap(removePlayer(lobby, "p2"));
+
+    assert.equal(JSON.stringify(lobby), before);
   });
 });

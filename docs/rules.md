@@ -148,6 +148,11 @@ Round scores accumulate. The match ends as soon as any player's total is **great
 
 There is no score reduction on hitting a round number — see excluded variants.
 
+A finished match may be **played again** by the same table: every score returns to 0, the
+round count starts over, and round 1 is dealt straight away with its opening player drawn
+at random exactly as in §2. Anyone who has left in the meantime is simply not in the new
+match — their seat is not refilled.
+
 ---
 
 ## 8. Excluded variants

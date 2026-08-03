@@ -746,6 +746,293 @@ describe("playing a match", () => {
   });
 });
 
+/**
+ * Leaving a room deliberately, and starting the next match with whoever stayed.
+ *
+ * Both actions are only reachable from a position the table has to be driven into, so
+ * this suite plays real matches out rather than hand-building states — the point is the
+ * wire behaviour of a room that has genuinely finished a game.
+ */
+describe("play again and exit to menu", () => {
+  let table: Harness;
+
+  before(async () => {
+    table = await startServer(97);
+  });
+  after(async () => {
+    await table.close();
+  });
+
+  interface Seat {
+    client: ClientSocket;
+    watcher: Watcher;
+    id: string;
+    name: string;
+  }
+
+  /** A host and, optionally, other humans, all sitting in the same fresh lobby. */
+  async function openLobby(names: string[]): Promise<{ roomCode: string; seats: Seat[] }> {
+    const [hostName, ...guestNames] = names;
+    const client = await table.connect();
+    const watcher = watch(client);
+    const created = expectOk(
+      await ask<{ roomCode: string; playerId: string }>(client, "createRoom", hostName!),
+    );
+    const seats: Seat[] = [
+      { client, watcher, id: created.playerId, name: hostName! },
+    ];
+
+    for (const name of guestNames) {
+      const guest = await table.connect();
+      const guestWatcher = watch(guest);
+      const joined = expectOk(
+        await ask<{ playerId: string }>(guest, "joinRoom", created.roomCode, name),
+      );
+      seats.push({ client: guest, watcher: guestWatcher, id: joined.playerId, name });
+    }
+
+    return { roomCode: created.roomCode, seats };
+  }
+
+  /**
+   * Play a table out to a finished match, acting for every human seat with `decideTurn` —
+   * the same judgement the server gives its bots, fed each player's own view over the
+   * wire, standing in for a client exactly as it does in the full-match test above.
+   *
+   * Every watcher is reset immediately before each action, so the views waited on
+   * afterwards can only be ones the action itself produced.
+   */
+  async function playToGameEnd(seats: Seat[]): Promise<PlayerGameView> {
+    const host = seats[0]!;
+    // The lobby view the deal was preceded by is still in every watcher, and is
+    // emphatically not a position anyone is being asked to act on.
+    const waitingOnAHuman = (view: PlayerGameView) =>
+      view.phase === "roundEnd" ||
+      view.phase === "gameEnd" ||
+      (view.phase === "playing" && seats.some((s) => s.id === view.currentTurnPlayerId));
+
+    for (let step = 0; step < 500; step++) {
+      const position = await host.watcher.until(waitingOnAHuman, "a human to be needed");
+      if (position.phase === "gameEnd") return position;
+
+      if (position.phase === "roundEnd") {
+        for (const seat of seats) seat.watcher.reset();
+        expectOk(await ask(host.client, "startNextRound"));
+        continue;
+      }
+
+      const actor = seats.find((s) => s.id === position.currentTurnPlayerId)!;
+      const mine = await actor.watcher.until(
+        (v) => v.phase === "playing" && v.currentTurnPlayerId === actor.id,
+        `${actor.name}'s own view of their turn`,
+      );
+      const decision = decideTurn(mine);
+
+      for (const seat of seats) seat.watcher.reset();
+      if (decision.type === "yaniv") {
+        expectOk(await ask(actor.client, "callYaniv"));
+      } else {
+        expectOk(await ask(actor.client, "takeTurn", decision.action));
+      }
+    }
+    assert.fail("the match never reached a finish");
+  }
+
+  /** Sit one host down alone and play their match out against the bots. */
+  async function finishedMatch(): Promise<{ roomCode: string; host: Seat }> {
+    const { roomCode, seats } = await openLobby(["Ada"]);
+    expectOk(await ask(seats[0]!.client, "startGame"));
+    await playToGameEnd(seats);
+    return { roomCode, host: seats[0]! };
+  }
+
+  describe("playAgain", () => {
+    it("deals a fresh match in the same room, with every score back to zero", async () => {
+      const { roomCode, host } = await finishedMatch();
+      const finished = await host.watcher.until((v) => v.phase === "gameEnd", "the finish");
+      assert.ok(
+        [finished.you, ...finished.opponents].some((p) => p.score > MAX_SCORE),
+        "the match really did end on a bust",
+      );
+
+      host.watcher.reset();
+      expectOk(await ask(host.client, "playAgain"));
+      const restarted = await host.watcher.until((v) => v.phase === "playing", "the deal");
+
+      assert.equal(restarted.roomCode, roomCode, "the room code does not change");
+      assert.equal(restarted.roundNumber, 1);
+      assert.equal(restarted.you.hand.length, HAND_SIZE);
+      assert.deepEqual(
+        [restarted.you, ...restarted.opponents].map((p) => p.score),
+        new Array(MAX_PLAYERS).fill(0),
+        "nobody carries a score over from the last match",
+      );
+      assert.equal(restarted.winnerIds, null, "the old winner is no longer declared");
+    });
+
+    it("rejects a restart by anyone but the host", async () => {
+      const { seats } = await openLobby(["Ada", "Grace"]);
+      expectOk(await ask(seats[0]!.client, "startGame"));
+      await playToGameEnd(seats);
+
+      const result = await ask(seats[1]!.client, "playAgain");
+
+      assert.equal(expectError(result).code, "NOT_HOST");
+    });
+
+    it("rejects a restart before the match has finished", async () => {
+      const { seats } = await openLobby(["Ada"]);
+      expectOk(await ask(seats[0]!.client, "startGame"));
+
+      const result = await ask(seats[0]!.client, "playAgain");
+
+      assert.equal(expectError(result).code, "WRONG_PHASE");
+    });
+
+    it("rejects a restart from a connection that is not in a room", async () => {
+      const stranger = await table.connect();
+
+      const result = await ask(stranger, "playAgain");
+
+      assert.equal(expectError(result).code, "PLAYER_NOT_FOUND");
+    });
+  });
+
+  describe("exitToMenu", () => {
+    it("frees only the leaver's seat when they are not the host", async () => {
+      const { roomCode, seats } = await openLobby(["Ada", "Grace"]);
+      const [host, guest] = seats;
+
+      const announced = nextEvent<string>(host!.client, "playerLeft");
+      host!.watcher.reset();
+      expectOk(await ask(guest!.client, "exitToMenu"));
+
+      assert.equal(await announced, "Grace", "whoever stays is told who left");
+      const roster = await host!.watcher.until(
+        (v) => v.opponents.length === 0,
+        "the roster to shrink",
+      );
+      assert.equal(roster.phase, "lobby", "the lobby carries on for whoever remains");
+      assert.equal(roster.roomCode, roomCode);
+
+      // The room is still there to be joined, so the seat really was freed.
+      const latecomer = await table.connect();
+      expectOk(await ask(latecomer, "joinRoom", roomCode, "Alan"));
+    });
+
+    it("closes the room for everyone else when the host leaves", async () => {
+      const { roomCode, seats } = await openLobby(["Ada", "Grace", "Alan"]);
+      const [host, ...guests] = seats;
+
+      const closed = guests.map((g) => nextEvent<string>(g.client, "roomClosed"));
+      expectOk(await ask(host!.client, "exitToMenu"));
+
+      for (const reason of await Promise.all(closed)) {
+        assert.match(reason, /host/i, "the reason names the host leaving");
+      }
+      const latecomer = await table.connect();
+      assert.equal(
+        expectError(await ask(latecomer, "joinRoom", roomCode, "Tony")).code,
+        "ROOM_NOT_FOUND",
+      );
+    });
+
+    it("leaves the finished match standing for whoever stays", async () => {
+      const { seats } = await openLobby(["Ada", "Grace"]);
+      const [host, guest] = seats;
+      expectOk(await ask(host!.client, "startGame"));
+      await playToGameEnd(seats);
+
+      host!.watcher.reset();
+      expectOk(await ask(guest!.client, "exitToMenu"));
+      const standings = await host!.watcher.until(
+        (v) => !v.opponents.some((o) => o.id === guest!.id),
+        "the roster to shrink",
+      );
+
+      assert.equal(standings.phase, "gameEnd", "the scoreboard is still on screen");
+      assert.ok(standings.winnerIds, "and still reports who won");
+    });
+
+    it("closes a finished match for everyone else when the host leaves", async () => {
+      const { roomCode, seats } = await openLobby(["Ada", "Grace"]);
+      expectOk(await ask(seats[0]!.client, "startGame"));
+      await playToGameEnd(seats);
+
+      const closed = nextEvent<string>(seats[1]!.client, "roomClosed");
+      expectOk(await ask(seats[0]!.client, "exitToMenu"));
+
+      assert.match(await closed, /host/i);
+      const latecomer = await table.connect();
+      assert.equal(
+        expectError(await ask(latecomer, "joinRoom", roomCode, "Tony")).code,
+        "ROOM_NOT_FOUND",
+      );
+    });
+
+    /**
+     * A seat given up is given up for good. `playAgain` deliberately does not seat a bot
+     * in it the way `startGame` fills an untouched lobby.
+     */
+    it("never refills a vacated seat with a bot on the next match", async () => {
+      const { seats } = await openLobby(["Ada", "Grace"]);
+      const [host, guest] = seats;
+      expectOk(await ask(host!.client, "startGame"));
+      await playToGameEnd(seats);
+      expectOk(await ask(guest!.client, "exitToMenu"));
+
+      host!.watcher.reset();
+      expectOk(await ask(host!.client, "playAgain"));
+      const restarted = await host!.watcher.until((v) => v.phase === "playing", "the deal");
+
+      assert.equal(
+        restarted.opponents.length,
+        MAX_PLAYERS - 2,
+        "the table is one seat smaller, and no bot moved in",
+      );
+      assert.ok(
+        !restarted.opponents.some((o) => o.id === guest!.id),
+        "the player who left is not back at the table",
+      );
+    });
+
+    it("frees the connection to create or join another room", async () => {
+      const { seats } = await openLobby(["Ada", "Grace"]);
+      const [host, guest] = seats;
+      expectOk(await ask(guest!.client, "exitToMenu"));
+
+      // Both halves of "as good as a fresh connection": the leaver may open their own
+      // room, and the host, once they close theirs, may go and join it.
+      const opened = expectOk(
+        await ask<{ roomCode: string; playerId: string }>(
+          guest!.client,
+          "createRoom",
+          "Grace",
+        ),
+      );
+      expectOk(await ask(host!.client, "exitToMenu"));
+      expectOk(await ask(host!.client, "joinRoom", opened.roomCode, "Ada"));
+    });
+
+    it("refuses to leave mid-match, where quitting is still a disconnect", async () => {
+      const { seats } = await openLobby(["Ada"]);
+      expectOk(await ask(seats[0]!.client, "startGame"));
+
+      const result = await ask(seats[0]!.client, "exitToMenu");
+
+      assert.equal(expectError(result).code, "WRONG_PHASE");
+    });
+
+    it("rejects a leave from a connection that is not in a room", async () => {
+      const stranger = await table.connect();
+
+      const result = await ask(stranger, "exitToMenu");
+
+      assert.equal(expectError(result).code, "PLAYER_NOT_FOUND");
+    });
+  });
+});
+
 describe("disconnect", () => {
   /**
    * Poll a room code with real join attempts until one is rejected.
