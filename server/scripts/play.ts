@@ -1,55 +1,33 @@
 /**
- * Smoke-test harness for the game engine. No transport involved — this drives
- * RoomManager and the pure transitions directly, the same way the Socket.io layer
- * eventually will.
+ * Bots-only smoke-test harness for the game engine. No transport involved — this drives
+ * RoomManager and the pure transitions directly, in process.
  *
  *   node scripts/play.ts                 auto-play a full match and print a transcript
  *   node scripts/play.ts --seed 7        same, with a specific seed (default: random)
- *   node scripts/play.ts --play          play as Ada against two bots
  *   node scripts/play.ts --players 4     change the table size (2-6)
+ *
+ * Seeded and reproducible on purpose: a whole match from a single number is what makes
+ * this usable for judging bot play, so keep it that way. Playing as a human happens
+ * over a real socket instead — see `playSocket.ts`.
  */
 
-import readline from "node:readline/promises";
-import { stdin, stdout } from "node:process";
-import type { Card, DrawAction } from "@yaniv/shared";
 import { sortHand } from "@yaniv/shared";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { handValue, pickupCandidates } from "../src/rules.ts";
+import { handValue } from "../src/rules.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
-import type { GameState } from "../src/state.ts";
-import { decideTurn } from "./bot.ts";
+import type { GameState, RoundState } from "../src/state.ts";
+import { decideTurn } from "../src/bot.ts";
+import { bold, cyan, dim, green, pad, red, renderCard, renderHand } from "./lib/cardDisplay.ts";
+
+/** Narrow to the active round, or throw — every call site here follows a deal. */
+function activeRound(state: GameState): RoundState {
+  if (state.phase === "lobby") throw new Error("expected a round in progress");
+  return state.round;
+}
 
 // --- rendering --------------------------------------------------------------
-
-const SUIT_SYMBOL: Record<string, string> = {
-  hearts: "♥",
-  diamonds: "♦",
-  clubs: "♣",
-  spades: "♠",
-};
-
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
-const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
-const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
-const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
-const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
-
-/** Pad to a visible width, ignoring the colour escapes that padEnd would miscount. */
-function pad(text: string, width: number): string {
-  // eslint-disable-next-line no-control-regex
-  const visible = text.replace(/\x1b\[[0-9;]*m/g, "").length;
-  return text + " ".repeat(Math.max(0, width - visible));
-}
-
-function renderCard(card: Card): string {
-  if (card.suit === null) return bold("Jk");
-  const face = `${card.rank}${SUIT_SYMBOL[card.suit]}`;
-  return card.suit === "hearts" || card.suit === "diamonds" ? red(face) : face;
-}
-
-const renderHand = (cards: readonly Card[]) => cards.map(renderCard).join(" ");
 
 function nameOf(state: GameState, playerId: string): string {
   return state.players.find((p) => p.id === playerId)?.name ?? playerId;
@@ -60,10 +38,9 @@ function nameOf(state: GameState, playerId: string): string {
 interface Table {
   rooms: RoomManager;
   roomCode: string;
-  humanId: string | null;
 }
 
-function setUp(playerCount: number, seed: number, human: boolean): Table {
+function setUp(playerCount: number, seed: number): Table {
   const names = ["Ada", "Grace", "Alan", "Edsger", "Barbara", "Tony"];
   const rooms = new RoomManager({
     rng: mulberry32(seed),
@@ -72,7 +49,7 @@ function setUp(playerCount: number, seed: number, human: boolean): Table {
 
   const created = rooms.createRoom(names[0]!);
   if (!created.ok) throw new Error(created.error.message);
-  const { roomCode, playerId } = created.value;
+  const { roomCode } = created.value;
 
   for (let i = 1; i < playerCount; i++) {
     const joined = rooms.joinRoom(roomCode, names[i]!);
@@ -82,11 +59,11 @@ function setUp(playerCount: number, seed: number, human: boolean): Table {
   const started = rooms.apply(roomCode, (s, rng) => startGame(s, s.hostId, rng));
   if (!started.ok) throw new Error(started.error.message);
 
-  return { rooms, roomCode, humanId: human ? playerId : null };
+  return { rooms, roomCode };
 }
 
 function printDeal(state: GameState): void {
-  const round = state.round!;
+  const round = activeRound(state);
   console.log(`\n${bold(`── Round ${state.roundNumber} ${"─".repeat(46)}`)}`);
   for (const id of round.turnOrder) {
     const hand = sortHand(round.hands[id]!);
@@ -134,7 +111,7 @@ function printFinal(state: GameState): void {
 // --- auto mode --------------------------------------------------------------
 
 function autoPlay(playerCount: number, seed: number): void {
-  const { rooms, roomCode } = setUp(playerCount, seed, false);
+  const { rooms, roomCode } = setUp(playerCount, seed);
   console.log(dim(`seed ${seed} · room ${roomCode} · ${playerCount} players`));
   printDeal(rooms.getState(roomCode)!);
 
@@ -149,7 +126,7 @@ function autoPlay(playerCount: number, seed: number): void {
       continue;
     }
 
-    const round = state.round!;
+    const round = activeRound(state);
     const playerId = round.currentTurnPlayerId;
 
     // The bot decides from the same view a client would receive, never raw state.
@@ -170,7 +147,7 @@ function autoPlay(playerCount: number, seed: number): void {
     );
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
 
-    const next = rooms.getState(roomCode)!.round!;
+    const next = activeRound(rooms.getState(roomCode)!);
     const after = next.hands[playerId]!;
     const draw = action.draw;
     const took =
@@ -189,147 +166,6 @@ function autoPlay(playerCount: number, seed: number): void {
   throw new Error("match did not finish");
 }
 
-// --- interactive mode -------------------------------------------------------
-
-async function interactivePlay(playerCount: number, seed: number): Promise<void> {
-  const { rooms, roomCode, humanId } = setUp(playerCount, seed, true);
-  const rl = readline.createInterface({ input: stdin, output: stdout });
-
-  /**
-   * Ask a question, resolving to null once input is exhausted so Ctrl-D quits
-   * cleanly. This pulls from the async line iterator rather than rl.question():
-   * question() only captures a line if one arrives while it is pending, so piped
-   * input (which readline delivers all at once) silently loses lines.
-   */
-  const lines = rl[Symbol.asyncIterator]();
-  const ask = async (prompt: string): Promise<string | null> => {
-    stdout.write(prompt);
-    const next = await lines.next();
-    return next.done ? null : next.value;
-  };
-
-  console.log(dim(`\nseed ${seed} · room ${roomCode} · you are Ada`));
-  console.log(
-    dim("commands: '1 3' to discard by number · 'yaniv' to call · 'q' to quit\n"),
-  );
-
-  try {
-    for (let step = 0; step < 20000; step++) {
-      const state = rooms.getState(roomCode)!;
-
-      if (state.phase === "gameEnd") return printFinal(state);
-      if (state.phase === "roundEnd") {
-        if ((await ask(dim("  [enter] for the next round "))) === null) return;
-        const next = rooms.apply(roomCode, (s, rng) => startNextRound(s, s.hostId, rng));
-        if (!next.ok) throw new Error(next.error.message);
-        continue;
-      }
-
-      const round = state.round!;
-      const playerId = round.currentTurnPlayerId;
-
-      if (playerId !== humanId) {
-        const hand = sortHand(round.hands[playerId]!);
-        // print the current bots hand (for debugging)
-        console.log(
-          `  ${nameOf(state, playerId).padEnd(8)} hand  ${hand.map((c, i) => `${dim(`${i + 1}:`)}${renderCard(c)}`).join("  ")}` +
-            dim(`   = ${handValue(hand)}`),
-        );
-        const decision = decideTurn(serializeStateForPlayer(state, playerId));
-
-        if (decision.type === "yaniv") {
-          const called = rooms.apply(roomCode, (s) => callYaniv(s, playerId));
-          if (!called.ok) throw new Error(called.error.message);
-          printRoundResult(rooms.getState(roomCode)!);
-          continue;
-        }
-
-        const played = rooms.apply(roomCode, (s, rng) =>
-          takeTurn(s, playerId, decision.action, rng),
-        );
-        if (!played.ok) {
-          throw new Error(`${played.error.code}: ${played.error.message}`);
-        }
-        console.log(
-          `  ${dim(nameOf(state, playerId).padEnd(8))} plays ` +
-            renderHand(rooms.getState(roomCode)!.round!.lastDiscard),
-        );
-        continue;
-      }
-
-      // Human turn. Sorted once: the same array backs both the rendering and the
-      // by-number selection below, so an index can never point at a different card.
-      const hand = sortHand(round.hands[humanId]!);
-      console.log(bold("\n  your turn"));
-      console.log(
-        `  table ${renderHand(round.lastDiscard)}  ${dim(`deck ${round.drawPile.length}`)}`,
-      );
-      for (const p of state.players.filter((p) => p.id !== humanId)) {
-        console.log(
-          dim(`  ${p.name.padEnd(8)} ${round.hands[p.id]!.length} cards · ${p.score} pts`),
-        );
-      }
-      console.log(
-        `  hand  ${hand.map((c, i) => `${dim(`${i + 1}:`)}${renderCard(c)}`).join("  ")}` +
-          dim(`   = ${handValue(hand)}`),
-      );
-
-      const raw = await ask("  discard > ");
-      if (raw === null) return;
-      const answer = raw.trim().toLowerCase();
-      if (answer === "q") return;
-
-      if (answer === "yaniv") {
-        const called = rooms.apply(roomCode, (s) => callYaniv(s, humanId));
-        if (!called.ok) {
-          console.log(red(`  ✗ ${called.error.code}: ${called.error.message}`));
-          continue;
-        }
-        printRoundResult(rooms.getState(roomCode)!);
-        continue;
-      }
-
-      const picked = answer
-        .split(/[\s,]+/)
-        .filter(Boolean)
-        .map((token) => hand[Number(token) - 1]);
-      if (picked.length === 0 || picked.some((c) => c === undefined)) {
-        console.log(red("  ✗ pick cards by number, e.g. '1' or '2 3 4'"));
-        continue;
-      }
-      const chosen = picked as Card[];
-
-      const options = pickupCandidates(round.lastDiscard);
-      const menu = options.map((c, i) => `${i + 1}:${renderCard(c)}`).join("  ");
-      const rawDraw = await ask(`  draw — d:deck  ${menu} > `);
-      if (rawDraw === null) return;
-      const drawAnswer = rawDraw.trim().toLowerCase();
-
-      let draw: DrawAction;
-      if (drawAnswer === "d" || drawAnswer === "") {
-        draw = { source: "deck" };
-      } else {
-        const option = options[Number(drawAnswer) - 1];
-        if (!option) {
-          console.log(red("  ✗ pick 'd' or one of the listed cards"));
-          continue;
-        }
-        draw = { source: "discard", cardId: option.id };
-      }
-
-      const result = rooms.apply(roomCode, (s, rng) =>
-        takeTurn(s, humanId, { discardCardIds: chosen.map((c) => c.id), draw }, rng),
-      );
-      if (!result.ok) {
-        console.log(red(`  ✗ ${result.error.code}: ${result.error.message}`));
-        continue;
-      }
-    }
-  } finally {
-    rl.close();
-  }
-}
-
 // --- entry point ------------------------------------------------------------
 
 function flagValue(name: string, fallback: number): number {
@@ -342,8 +178,4 @@ function flagValue(name: string, fallback: number): number {
 const seed = flagValue("--seed", Math.floor(Math.random() * 100000));
 const playerCount = Math.min(6, Math.max(2, flagValue("--players", 3)));
 
-if (process.argv.includes("--play")) {
-  await interactivePlay(playerCount, seed);
-} else {
-  autoPlay(playerCount, seed);
-}
+autoPlay(playerCount, seed);

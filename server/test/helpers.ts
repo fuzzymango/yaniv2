@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type { Card, GameErrorCode, Phase } from "@yaniv/shared";
 import { createDeck } from "../src/deck.ts";
 import type { Result } from "../src/result.ts";
-import type { GameState, Player, RoundState } from "../src/state.ts";
+import type { GameState, GameStateActive, Player, RoundState } from "../src/state.ts";
 
 const BY_ID = new Map(createDeck().map((c) => [c.id, c]));
 
@@ -19,7 +19,7 @@ export function cards(...ids: string[]): Card[] {
 
 export interface StateOptions {
   phase?: Phase;
-  players?: Array<{ id: string; name?: string; score?: number }>;
+  players?: Array<{ id: string; name?: string; score?: number; isBot?: boolean }>;
   /** playerId -> card ids. */
   hands?: Record<string, string[]>;
   drawPile?: string[];
@@ -36,36 +36,39 @@ export function makeState(options: StateOptions = {}): GameState {
     id: p.id,
     name: p.name ?? `Player ${i + 1}`,
     score: p.score ?? 0,
+    isBot: p.isBot ?? false,
   }));
   const turnOrder = players.map((p) => p.id);
   const phase = options.phase ?? "playing";
 
-  let round: RoundState | null = null;
-  if (phase !== "lobby") {
-    const hands: Record<string, Card[]> = {};
-    for (const id of turnOrder) {
-      hands[id] = cards(...(options.hands?.[id] ?? []));
-    }
-    round = {
-      hands,
-      drawPile: cards(...(options.drawPile ?? [])),
-      lastDiscard: cards(...(options.lastDiscard ?? [])),
-      buried: cards(...(options.buried ?? [])),
-      currentTurnPlayerId: options.currentTurnPlayerId ?? turnOrder[0]!,
-      turnOrder,
-    };
-  }
-
-  return {
+  const base = {
     roomCode: "TEST",
-    phase,
     hostId: turnOrder[0]!,
     players,
     roundNumber: options.roundNumber ?? 1,
-    round,
     lastRoundResult: null,
     winnerIds: null,
   };
+
+  if (phase === "lobby") {
+    return { ...base, phase, round: null };
+  }
+
+  const hands: Record<string, Card[]> = {};
+  for (const id of turnOrder) {
+    hands[id] = cards(...(options.hands?.[id] ?? []));
+  }
+  const round: RoundState = {
+    hands,
+    drawPile: cards(...(options.drawPile ?? [])),
+    lastDiscard: cards(...(options.lastDiscard ?? [])),
+    buried: cards(...(options.buried ?? [])),
+    currentTurnPlayerId: options.currentTurnPlayerId ?? turnOrder[0]!,
+    turnOrder,
+  };
+
+  const active: GameStateActive = { ...base, phase, round };
+  return active;
 }
 
 /** Every card id currently in the round, sorted. Used for conservation invariants. */

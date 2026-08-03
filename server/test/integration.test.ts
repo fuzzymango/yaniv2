@@ -5,7 +5,7 @@ import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { canCallYaniv, handValue, legalDiscards } from "../src/rules.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
-import type { GameState } from "../src/state.ts";
+import type { GameState, GameStateActive } from "../src/state.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { unwrap } from "./helpers.ts";
 
@@ -21,12 +21,13 @@ function roundCards(state: GameState): Card[] {
   ];
 }
 
-function assertInvariants(state: GameState): void {
+function assertInvariants(state: GameState): asserts state is GameStateActive {
   const all = roundCards(state);
   assert.equal(all.length, 54, "cards went missing or were duplicated");
   assert.equal(new Set(all.map((c) => c.id)).size, 54, "duplicate card id in play");
 
-  const round = state.round!;
+  assert.equal(state.phase, "playing");
+  const round = state.round;
   for (const playerId of round.turnOrder) {
     assert.ok(round.hands[playerId]!.length > 0, `${playerId} has an empty hand`);
   }
@@ -38,7 +39,7 @@ function assertInvariants(state: GameState): void {
 }
 
 /**
- * A driver, not a player. This deliberately does *not* use scripts/bot.ts: its job is
+ * A driver, not a player. This deliberately does *not* use src/bot.ts: its job is
  * to push the engine through as many odd states as possible, and coupling it to the
  * real bot would mean any improvement there silently shrinks what this test explores.
  * It shares only `legalDiscards`, which is a rules query rather than a policy.
@@ -80,7 +81,7 @@ function playMatch(seed: number): { final: GameState; turns: number } {
 
     assertInvariants(state);
 
-    const round = state.round!;
+    const round = state.round;
     const playerId = round.currentTurnPlayerId;
     const hand = round.hands[playerId]!;
 
@@ -156,14 +157,14 @@ describe("full match simulation", () => {
       for (const viewer of state.players) {
         const wire = JSON.stringify(serializeStateForPlayer(state, viewer.id));
         const visible = new Set([
-          ...state.round!.hands[viewer.id]!.map((c) => c.id),
-          ...state.round!.lastDiscard.map((c) => c.id),
+          ...state.round.hands[viewer.id]!.map((c) => c.id),
+          ...state.round.lastDiscard.map((c) => c.id),
         ]);
         const hidden = [
           ...state.players
             .filter((p) => p.id !== viewer.id)
-            .flatMap((p) => state.round!.hands[p.id]!),
-          ...state.round!.drawPile,
+            .flatMap((p) => state.round.hands[p.id]!),
+          ...state.round.drawPile,
         ];
         for (const card of hidden) {
           if (visible.has(card.id)) continue;
@@ -174,7 +175,7 @@ describe("full match simulation", () => {
         }
       }
 
-      const round = state.round!;
+      const round = state.round;
       const playerId = round.currentTurnPlayerId;
       const hand = round.hands[playerId]!;
       if (canCallYaniv(hand)) break;

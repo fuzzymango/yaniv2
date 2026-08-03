@@ -26,7 +26,8 @@ describe("startGame", () => {
     const state = unwrap(
       startGame(makeState({ phase: "lobby", roundNumber: 0 }), "p1", rng()),
     );
-    assert.equal(state.round!.currentTurnPlayerId, "p1");
+    assert.equal(state.phase, "playing");
+    assert.equal(state.round.currentTurnPlayerId, "p1");
   });
 
   it("puts all 54 cards into play exactly once", () => {
@@ -158,14 +159,15 @@ describe("takeTurn — drawing from the deck", () => {
       ),
     );
 
-    assert.deepEqual(ids(state.round!.hands["p1"]!), [
+    assert.equal(state.phase, "playing");
+    assert.deepEqual(ids(state.round.hands["p1"]!), [
       "hearts-4",
       "hearts-5",
       "spades-9",
       "clubs-2",
       "spades-A",
     ]);
-    assert.deepEqual(ids(state.round!.drawPile), ["hearts-10"]);
+    assert.deepEqual(ids(state.round.drawPile), ["hearts-10"]);
   });
 
   it("makes the discard the new pickup set and buries the old one", () => {
@@ -178,8 +180,9 @@ describe("takeTurn — drawing from the deck", () => {
       ),
     );
 
-    assert.deepEqual(ids(state.round!.lastDiscard), ["hearts-3"]);
-    assert.deepEqual(ids(state.round!.buried), ["clubs-7"]);
+    assert.equal(state.phase, "playing");
+    assert.deepEqual(ids(state.round.lastDiscard), ["hearts-3"]);
+    assert.deepEqual(ids(state.round.buried), ["clubs-7"]);
   });
 
   it("advances the turn", () => {
@@ -191,7 +194,8 @@ describe("takeTurn — drawing from the deck", () => {
         rng(),
       ),
     );
-    assert.equal(state.round!.currentTurnPlayerId, "p2");
+    assert.equal(state.phase, "playing");
+    assert.equal(state.round.currentTurnPlayerId, "p2");
   });
 
   it("wraps the turn around to the first player", () => {
@@ -210,7 +214,8 @@ describe("takeTurn — drawing from the deck", () => {
         rng(),
       ),
     );
-    assert.equal(state.round!.currentTurnPlayerId, "p1");
+    assert.equal(state.phase, "playing");
+    assert.equal(state.round.currentTurnPlayerId, "p1");
   });
 
   it("shrinks a multi-card discard down to a smaller hand", () => {
@@ -225,7 +230,8 @@ describe("takeTurn — drawing from the deck", () => {
         rng(),
       ),
     );
-    assert.equal(state.round!.hands["p1"]!.length, 3);
+    assert.equal(state.phase, "playing");
+    assert.equal(state.round.hands["p1"]!.length, 3);
   });
 
   it("stores a run in ascending order regardless of submitted order", () => {
@@ -240,7 +246,8 @@ describe("takeTurn — drawing from the deck", () => {
         rng(),
       ),
     );
-    assert.deepEqual(ids(state.round!.lastDiscard), [
+    assert.equal(state.phase, "playing");
+    assert.deepEqual(ids(state.round.lastDiscard), [
       "hearts-3",
       "hearts-4",
       "hearts-5",
@@ -296,7 +303,8 @@ describe("takeTurn — picking up from the discard", () => {
         rng(),
       ),
     );
-    assert.ok(ids(state.round!.hands["p1"]!).includes("hearts-4"));
+    assert.equal(state.phase, "playing");
+    assert.ok(ids(state.round.hands["p1"]!).includes("hearts-4"));
   });
 
   it("allows taking the last card of the set", () => {
@@ -311,7 +319,8 @@ describe("takeTurn — picking up from the discard", () => {
         rng(),
       ),
     );
-    assert.ok(ids(state.round!.hands["p1"]!).includes("hearts-6"));
+    assert.equal(state.phase, "playing");
+    assert.ok(ids(state.round.hands["p1"]!).includes("hearts-6"));
   });
 
   it("refuses a card buried in the middle of the set", () => {
@@ -353,9 +362,10 @@ describe("takeTurn — picking up from the discard", () => {
       ),
     );
 
-    assert.deepEqual(ids(state.round!.buried), ["hearts-5", "hearts-6"]);
-    assert.deepEqual(ids(state.round!.lastDiscard), ["clubs-2"]);
-    assert.deepEqual(ids(state.round!.drawPile), ["spades-A"]);
+    assert.equal(state.phase, "playing");
+    assert.deepEqual(ids(state.round.buried), ["hearts-5", "hearts-6"]);
+    assert.deepEqual(ids(state.round.lastDiscard), ["clubs-2"]);
+    assert.deepEqual(ids(state.round.drawPile), ["spades-A"]);
   });
 
   it("refuses a pickup when there is nothing on the table", () => {
@@ -414,7 +424,8 @@ describe("takeTurn — picking up from the discard", () => {
         rng(),
       ),
     );
-    assert.ok(ids(afterP2.round!.hands["p2"]!).includes("clubs-2"));
+    assert.equal(afterP2.phase, "playing");
+    assert.ok(ids(afterP2.round.hands["p2"]!).includes("clubs-2"));
   });
 
   it("conserves every card in the round", () => {
@@ -456,12 +467,13 @@ describe("takeTurn — wild jokers in runs", () => {
       ),
     );
 
-    assert.deepEqual(ids(after.round!.lastDiscard), [
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(ids(after.round.lastDiscard), [
       "hearts-7",
       "joker-1",
       "hearts-9",
     ]);
-    assert.equal(after.round!.hands["p1"]!.length, 2);
+    assert.equal(after.round.hands["p1"]!.length, 2);
     assert.deepEqual(allCardIds(after), allCardIds(before));
   });
 
@@ -477,7 +489,8 @@ describe("takeTurn — wild jokers in runs", () => {
         rng(),
       ),
     );
-    assert.deepEqual(ids(afterP1.round!.lastDiscard), [
+    assert.equal(afterP1.phase, "playing");
+    assert.deepEqual(ids(afterP1.round.lastDiscard), [
       "hearts-7",
       "hearts-8",
       "joker-1",
@@ -494,7 +507,8 @@ describe("takeTurn — wild jokers in runs", () => {
         rng(),
       ),
     );
-    assert.ok(ids(afterP2.round!.hands["p2"]!).includes("joker-1"));
+    assert.equal(afterP2.phase, "playing");
+    assert.ok(ids(afterP2.round.hands["p2"]!).includes("joker-1"));
   });
 
   it("withholds a joker that is buried inside the run", () => {
@@ -531,7 +545,8 @@ describe("takeTurn — wild jokers in runs", () => {
         rng(),
       ),
     );
-    assert.deepEqual(ids(after.round!.lastDiscard), [
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(ids(after.round.lastDiscard), [
       "joker-1",
       "hearts-7",
       "hearts-8",
@@ -565,10 +580,11 @@ describe("takeTurn — exhausting the draw pile", () => {
 
     const after = unwrap(discardAndDrawFromDeck(state, "p1", ["hearts-3"]));
 
+    assert.equal(after.phase, "playing");
     // Three buried cards became the new draw pile; one of them was drawn.
-    assert.equal(after.round!.drawPile.length, 2);
+    assert.equal(after.round.drawPile.length, 2);
     // The set that was on the table was not shuffled in — it is buried now instead.
-    assert.deepEqual(ids(after.round!.buried), ["hearts-2"]);
+    assert.deepEqual(ids(after.round.buried), ["hearts-2"]);
     assert.deepEqual(allCardIds(after), allCardIds(state));
   });
 
@@ -790,14 +806,15 @@ describe("startNextRound", () => {
 
     assert.equal(next.phase, "playing");
     assert.equal(next.roundNumber, 2);
-    assert.equal(next.round!.hands["p1"]!.length, 5);
-    assert.equal(next.round!.buried.length, 0);
+    assert.equal(next.round.hands["p1"]!.length, 5);
+    assert.equal(next.round.buried.length, 0);
     assert.equal(allCardIds(next).length, 54);
   });
 
   it("gives the first turn to the previous round's winner", () => {
     const next = unwrap(startNextRound(finished(), "p1", rng()));
-    assert.equal(next.round!.currentTurnPlayerId, "p2");
+    assert.equal(next.phase, "playing");
+    assert.equal(next.round.currentTurnPlayerId, "p2");
   });
 
   it("carries scores forward but clears the previous result", () => {

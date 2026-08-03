@@ -105,6 +105,99 @@ describe("joinRoom", () => {
   });
 });
 
+describe("seatBots", () => {
+  it("fills a lone host's table to the limit with bots", () => {
+    const rooms = manager();
+    const { roomCode, playerId: hostId } = unwrap(rooms.createRoom("Ada"));
+
+    const state = rooms.seatBots(rooms.getState(roomCode)!);
+
+    assert.equal(state.players.length, MAX_PLAYERS);
+    assert.equal(state.players[0]!.id, hostId, "the host keeps their seat");
+    assert.equal(
+      state.players.filter((p) => p.isBot).length,
+      MAX_PLAYERS - 1,
+      "every seat but the host's is bot-controlled",
+    );
+  });
+
+  it("issues each bot its own player id", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+
+    const ids = rooms.seatBots(rooms.getState(roomCode)!).players.map((p) => p.id);
+
+    assert.equal(new Set(ids).size, ids.length, `not all distinct: ${ids}`);
+  });
+
+  it("gives every bot a distinct name a human could not be mistaken for", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+
+    const names = rooms
+      .seatBots(rooms.getState(roomCode)!)
+      .players.filter((p) => p.isBot)
+      .map((p) => p.name);
+
+    assert.equal(new Set(names).size, names.length, `not all distinct: ${names}`);
+    for (const name of names) {
+      assert.match(name, /bot/i, "a bot's name says it is a bot");
+    }
+  });
+
+  it("leaves the humans already seated alone", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    unwrap(rooms.joinRoom(roomCode, "Grace"));
+
+    const state = rooms.seatBots(rooms.getState(roomCode)!);
+
+    assert.equal(state.players.length, MAX_PLAYERS);
+    assert.deepEqual(
+      state.players.filter((p) => !p.isBot).map((p) => p.name),
+      ["Ada", "Grace"],
+    );
+  });
+
+  it("is a no-op on a table that is already full", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const filled = rooms.seatBots(rooms.getState(roomCode)!);
+
+    assert.equal(rooms.seatBots(filled), filled);
+  });
+
+  /** Nothing is stored until a caller folds the result into a transition. */
+  it("does not seat anyone in the stored room by itself", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+
+    rooms.seatBots(rooms.getState(roomCode)!);
+
+    assert.equal(rooms.getState(roomCode)!.players.length, 1);
+  });
+});
+
+describe("isBot", () => {
+  it("marks only the bot seats as bot-controlled", () => {
+    const rooms = manager();
+    const { roomCode, playerId: hostId } = unwrap(rooms.createRoom("Ada"));
+    unwrap(rooms.apply(roomCode, (state) => ok(rooms.seatBots(state))));
+    const botId = rooms.getState(roomCode)!.players[1]!.id;
+
+    assert.equal(rooms.isBot(roomCode, botId), true);
+    assert.equal(rooms.isBot(roomCode, hostId), false);
+  });
+
+  it("reports a player id it has never heard of as not a bot", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+
+    assert.equal(rooms.isBot(roomCode, "nobody"), false);
+    assert.equal(rooms.isBot("ZZZZ", "nobody"), false);
+  });
+});
+
 describe("apply", () => {
   it("persists the new state when the transition succeeds", () => {
     const rooms = manager();
@@ -113,8 +206,9 @@ describe("apply", () => {
 
     unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
 
-    assert.equal(rooms.getState(roomCode)!.phase, "playing");
-    assert.equal(rooms.getState(roomCode)!.round!.hands["player-1"]!.length, 5);
+    const state = rooms.getState(roomCode)!;
+    assert.equal(state.phase, "playing");
+    assert.equal(state.round.hands["player-1"]!.length, 5);
   });
 
   it("leaves the stored state untouched when the transition fails", () => {
