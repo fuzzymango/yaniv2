@@ -5,17 +5,15 @@ import {
   MAX_SCORE,
   MIN_PLAYERS,
   YANIV_THRESHOLD,
-} from "./config.ts";
-import { createDeck, deal, shuffle } from "./deck.ts";
-import { err, ok } from "./result.ts";
-import { randomInt, type Rng } from "./rng.ts";
-import {
   canCallYaniv,
   canonicalizeSet,
   handValue,
   isValidSet,
   pickupCandidates,
-} from "./rules.ts";
+} from "@yaniv/shared";
+import { createDeck, deal, shuffle } from "./deck.ts";
+import { err, ok } from "./result.ts";
+import { randomInt, type Rng } from "./rng.ts";
 import type {
   ActionResult,
   GameState,

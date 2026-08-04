@@ -2,8 +2,8 @@
 
 Multiplayer [Yaniv](https://en.wikipedia.org/wiki/Yaniv_(card_game)), built top-down:
 engine first, fully unit tested, then transport. TypeScript, npm workspaces. `socket.io`
-is the only runtime dependency, and only the server has it — `shared/` is types and the
-event contract, so it stays dependency-free for the client's sake.
+is the only runtime dependency, and only the server has it — `shared/` is types, the event
+contract and the rulebook, so it stays dependency-free for the client's sake.
 
 ## Where the rules live
 
@@ -21,9 +21,12 @@ tests. Don't let a rule exist only in code.
 ## Code structure
 
 ```
-shared/     Card/view/error types + the Socket.io event contract. No logic.
+shared/
+  src/      Card/view/error types, the Socket.io event contract, and the rulebook
+            (rules.ts + the rule constants). Pure and dependency-free.
+  test/     node:test suites for the logic that lives here.
 server/
-  src/      The engine: deck, rules, pure state transitions, serialization, rooms, bots.
+  src/      The engine: deck, pure state transitions, serialization, rooms, bots.
   scripts/  play.ts (bots-only, in process) + playSocket.ts & cli/ (human, over a
             socket). Not shipped.
   test/     node:test suites, one file per src/ module plus integration.test.ts.
@@ -38,20 +41,24 @@ server/
 | `views.ts` | `PlayerGameView` and friends — what a client actually receives |
 | `errors.ts` | `GameErrorCode` union |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
+| `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `handValue` — the rulebook, used by the engine, the bot and (later) the client |
+| `config.ts` | Every rule constant (`HAND_SIZE`, `YANIV_THRESHOLD`, `ASSAF_PENALTY`, `MAX_SCORE`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS`, `MIN_PLAYERS`, `MAX_PLAYERS`), each pointing at a `docs/rules.md` section |
 
 Imported by the server now, and will be imported by the client later, so the wire
-contract can't drift between them.
+contract can't drift between them. The rulebook is here rather than in `server/src` for
+the same reason: a client must offer exactly the moves the server will accept, and it
+cannot reach into `server/src` to find out. Every function is pure over `Card` values, so
+this costs `shared` none of its dependency-freedom. See `docs/adr/0002`.
 
 ### `server/src/`
 
 | File | Contents |
 |---|---|
 | `state.ts` | `GameState`, `RoundState`, `Player` — the domain model |
-| `config.ts` | Every rule constant (hand size, Yaniv threshold, Assaf penalty, ...), each pointing at a `docs/rules.md` section |
+| `config.ts` | The operational constants only — `BOT_NAMES` and `ROOM_CODE_*`. The rule constants live in `shared` |
 | `rng.ts` | `Rng` type + `mulberry32` seeded PRNG |
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
 | `deck.ts` | `createDeck`, `shuffle`, `deal` — pure functions, no class |
-| `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `handValue` — the rulebook, used by both the engine and the bot |
 | `game.ts` | `startGame`, `takeTurn`, `callYaniv`, `startNextRound`, `playAgain`, `removePlayer` — the pure state transitions |
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
@@ -159,9 +166,10 @@ through.
 
 Split deliberately across three layers:
 
-- **`server/src/rules.ts`** owns what's *legal* — `legalDiscards` (every valid discard
+- **`shared/src/rules.ts`** owns what's *legal* — `legalDiscards` (every valid discard
   from a hand) and `canCallYaniv` (is the hand low enough). These are rules queries, not
-  bot logic, and are also usable by a future client to highlight playable cards.
+  bot logic, which is why they sit in `shared`, where a client can reach them to
+  highlight playable cards.
 - **`server/src/bot.ts`** owns *judgement* — `shouldCallYaniv`, `chooseDiscard`,
   `chooseDraw`, composed by `decideTurn`. It takes a `PlayerGameView`, never raw
   `GameState`, so it cannot cheat by construction.
@@ -356,10 +364,11 @@ project references, `shared` → `server`). This constrains the codebase to *era
 TypeScript: no `enum`, no `namespace`, no parameter properties, `import type` for
 type-only imports. `tsconfig.base.json` enforces this via `erasableSyntaxOnly`.
 
-The server's `test` script uses an explicit glob
-(`node --test "test/**/*.test.ts"`) rather than bare `node --test` — the bare form also
-picks up `test/helpers.ts` and any stray `.d.ts` files `tsc --build` emits into
-`dist/test/`, which made test counts silently depend on whether a typecheck had run.
+Both workspaces have a `test` script, and the root `npm test` runs them with
+`--workspaces --if-present`. Each uses an explicit glob (`node --test
+"test/**/*.test.ts"`) rather than bare `node --test` — the bare form also picks up
+`test/helpers.ts` and any stray `.d.ts` files `tsc --build` emits into `dist/test/`,
+which made test counts silently depend on whether a typecheck had run.
 
 ## Explicitly out of scope (for now)
 
@@ -378,7 +387,7 @@ Not oversights — deferred on purpose, in this order of likely next work:
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
 - **The client.** No React app yet; `shared/` exists specifically so the client can
-  import the same types and event contract the server uses.
+  import the same types, event contract and rulebook the server uses.
 
 ## Deviations from the original sketch (`docs/backend-archetechture.md`)
 

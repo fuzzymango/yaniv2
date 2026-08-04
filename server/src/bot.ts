@@ -3,7 +3,7 @@
  *
  * This file holds *judgement* only. Anything about what the rules permit —
  * enumerating legal discards, deciding whether a hand is low enough to call Yaniv —
- * lives in `src/rules.ts`, so the bot cannot drift away from the engine as rules
+ * lives in `@yaniv/shared`'s `rules.ts`, so the bot cannot drift from the engine as rules
  * change. The split is "may I" (rules) versus "should I" (here).
  *
  * The bot sees a `PlayerGameView`: exactly the payload a real client receives, with
@@ -13,7 +13,12 @@
  */
 
 import type { Card, DrawAction, PlayerGameView, TurnAction } from "@yaniv/shared";
-import { canCallYaniv, handValue, legalDiscards, pickupCandidates } from "./rules.ts";
+import {
+  canCallYaniv,
+  handValue,
+  legalDiscards,
+  pickupCandidates,
+} from "@yaniv/shared";
 
 /**
  * Highest face value the bot will take from the table instead of drawing blind.

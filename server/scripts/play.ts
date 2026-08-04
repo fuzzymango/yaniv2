@@ -11,11 +11,10 @@
  * over a real socket instead — see `playSocket.ts`.
  */
 
-import { sortHand } from "@yaniv/shared";
+import { handValue, sortHand } from "@yaniv/shared";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { handValue } from "../src/rules.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState, RoundState } from "../src/state.ts";
 import { decideTurn } from "../src/bot.ts";

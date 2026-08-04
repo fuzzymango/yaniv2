@@ -14,13 +14,18 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
 import type { GameError, PlayerGameView } from "@yaniv/shared";
+import {
+  HAND_SIZE,
+  MAX_PLAYERS,
+  MAX_SCORE,
+  YANIV_THRESHOLD,
+  handValue,
+} from "@yaniv/shared";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
 import { decideTurn } from "../src/bot.ts";
-import { HAND_SIZE, MAX_PLAYERS, MAX_SCORE, YANIV_THRESHOLD } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { handValue } from "../src/rules.ts";
 import { createSocketServer } from "../src/socketServer.ts";
 
 /** The ack shape every request/response event replies with. Mirrors `Ack<T>`. */

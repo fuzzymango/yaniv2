@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MAX_PLAYERS, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "../src/config.ts";
+import { MAX_PLAYERS } from "@yaniv/shared";
+import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "../src/config.ts";
 import { startGame } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { err, ok } from "../src/result.ts";
