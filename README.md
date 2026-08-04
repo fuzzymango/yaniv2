@@ -6,8 +6,9 @@ Multiplayer [Yaniv](docs/rules.md) — TypeScript, npm workspaces, no runtime de
 
 | Workspace | Contents |
 |-----------|----------|
-| `shared/` | Card types, the per-player client view, error codes, and the Socket.io event contract. Imported by the server and (later) the client, so the wire contract can't drift. |
+| `shared/` | Card types, the per-player client view, error codes, and the Socket.io event contract. Imported by the server and the client, so the wire contract can't drift. |
 | `server/` | The game engine: deck, rules, pure state transitions, per-player serialization, and the room registry. |
+| `client/` | The React browser client: the session core, screen components, and Socket.io connection. |
 
 `docs/rules.md` is the source of truth for gameplay. `docs/backend-archetechture.md` is the
 original design sketch — where the two disagree, the code and `rules.md` are current.
@@ -27,10 +28,23 @@ no test-runner dependency. This constrains the codebase to *erasable* TypeScript
 
 ## Playing
 
-There's no client yet, but there are two terminal harnesses. They answer different
-questions, so neither replaces the other.
+**Play in the browser.** The React client runs on its own dev server and talks to a
+separately running backend. Start the server first:
 
-**Play a match yourself (`play`).** A real socket client, so it needs a server running.
+```sh
+npm run serve --workspace=@yaniv/server   # terminal 1 — PORT, default 3000
+```
+
+Then start the frontend in a second terminal:
+
+```sh
+npm run dev                               # terminal 2 — opens on http://localhost:5173
+```
+
+Open http://localhost:5173 in your browser. The frontend proxies `/socket.io` requests to
+port 3000, so the client and server talk to each other automatically.
+
+**Play in the terminal (`play`).** A real socket client, so it needs a server running.
 Start the server first:
 
 ```sh
@@ -131,4 +145,6 @@ npm run demo --workspace=@yaniv/server -- --seed 42 --players 4
 ## Not yet built
 
 Disconnect/reconnect handling (dropping a connection currently ends the room for everyone),
-persistence (rooms are in-memory, so a restart drops games in progress), and the React client.
+persistence (rooms are in-memory, so a restart drops games in progress), and additional
+client screens (the main menu and lobby exist; the table, round results, and game-end
+standings are placeholders).
