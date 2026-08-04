@@ -1,0 +1,190 @@
+/*
+ * Mobile-first: every rule here is written for a phone held in one hand, and the few
+ * media queries widen it for a desktop rather than the other way round. Nothing scales
+ * a phone screen across a monitor — the layout is capped and centred instead.
+ *
+ * No images and no icon fonts. Cards, when they arrive, are drawn in CSS.
+ */
+
+:root {
+  --felt: #14532d;
+  --felt-dark: #0b3018;
+  --ink: #f8fafc;
+  --ink-dim: #cbd5e1;
+  --accent: #fde047;
+  --danger: #fca5a5;
+  --surface: rgb(0 0 0 / 25%);
+
+  /* The smallest comfortable tap target, used for every control. */
+  --tap: 2.75rem;
+
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: radial-gradient(circle at 50% 0%, var(--felt), var(--felt-dark));
+  color: var(--ink);
+}
+
+/*
+ * Every screen is one column that fills the viewport and no more: the whole table has
+ * to be readable on a phone without pinching, so nothing here is allowed to scroll
+ * sideways. `dvh` rather than `vh` so a mobile browser's collapsing address bar does
+ * not leave the bottom of the screen off it.
+ */
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem
+    max(1.25rem, env(safe-area-inset-bottom));
+  max-width: 30rem;
+}
+
+@media (min-width: 48rem) {
+  .screen {
+    justify-content: center;
+    gap: 1.5rem;
+  }
+}
+
+/* --- main menu --- */
+
+.menu {
+  justify-content: center;
+}
+
+.menu__title {
+  margin: 0;
+  font-size: clamp(2.5rem, 12vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.menu__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.menu__or {
+  margin: 0.5rem 0 0;
+  color: var(--ink-dim);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field__label {
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+}
+
+.field__input {
+  min-height: var(--tap);
+  padding: 0 0.75rem;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: inherit;
+  /* 1rem is the floor iOS Safari will accept without zooming the page on focus. */
+  font: inherit;
+  font-size: 1rem;
+}
+
+.field__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.field__input--code {
+  font-size: 1.5rem;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+}
+
+.button {
+  min-height: var(--tap);
+  padding: 0 1rem;
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button--primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #1c1917;
+}
+
+.notice {
+  margin: 0;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.notice--error {
+  color: var(--danger);
+}
+
+/* --- a room --- */
+
+.room {
+  justify-content: center;
+  text-align: center;
+}
+
+.room__label {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+}
+
+/*
+ * The code is the loudest thing on the screen because reading it out is the only way
+ * anybody else gets into the room.
+ */
+.room__code {
+  margin: 0;
+  font-size: clamp(3.5rem, 22vw, 5.5rem);
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  /* Half the tracking is added to the right of the last character; this re-centres. */
+  text-indent: 0.15em;
+}
+
+.room__hint,
+.room__you {
+  margin: 0;
+  color: var(--ink-dim);
+}

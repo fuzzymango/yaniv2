@@ -3,6 +3,8 @@
   "references": [
     { "path": "./shared" },
     { "path": "./shared/tsconfig.test.json" },
-    { "path": "./server" }
+    { "path": "./server" },
+    { "path": "./client" },
+    { "path": "./client/tsconfig.test.json" }
   ]
 }
