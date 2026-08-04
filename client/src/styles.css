@@ -155,14 +155,13 @@ body {
   color: var(--danger);
 }
 
-/* --- a room --- */
+/* --- the room code --- */
 
-.room {
-  justify-content: center;
+.code {
   text-align: center;
 }
 
-.room__label {
+.code__label {
   margin: 0;
   color: var(--ink-dim);
   font-size: 0.85rem;
@@ -171,20 +170,127 @@ body {
 }
 
 /*
- * The code is the loudest thing on the screen because reading it out is the only way
- * anybody else gets into the room.
+ * The loudest thing on the screen, because reading it out is the only way anybody else
+ * gets into the room.
  */
-.room__code {
+.code__value {
   margin: 0;
-  font-size: clamp(3.5rem, 22vw, 5.5rem);
+  font-size: clamp(3rem, 20vw, 4.5rem);
   font-weight: 800;
   letter-spacing: 0.15em;
   /* Half the tracking is added to the right of the last character; this re-centres. */
   text-indent: 0.15em;
 }
 
-.room__hint,
-.room__you {
+.code__hint {
   margin: 0;
   color: var(--ink-dim);
+  font-size: 0.9rem;
+}
+
+/* --- the lobby --- */
+
+/*
+ * The seats take whatever height is left between the code and the controls, so the
+ * controls sit at the bottom of the phone where a thumb is rather than floating under a
+ * short list. Pinned to exactly the viewport rather than the `min-height` every other
+ * screen gets: a table that fills up to six has to push the *list* to scroll, and a
+ * container that can grow would push the page instead — taking the controls off the
+ * bottom of the screen with it.
+ */
+.lobby {
+  justify-content: flex-start;
+  height: 100dvh;
+}
+
+.seats {
+  flex: 1;
+  /*
+   * Without this a flex item refuses to shrink below its content (`min-height: auto`),
+   * and `overflow-y` on it would never have anything to do.
+   */
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.seat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap);
+  padding: 0 0.875rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.seat__name {
+  /* Names are bounded server-side but not narrow; the marks keep their place. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.seat__mark {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 0.75rem;
+  color: var(--ink-dim);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.lobby__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/*
+ * Where the host's start control sits on the host's own screen, so a guest sees the
+ * reason there is no button rather than a gap. Sized like the control it stands in for,
+ * but plainly not one.
+ */
+.lobby__hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  margin: 0;
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+/*
+ * A desktop has room to spare, so the table is centred in it rather than stretched down
+ * it — the seats stop claiming the leftover height and the column sits in the middle.
+ */
+@media (min-width: 48rem) {
+  .lobby {
+    justify-content: center;
+  }
+
+  .seats {
+    flex: 0 1 auto;
+  }
+}
+
+/* --- the phases still to be built --- */
+
+.room {
+  justify-content: center;
+  text-align: center;
+}
+
+.room__phase {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
 }

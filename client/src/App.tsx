@@ -6,18 +6,20 @@
  * other screen is a function of the view it renders. See docs/adr/0004.
  */
 
+import { Lobby } from "./Lobby.tsx";
 import { MainMenu } from "./MainMenu.tsx";
 import { Room } from "./Room.tsx";
 import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
 
 export function App({ session }: { session: Session }) {
-  const { view, error, busy } = useSession(session);
+  const { view, error, notice, busy } = useSession(session);
 
   if (view === null) {
     return (
       <MainMenu
         error={error}
+        notice={notice}
         busy={busy}
         onCreate={session.createRoom}
         onJoin={session.joinRoom}
@@ -25,5 +27,21 @@ export function App({ session }: { session: Session }) {
     );
   }
 
-  return <Room view={view} />;
+  // Pulled out so the early return narrows it: everything past this point is a phase
+  // with a round dealt behind it, and `Room` is typed to accept only those.
+  const { phase } = view;
+
+  if (phase === "lobby") {
+    return (
+      <Lobby
+        view={view}
+        error={error}
+        busy={busy}
+        onStart={session.startGame}
+        onExit={session.exitToMenu}
+      />
+    );
+  }
+
+  return <Room view={view} phase={phase} />;
 }

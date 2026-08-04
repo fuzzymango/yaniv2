@@ -31,6 +31,10 @@ server/
             socket). Not shipped.
   test/     node:test suites, one file per src/ module plus integration.test.ts.
             socketServer.test.ts uses real socket.io-client connections.
+client/
+  src/      The browser client: the framework-free session core, plus one React
+            component per screen. Vite + React.
+  test/     node:test suites driving the session core over a real socket server.
 ```
 
 ### `shared/src/`
@@ -104,6 +108,24 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
 
 The two are not redundant: `play.ts` answers "do the rules and the bot behave?", and
 `playSocket.ts` answers "does the wire work?".
+
+### `client/src/`
+
+A third client of the same contract, alongside the two harnesses — not a replacement for
+either. It imports `@yaniv/shared` and nothing from `server/src`.
+
+| File | Contents |
+|---|---|
+| `main.tsx` | The entrypoint. Opens the socket and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
+| `session.ts` | The session core: owns the socket, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
+| `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
+| `App.tsx` | Which screen: no view is the main menu, everything else is a function of `view.phase` |
+| `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
+| `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, start (host only), leave |
+| `Room.tsx` | Stands in for `playing`/`roundEnd`/`gameEnd` until each is built |
+| `styles.css` | Mobile-first. Cards, when they arrive, are drawn in CSS — no image assets |
+
+See "The client's session core" below for what the split buys.
 
 ## Key decisions from the build
 
@@ -356,6 +378,60 @@ their session, apply, and on success ack, broadcast, then run any bot turns. A r
 acks the error and publishes nothing, so a refused action costs the player nothing — the
 turn is still theirs.
 
+### The client's session core
+
+The browser client's logic lives in `client/src/session.ts`, a plain module outside React
+that owns the socket and exposes exactly two things: a `SessionSnapshot` to read and a set
+of intents to call. `useSession` subscribes to it with `useSyncExternalStore` and holds no
+logic — **if that hook ever grows a branch, the branch is in the wrong place.** The point
+is testability: the session core is driven under `node:test` against a real socket server,
+with no browser, no jsdom and no React test dependencies. Components are not tested at
+all, which is a consequence of that split rather than a gap.
+
+Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` compares by
+identity, so a mutated object would leave React rendering a position that has already
+moved on.
+
+Three fields, and each answers a different question:
+
+- **`view`** — the position, or `null`. Null *is* the main menu: the one screen that is
+  not a function of `view.phase`, because before a room exists there is nothing for the
+  server to have sent. See `docs/adr/0004`.
+- **`error`** — a `GameError`, i.e. something the player asked for and was refused.
+  Cleared the moment they try again, because a refused action costs them nothing.
+- **`notice`** — news about the room that is *not* a refusal, today only `roomClosed`.
+  Separate from `error` precisely because there is no action to blame and nothing to
+  retry, and because it arrives while the player is sitting still.
+
+**`busy` locks on emit and settles on the ack.** Note the ordering trap this leaves: the
+server publishes a new position *before* it acks entry to a room, and *after* it acks an
+in-game action, so the first snapshot carrying a view is one the player still cannot act
+from. Tests wait on `view !== null && !busy` rather than on the view alone.
+
+**Leaving is the one action answered by the ack alone.** Everything else is confirmed by
+the broadcast behind it, but the server stops publishing to a connection that has left, so
+`exitToMenu` clears the view itself. The client is never told which of the two outcomes it
+got — a freed seat or a closed room — and does not need to be; either way it is out. That
+is the server's decision (see "Leaving a room without dropping the connection").
+
+**A rejection that lands after the room has gone is swallowed, not shown.** Two players
+leaving at once is the case: the host's exit closes the room and drops everyone's session,
+so a guest's in-flight action acks `PLAYER_NOT_FOUND` — about a room that no longer
+exists. They are already on the menu being told why, and a red error blaming them on top
+would be exactly what "a refused action costs the player nothing" rules out. The session
+therefore drops an error whenever `view` is already null.
+
+**`playerJoined`/`playerLeft` are deliberately unhandled.** The roster arrives right
+behind each of them as a fresh view, and a screen that re-renders in place shows a seat
+filling or emptying by itself. The CLI needs those nudges only because its frames scroll
+away from each other.
+
+**The client never enforces a rule the server owns.** Showing the start control to the
+host alone is a courtesy so a guest is not hunting for a button that was never theirs; the
+rule is `NOT_HOST`, and the server is what says it. Refusing an empty name locally is the
+one exception, and only because the server enforces the same rule — it is the client
+declining to offer a move it knows will be refused, not a rule of its own.
+
 ### Tooling
 
 TypeScript runs **directly on Node 24 via native type stripping** — no build step, no
@@ -392,8 +468,8 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **Choosing how many opponents you want.** `startGame` always fills to six. Adding bots
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
-- **The client.** No React app yet; `shared/` exists specifically so the client can
-  import the same types, event contract and rulebook the server uses.
+- **The rest of the client.** The main menu and the lobby are built; the table, a scored
+  round and a finished match are not. `Room.tsx` stands in for all three (issue #31).
 
 ## Deviations from the original sketch (`docs/backend-archetechture.md`)
 
@@ -418,11 +494,22 @@ npm test                                  # all workspaces, node:test
 npm run typecheck                         # tsc --build across the monorepo
 npm run serve --workspace=@yaniv/server   # start the socket server (PORT, default 3000)
 npm run demo --workspace=@yaniv/server    # watch bots play a full match, in process
+npm run dev                               # the browser client on :5173, socket proxied
 ```
 
 `demo` accepts `-- --seed <n> --players <n>`.
 
-Playing yourself takes two terminals, because the harness is a real client:
+The browser client also takes two terminals, and for the same reason the CLI does — it
+talks to a separately running server. `npm run dev` proxies `/socket.io` to port 3000, so
+the client is same-origin in development and needs no CORS (docs/adr/0003):
+
+```sh
+npm run serve --workspace=@yaniv/server   # terminal 1
+npm run dev                               # terminal 2 — open http://localhost:5173
+```
+
+Playing yourself in a terminal takes two terminals too, because the harness is a real
+client:
 
 ```sh
 npm run serve --workspace=@yaniv/server              # terminal 1

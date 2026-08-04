@@ -17,6 +17,7 @@
  */
 
 import type {
+  Ack,
   ClientToServerEvents,
   GameError,
   PlayerGameView,
@@ -51,6 +52,13 @@ export interface SessionSnapshot {
    */
   readonly error: GameError | null;
   /**
+   * News about the room that is not a refusal of anything the player did — today, only
+   * the host closing it under them. Separate from `error` because there is no action to
+   * blame and nothing to retry: it is the last thing they hear about that room, and it
+   * arrives while they are sitting still.
+   */
+  readonly notice: string | null;
+  /**
    * An intent is in flight and the controls that sent it are locked. A phone taps twice
    * on a slow connection far more readily than a keyboard does, and the second create
    * would be refused with `ALREADY_IN_ROOM` — an error about the transport, shown to a
@@ -66,6 +74,20 @@ export interface Session {
   createRoom: (playerName: string) => void;
   /** The code as typed. Case is not the player's problem — see below. */
   joinRoom: (roomCode: string, playerName: string) => void;
+  /**
+   * Deal the first round, filling every empty seat with a bot. Host only — and the
+   * server is what says so, answering anyone else with `NOT_HOST`. A screen that shows
+   * the control to the host alone is a courtesy, not the rule.
+   */
+  startGame: () => void;
+  /**
+   * Leave the room without dropping the connection, and go back to the main menu.
+   *
+   * What it costs the rest of the table is the server's decision and not the caller's:
+   * a guest frees their own seat, the host closes the room. The client is not told
+   * which happened, and does not need to be — either way it is out.
+   */
+  exitToMenu: () => void;
 }
 
 /**
@@ -80,7 +102,7 @@ const EMPTY_NAME: GameError = {
 };
 
 export function createSession(socket: YanivClientSocket): Session {
-  let snapshot: SessionSnapshot = { view: null, error: null, busy: false };
+  let snapshot: SessionSnapshot = { view: null, error: null, notice: null, busy: false };
   const listeners = new Set<() => void>();
 
   const publish = (next: Partial<SessionSnapshot>): void => {
@@ -97,6 +119,32 @@ export function createSession(socket: YanivClientSocket): Session {
   socket.on("gameStateUpdate", (view) => publish({ view }));
 
   /**
+   * The room is gone and this connection is no longer in it — the host having left is
+   * today the only cause. Dropping the view is what returns the player to the main menu,
+   * and the reason goes with them so they are not left wondering where the table went.
+   *
+   * The reason arrives as a fragment — "the host left the room" — so it is made into a
+   * sentence here rather than at the screen, because this handler is what knows which
+   * kind of news it is. The CLI frames it the same way, and the CLI is the specification
+   * for behaviour.
+   */
+  socket.on("roomClosed", (reason) =>
+    publish({
+      view: null,
+      notice: `The room closed — ${reason}.`,
+      error: null,
+      busy: false,
+    }),
+  );
+
+  /*
+   * There is deliberately no handler for `playerJoined` or `playerLeft`. The roster
+   * arrives right behind each of them as a fresh view, and a screen that re-renders in
+   * place shows a seat filling or emptying by itself — the CLI needs those nudges only
+   * because its frames scroll away from each other.
+   */
+
+  /**
    * The name to enter a room under, or null when there is no asking: the controls are
    * already locked on an earlier attempt, or the player has typed nothing.
    *
@@ -111,7 +159,9 @@ export function createSession(socket: YanivClientSocket): Session {
       return null;
     }
 
-    publish({ error: null, busy: true });
+    // The notice goes with the error: a player who is acting again has read whatever
+    // became of the last room, and it has nothing to say about this one.
+    publish({ error: null, notice: null, busy: true });
     return name;
   };
 
@@ -122,6 +172,39 @@ export function createSession(socket: YanivClientSocket): Session {
    * lobby before it acks.
    */
   const settle = (error: GameError | null): void => publish({ error, busy: false });
+
+  /**
+   * How an action inside a room goes out: locked on the way so a double tap sends one
+   * of it, and settled by the server's answer.
+   *
+   * `leavesRoom` is the one thing an ack alone decides. Every other action is confirmed
+   * by the broadcast behind it, but leaving is confirmed by nothing — the server has
+   * stopped publishing to this connection, so the session has to learn it is out from
+   * the ack itself.
+   */
+  const act = (emit: (ack: Ack<null>) => void, leavesRoom = false): void => {
+    if (snapshot.busy) return;
+    publish({ error: null, busy: true });
+    emit((result) => {
+      if (!result.ok) {
+        /*
+         * A rejection that lands after the room has already gone is about a room that no
+         * longer exists. It happens when the host closes the room while somebody else's
+         * action is in flight: the server has dropped their session, so the ack comes
+         * back `PLAYER_NOT_FOUND`. They are already on the menu being told why, and
+         * blaming them for it on top would be exactly what a refusal must never cost.
+         */
+        if (snapshot.view === null) publish({ busy: false });
+        else settle(result.error);
+        return;
+      }
+      publish({
+        error: null,
+        busy: false,
+        view: leavesRoom ? null : snapshot.view,
+      });
+    });
+  };
 
   return {
     subscribe: (listener) => {
@@ -149,5 +232,11 @@ export function createSession(socket: YanivClientSocket): Session {
         settle(result.ok ? null : result.error),
       );
     },
+
+    startGame: () => act((ack) => socket.emit("startGame", ack)),
+
+    // The view goes with the seat: there is no room to render any more, and a null view
+    // *is* the main menu.
+    exitToMenu: () => act((ack) => socket.emit("exitToMenu", ack), true),
   };
 }

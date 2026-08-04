@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
-import { MAX_PLAYERS } from "@yaniv/shared";
+import { HAND_SIZE, MAX_PLAYERS } from "@yaniv/shared";
 import { RoomManager } from "@yaniv/server/src/roomManager.ts";
 import { mulberry32 } from "@yaniv/server/src/rng.ts";
 import { createSocketServer } from "@yaniv/server/src/socketServer.ts";
@@ -93,12 +93,38 @@ function waitForSnapshot(
   });
 }
 
-/** A room to join, taken the way another player would: off the host's screen. */
+/**
+ * A room to join, taken the way another player would: off the host's screen.
+ *
+ * Waits for the controls to unlock as well as for the room, because the server publishes
+ * the lobby *before* it acks the creation — so the first snapshot with a view in it is
+ * one the host still cannot act from.
+ */
 async function hostARoom(server: Harness, name: string): Promise<[Session, string]> {
   const host = await server.openSession();
   host.createRoom(name);
-  const snapshot = await waitForSnapshot(host, "the host's room", (s) => s.view !== null);
+  const snapshot = await waitForSnapshot(
+    host,
+    "the host's room",
+    (s) => s.view !== null && !s.busy,
+  );
   return [host, snapshot.view!.roomCode];
+}
+
+/** The same wait, for a guest who has just been seated in somebody else's room. */
+const seated = (session: Session, who: string) =>
+  waitForSnapshot(session, `${who} to be seated`, (s) => s.view !== null && !s.busy);
+
+/**
+ * The smallest table with two humans on it — the shape every question about who may do
+ * what needs, since a lone host is host by default and cannot be refused anything.
+ */
+async function hostAndGuest(server: Harness): Promise<[Session, Session]> {
+  const [host, roomCode] = await hostARoom(server, "Ada");
+  const guest = await server.openSession();
+  guest.joinRoom(roomCode, "Grace");
+  await seated(guest, "the guest");
+  return [host, guest];
 }
 
 describe("the session core", () => {
@@ -245,6 +271,151 @@ describe("the session core", () => {
       const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
       assert.equal(refused.error!.code, "INVALID_NAME");
       assert.equal(refused.view, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("fills every empty seat with a bot when the host starts", async () => {
+    const server = await startServer(7);
+    try {
+      const [host] = await hostARoom(server, "Ada");
+      host.startGame();
+
+      const playing = await waitForSnapshot(
+        host,
+        "the match to start",
+        (s) => s.view?.phase === "playing",
+      );
+
+      // Nobody was asked how many opponents they wanted: creating and starting is the
+      // whole of setting a match up.
+      assert.equal(
+        playing.view!.opponents.length,
+        MAX_PLAYERS - 1,
+        "every seat the host did not fill is a bot",
+      );
+      assert.equal(playing.view!.you.hand.length, HAND_SIZE, "and the cards are dealt");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refuses a guest's start and leaves the lobby where it was", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+
+      guest.startGame();
+
+      // Whether the control is offered is the screen's business; whether the match
+      // starts is the server's, and this is how a guest is told the rule.
+      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
+      assert.equal(refused.error!.code, "NOT_HOST");
+      assert.equal(refused.view!.phase, "lobby", "still waiting on the host");
+
+      // Nothing was dealt behind the refusal, on the host's screen either.
+      assert.equal(host.getSnapshot().view!.phase, "lobby");
+      assert.equal(host.getSnapshot().view!.you.hand.length, 0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("frees only their own seat when a guest exits to the menu", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+      await waitForSnapshot(host, "the table to fill", (s) => s.view?.opponents.length === 1);
+
+      guest.exitToMenu();
+
+      const gone = await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null);
+      assert.equal(gone.error, null, "leaving a room is not a failure");
+
+      const stayed = await waitForSnapshot(
+        host,
+        "the table to shrink",
+        (s) => s.view?.opponents.length === 0,
+      );
+      assert.equal(stayed.view!.phase, "lobby", "the room plays on for whoever remains");
+
+      // Straight into another room, which is the whole point of an exit that is not a
+      // disconnect — a connection still bound to the old room would be told
+      // ALREADY_IN_ROOM instead.
+      guest.createRoom("Grace");
+      const another = await waitForSnapshot(guest, "a room of their own", (s) => s.view !== null);
+      assert.equal(another.error, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("closes the room and says why when the host exits", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+
+      host.exitToMenu();
+
+      const hostGone = await waitForSnapshot(host, "the host's menu", (s) => s.view === null);
+      assert.equal(hostGone.error, null);
+
+      // The guest was sitting doing nothing, so the room going away has to reach them
+      // where they are rather than waiting for them to tap something.
+      const closed = await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null);
+      assert.match(
+        closed.notice ?? "",
+        /host/,
+        "the reason it closed, so the guest is not left guessing",
+      );
+      assert.equal(closed.error, null, "nothing the guest did was refused");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not blame a guest for an action the closing room refused", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+
+      // Both leave at once. The server sees them in some order, and if the host's lands
+      // first the guest's own exit comes back `PLAYER_NOT_FOUND` — the room they were
+      // asking to leave is already gone. Either way the guest ends up on the menu, and
+      // either way that must be the whole of it: a refusal costs the player nothing, so
+      // it cannot leave them reading an error about a room that no longer exists.
+      host.exitToMenu();
+      guest.exitToMenu();
+
+      await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null);
+
+      // The late ack would land a round trip behind, so give it one before believing it
+      // changed nothing.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const settled = guest.getSnapshot();
+      assert.equal(settled.view, null);
+      assert.equal(settled.error, null, "nothing the guest did was their fault");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("lets a closed-out player straight into another room", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+
+      host.exitToMenu();
+      await waitForSnapshot(guest, "the room to close", (s) => s.notice !== null);
+
+      // The menu is a menu, not a dead end: whatever happened to the last room, the
+      // controls on this screen work.
+      guest.createRoom("Grace");
+      const own = await waitForSnapshot(guest, "a room of their own", (s) => s.view !== null);
+      assert.equal(own.view!.phase, "lobby");
+      assert.equal(own.notice, null, "the last room's news is not this room's");
+      assert.equal(own.error, null);
     } finally {
       await server.close();
     }

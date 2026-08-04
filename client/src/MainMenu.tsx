@@ -8,6 +8,10 @@
  * Neither button decides anything: an empty name is refused by the session core and a
  * bad code by the server, and both come back the same way, as an error to show. This
  * file only says what happened.
+ *
+ * It is also where a player lands when a room goes away underneath them, which is what
+ * the notice is for — news about the room they were in rather than a refusal of anything
+ * they did here.
  */
 
 import { useState } from "react";
@@ -15,12 +19,13 @@ import type { GameError } from "@yaniv/shared";
 
 interface MainMenuProps {
   error: GameError | null;
+  notice: string | null;
   busy: boolean;
   onCreate: (playerName: string) => void;
   onJoin: (roomCode: string, playerName: string) => void;
 }
 
-export function MainMenu({ error, busy, onCreate, onJoin }: MainMenuProps) {
+export function MainMenu({ error, notice, busy, onCreate, onJoin }: MainMenuProps) {
   const [name, setName] = useState("");
   const [roomCode, setRoomCode] = useState("");
 
@@ -35,6 +40,16 @@ export function MainMenu({ error, busy, onCreate, onJoin }: MainMenuProps) {
   return (
     <main className="screen menu">
       <h1 className="menu__title">Yaniv</h1>
+
+      {/*
+        Above the form rather than below it, because it explains why this screen is the
+        one in front of them — and it is read before anything is typed, not after.
+      */}
+      {notice && (
+        <p className="notice" role="status">
+          {notice}
+        </p>
+      )}
 
       <form
         className="menu__form"
