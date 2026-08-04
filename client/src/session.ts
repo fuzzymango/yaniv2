@@ -24,6 +24,8 @@ import type {
   ServerToClientEvents,
 } from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
+import type { DrawSource } from "./turn.ts";
+import { retainSelection, toggleSelection, turnFrom } from "./turn.ts";
 
 /**
  * Declared here rather than imported from the CLI harness, which has the identical
@@ -65,6 +67,16 @@ export interface SessionSnapshot {
    * player who did nothing wrong.
    */
   readonly busy: boolean;
+  /**
+   * The cards chosen for the next turn, by id, **in tap order** — the order decides where
+   * a joker extending a run sits (docs/rules.md §4), so it is the move and not merely a
+   * way of writing it down. See "Selection" in CONTEXT.md.
+   *
+   * It lives here rather than in a component because it has to survive views arriving
+   * underneath it: a card that leaves the hand leaves the selection with it, and that is
+   * a rule about incoming server state, which is what this module is for.
+   */
+  readonly selection: readonly string[];
 }
 
 export interface Session {
@@ -88,6 +100,17 @@ export interface Session {
    * which happened, and does not need to be — either way it is out.
    */
   exitToMenu: () => void;
+  /** Choose a card for the next turn, or un-choose one already chosen. */
+  toggleCard: (cardId: string) => void;
+  /**
+   * Play the selection, drawing from where the player tapped. One action, because the
+   * engine has no state between discarding and drawing (see "Turn model" in CLAUDE.md).
+   *
+   * A tap the rules do not permit sends nothing and says nothing: the interface should
+   * not have offered it, and a player who taps a dead target has asked for nothing and
+   * been refused nothing.
+   */
+  commitTurn: (source: DrawSource) => void;
 }
 
 /**
@@ -102,7 +125,13 @@ const EMPTY_NAME: GameError = {
 };
 
 export function createSession(socket: YanivClientSocket): Session {
-  let snapshot: SessionSnapshot = { view: null, error: null, notice: null, busy: false };
+  let snapshot: SessionSnapshot = {
+    view: null,
+    error: null,
+    notice: null,
+    busy: false,
+    selection: [],
+  };
   const listeners = new Set<() => void>();
 
   const publish = (next: Partial<SessionSnapshot>): void => {
@@ -111,12 +140,44 @@ export function createSession(socket: YanivClientSocket): Session {
   };
 
   /**
+   * How many positions have arrived, and which one a turn is waiting to be played past.
+   *
+   * The counter is the CLI's `Position { view, version }` and `actedOn` watermark, kept
+   * here rather than in a component because it is the same fact about the same wire: the
+   * server acks a turn *before* it broadcasts the result, so for a moment after a move
+   * the last view still shows the mover's own turn and their discarded cards in hand.
+   * Controls released on the ack would come back to life over that stale position.
+   *
+   * *Any* newer position releases it, not only the one the turn caused — which is the
+   * same thing wherever it matters, since nobody else can move while the turn is ours.
+   * Off turn it lets go a beat early, on a broadcast from whoever is actually playing;
+   * the turn being sent again from there is refused either way.
+   */
+  let version = 0;
+  let committedAt: number | null = null;
+
+  /**
    * Every broadcast is published the moment it lands. A run of bot turns arrives as one
    * update per move, so a screen that renders on arrival shows the moves as moves — the
    * pacing that makes them watchable belongs here too, but it is not needed until there
    * is a table to watch.
+   *
+   * A committed turn's lock is released here and only here, on a strictly newer position
+   * than the one it was played from. That same filtering of the selection against the
+   * arriving hand is what empties it afterwards: the cards it named have just been
+   * discarded, so nothing survives the move that made them.
    */
-  socket.on("gameStateUpdate", (view) => publish({ view }));
+  socket.on("gameStateUpdate", (view) => {
+    version += 1;
+    const played = committedAt !== null && version > committedAt;
+    if (played) committedAt = null;
+
+    publish({
+      view,
+      selection: retainSelection(snapshot.selection, view.you.hand),
+      busy: played ? false : snapshot.busy,
+    });
+  });
 
   /**
    * The room is gone and this connection is no longer in it — the host having left is
@@ -128,14 +189,18 @@ export function createSession(socket: YanivClientSocket): Session {
    * kind of news it is. The CLI frames it the same way, and the CLI is the specification
    * for behaviour.
    */
-  socket.on("roomClosed", (reason) =>
+  socket.on("roomClosed", (reason) => {
+    // A turn in flight is one nobody will answer now, and a selection is a tap or two
+    // made in front of a table that is no longer there. Neither goes to the next room.
+    committedAt = null;
     publish({
       view: null,
       notice: `The room closed — ${reason}.`,
       error: null,
       busy: false,
-    }),
-  );
+      selection: [],
+    });
+  });
 
   /*
    * There is deliberately no handler for `playerJoined` or `playerLeft`. The roster
@@ -174,6 +239,20 @@ export function createSession(socket: YanivClientSocket): Session {
   const settle = (error: GameError | null): void => publish({ error, busy: false });
 
   /**
+   * How a refusal lands, wherever it comes from.
+   *
+   * A rejection that arrives after the room has already gone is about a room that no
+   * longer exists. It happens when the host closes the room while somebody else's action
+   * is in flight: the server has dropped their session, so the ack comes back
+   * `PLAYER_NOT_FOUND`. They are already on the menu being told why, and blaming them for
+   * it on top would be exactly what a refusal must never cost.
+   */
+  const refuse = (error: GameError): void => {
+    if (snapshot.view === null) publish({ busy: false });
+    else settle(error);
+  };
+
+  /**
    * How an action inside a room goes out: locked on the way so a double tap sends one
    * of it, and settled by the server's answer.
    *
@@ -187,21 +266,14 @@ export function createSession(socket: YanivClientSocket): Session {
     publish({ error: null, busy: true });
     emit((result) => {
       if (!result.ok) {
-        /*
-         * A rejection that lands after the room has already gone is about a room that no
-         * longer exists. It happens when the host closes the room while somebody else's
-         * action is in flight: the server has dropped their session, so the ack comes
-         * back `PLAYER_NOT_FOUND`. They are already on the menu being told why, and
-         * blaming them for it on top would be exactly what a refusal must never cost.
-         */
-        if (snapshot.view === null) publish({ busy: false });
-        else settle(result.error);
+        refuse(result.error);
         return;
       }
       publish({
         error: null,
         busy: false,
         view: leavesRoom ? null : snapshot.view,
+        selection: leavesRoom ? [] : snapshot.selection,
       });
     });
   };
@@ -238,5 +310,39 @@ export function createSession(socket: YanivClientSocket): Session {
     // The view goes with the seat: there is no room to render any more, and a null view
     // *is* the main menu.
     exitToMenu: () => act((ack) => socket.emit("exitToMenu", ack), true),
+
+    // Choosing costs nothing and asks for nothing, so there is no error to clear and no
+    // lock to take — only the one already held by a turn on its way out.
+    toggleCard: (cardId) => {
+      if (snapshot.busy) return;
+      publish({ selection: toggleSelection(snapshot.selection, cardId) });
+    },
+
+    commitTurn: (source) => {
+      if (snapshot.busy || snapshot.view === null) return;
+
+      /*
+       * The rulebook has the last word on what may be sent, and it is the same rulebook
+       * the server will judge the move by. Nothing to say when it refuses: the screen
+       * should not have offered a tap that lands here, and a player who found a dead
+       * target has asked for nothing.
+       */
+      const action = turnFrom(snapshot.selection, snapshot.view, source);
+      if (action === null) return;
+
+      // Watermarked before the emit, so the ack — which arrives ahead of the broadcast —
+      // cannot be mistaken for the position the lock is waiting on.
+      committedAt = version;
+      publish({ error: null, busy: true });
+
+      socket.emit("takeTurn", action, (result) => {
+        // A success is settled by the broadcast behind it, not here.
+        if (result.ok) return;
+        // A refusal publishes nothing, so no newer position is coming and the lock has
+        // to be let go now — the turn is still theirs, and so is what they chose.
+        committedAt = null;
+        refuse(result.error);
+      });
+    },
   };
 }

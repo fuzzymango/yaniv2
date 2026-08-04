@@ -13,6 +13,7 @@
  */
 
 import type { GameError, PlayerGameView } from "@yaniv/shared";
+import { bySeat } from "./seating.ts";
 
 interface LobbyProps {
   view: PlayerGameView;
@@ -25,14 +26,7 @@ interface LobbyProps {
 export function Lobby({ view, error, busy, onStart, onExit }: LobbyProps) {
   const isHost = view.hostId === view.you.id;
 
-  /**
-   * Seating order, so the table reads the same way round on everybody's screen. Ordered
-   * by `turnOrder` rather than listed from it, so every row is a player the view actually
-   * carries — there is no id here that could be rendered raw for want of a name.
-   */
-  const seats = [view.you, ...view.opponents].sort(
-    (a, b) => view.turnOrder.indexOf(a.id) - view.turnOrder.indexOf(b.id),
-  );
+  const seats = [view.you, ...view.opponents].sort(bySeat(view));
 
   return (
     <main className="screen lobby">

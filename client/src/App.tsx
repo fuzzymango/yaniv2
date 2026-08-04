@@ -9,11 +9,12 @@
 import { Lobby } from "./Lobby.tsx";
 import { MainMenu } from "./MainMenu.tsx";
 import { Room } from "./Room.tsx";
+import { Table } from "./Table.tsx";
 import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
 
 export function App({ session }: { session: Session }) {
-  const { view, error, notice, busy } = useSession(session);
+  const { view, error, notice, busy, selection } = useSession(session);
 
   if (view === null) {
     return (
@@ -39,6 +40,19 @@ export function App({ session }: { session: Session }) {
         busy={busy}
         onStart={session.startGame}
         onExit={session.exitToMenu}
+      />
+    );
+  }
+
+  if (phase === "playing") {
+    return (
+      <Table
+        view={view}
+        selection={selection}
+        error={error}
+        busy={busy}
+        onToggleCard={session.toggleCard}
+        onCommitTurn={session.commitTurn}
       />
     );
   }

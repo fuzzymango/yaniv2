@@ -44,6 +44,14 @@ npm run dev                               # terminal 2 — opens on http://local
 Open http://localhost:5173 in your browser. The frontend proxies `/socket.io` requests to
 port 3000, so the client and server talk to each other automatically.
 
+Enter a name, create a room or join one by its code, and the host starts the match — every
+empty seat is filled with a bot. A turn is two taps and no button: tap cards in your hand
+to choose them (chosen cards are outlined in yellow, tapped again to unchoose), then tap
+either the deck or one of the two end cards of the face-up discard. That second tap is the
+move — the chosen cards are discarded and the tapped card drawn, in one action. The deck
+and the face-up cards do nothing until what you have chosen is a legal discard, so a move
+the rules refuse is never offered in the first place.
+
 **Play in the terminal (`play`).** A real socket client, so it needs a server running.
 Start the server first:
 
@@ -145,6 +153,7 @@ npm run demo --workspace=@yaniv/server -- --seed 42 --players 4
 ## Not yet built
 
 Disconnect/reconnect handling (dropping a connection currently ends the room for everyone),
-persistence (rooms are in-memory, so a restart drops games in progress), and additional
-client screens (the main menu and lobby exist; the table, round results, and game-end
-standings are placeholders).
+persistence (rooms are in-memory, so a restart drops games in progress), and the last of
+the client screens (the main menu, lobby, and table exist; calling Yaniv, round results,
+and game-end standings are still placeholders, so a browser match plays turns but cannot
+yet be ended from the browser).

@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
-import { HAND_SIZE, MAX_PLAYERS } from "@yaniv/shared";
+import { HAND_SIZE, MAX_PLAYERS, isValidSet } from "@yaniv/shared";
 import { RoomManager } from "@yaniv/server/src/roomManager.ts";
 import { mulberry32 } from "@yaniv/server/src/rng.ts";
 import { createSocketServer } from "@yaniv/server/src/socketServer.ts";
@@ -125,6 +125,50 @@ async function hostAndGuest(server: Harness): Promise<[Session, Session]> {
   guest.joinRoom(roomCode, "Grace");
   await seated(guest, "the guest");
   return [host, guest];
+}
+
+/**
+ * A match under way, waiting on the one human in it.
+ *
+ * Whoever opens is chosen at random (ADR-0001) and the server plays every bot seat out
+ * before it stops, so waiting for our own turn is the only way to know the table has
+ * come to rest — and the only position a turn can be taken from.
+ */
+async function soloMatch(server: Harness): Promise<Session> {
+  const [host] = await hostARoom(server, "Ada");
+  host.startGame();
+  await waitForSnapshot(
+    host,
+    "the host's turn",
+    (s) => s.view !== null && s.view.currentTurnPlayerId === s.view.you.id && !s.busy,
+  );
+  return host;
+}
+
+/**
+ * The same match with two humans at it, handed back as [whoever is on turn, whoever is
+ * not] — which the test asks for rather than assumes, since the opener is random.
+ *
+ * Both are waited on, because "the bots have finished" is a fact about the position and
+ * each connection learns it separately.
+ */
+async function twoHumanMatch(server: Harness): Promise<[Session, Session]> {
+  const [host, guest] = await hostAndGuest(server);
+  const hostId = host.getSnapshot().view!.you.id;
+  const guestId = guest.getSnapshot().view!.you.id;
+  host.startGame();
+
+  const restsOnAHuman = (s: SessionSnapshot) =>
+    s.view !== null &&
+    s.view.phase === "playing" &&
+    (s.view.currentTurnPlayerId === hostId || s.view.currentTurnPlayerId === guestId) &&
+    !s.busy;
+
+  const [seenByHost] = await Promise.all([
+    waitForSnapshot(host, "the host's table", restsOnAHuman),
+    waitForSnapshot(guest, "the guest's table", restsOnAHuman),
+  ]);
+  return seenByHost.view!.currentTurnPlayerId === hostId ? [host, guest] : [guest, host];
 }
 
 describe("the session core", () => {
@@ -416,6 +460,165 @@ describe("the session core", () => {
       assert.equal(own.view!.phase, "lobby");
       assert.equal(own.notice, null, "the last room's news is not this room's");
       assert.equal(own.error, null);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("taking a turn", () => {
+  it("discards the selection and draws the deck in one action", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      const chosen = host.getSnapshot().view!.you.hand[0]!;
+
+      host.toggleCard(chosen.id);
+      assert.deepEqual(host.getSnapshot().selection, [chosen.id], "chosen, not yet sent");
+
+      host.commitTurn({ kind: "deck" });
+      assert.equal(host.getSnapshot().busy, true, "locked the instant the turn went out");
+
+      const landed = await waitForSnapshot(host, "the turn to land", (s) => !s.busy);
+
+      // The lock is what proves the *timing*: the server acks a turn before it
+      // broadcasts the result, so a lock released on the ack would let go while the
+      // last view still showed this card in hand and this player on turn.
+      assert.ok(
+        !landed.view!.you.hand.some((c) => c.id === chosen.id),
+        "the lock held until a strictly newer position arrived, not merely until the ack",
+      );
+      assert.equal(landed.error, null);
+      assert.deepEqual(landed.selection, [], "the selection went with the turn");
+      assert.equal(landed.view!.you.hand.length, HAND_SIZE, "discarded one, drew one");
+      assert.deepEqual(
+        landed.view!.lastDiscard.map((c) => c.id),
+        [chosen.id],
+        "and the card is face up for whoever plays next",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("takes an end of the discard when that is what was tapped", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      const before = host.getSnapshot().view!;
+      const wanted = before.lastDiscard[0]!;
+
+      host.toggleCard(before.you.hand[0]!.id);
+      host.commitTurn({ kind: "discard", cardId: wanted.id });
+
+      const landed = await waitForSnapshot(host, "the turn to land", (s) => !s.busy);
+      assert.equal(landed.error, null, "the client offered only what the server accepts");
+      assert.ok(
+        landed.view!.you.hand.some((c) => c.id === wanted.id),
+        "the tapped card was drawn, not one off the deck",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("gives the controls back when a turn is refused", async () => {
+    const server = await startServer(7);
+    try {
+      const [, waiting] = await twoHumanMatch(server);
+      const chosen = waiting.getSnapshot().view!.you.hand[0]!;
+
+      // A legal discard, out of turn. Turn order is the server's to own — the client
+      // does not second-guess it, so the refusal is how this player is told.
+      waiting.toggleCard(chosen.id);
+      waiting.commitTurn({ kind: "deck" });
+      assert.equal(waiting.getSnapshot().busy, true);
+
+      const refused = await waitForSnapshot(waiting, "the refusal", (s) => s.error !== null);
+      assert.equal(refused.error!.code, "NOT_YOUR_TURN");
+      assert.equal(refused.busy, false, "released on the ack — no new position is coming");
+      assert.deepEqual(
+        refused.selection,
+        [chosen.id],
+        "a refused action costs nothing, so the cards they chose are still chosen",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("sends one turn however many times the deck is tapped", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      const chosen = host.getSnapshot().view!.you.hand[0]!;
+      host.toggleCard(chosen.id);
+
+      // A phone on a slow connection double-taps far more readily than a keyboard
+      // double-presses. The second turn would be refused — the cards it names have
+      // already left the hand — and the player would be blamed for a lag they cannot see.
+      host.commitTurn({ kind: "deck" });
+      host.commitTurn({ kind: "deck" });
+
+      await waitForSnapshot(host, "the turn to land", (s) => !s.busy);
+
+      // The second send, had it been made, would be answered a round trip behind the
+      // first, so give it one before believing it never was.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(host.getSnapshot().error, null, "only one turn was ever sent");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps a selection across a view that leaves the hand alone", async () => {
+    const server = await startServer(7);
+    try {
+      const [mover, waiting] = await twoHumanMatch(server);
+      const chosen = waiting.getSnapshot().view!.you.hand[0]!;
+      waiting.toggleCard(chosen.id);
+
+      const played = mover.getSnapshot().view!.you.hand[0]!;
+      mover.toggleCard(played.id);
+      mover.commitTurn({ kind: "deck" });
+
+      await waitForSnapshot(waiting, "somebody else's move", (s) =>
+        s.view!.lastDiscard.some((c) => c.id === played.id),
+      );
+      assert.deepEqual(
+        waiting.getSnapshot().selection,
+        [chosen.id],
+        "their own hand did not change, so neither did what they had chosen from it",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("never sends a turn the rules do not permit", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      const hand = host.getSnapshot().view!.you.hand;
+
+      // Five dealt cards always hold two that make no set between them, and tapping
+      // both is the ordinary way to find that out — so it has to cost nothing at all.
+      const illegal = hand.find((c) => !isValidSet([hand[0]!, c]));
+      assert.ok(illegal, "a hand of five holds two cards that are not a set");
+      host.toggleCard(hand[0]!.id);
+      host.toggleCard(illegal.id);
+
+      host.commitTurn({ kind: "deck" });
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const settled = host.getSnapshot();
+      assert.equal(settled.busy, false, "nothing was sent, so nothing is locked");
+      assert.equal(settled.error, null, "and nothing was refused, so there is nothing to say");
+      assert.equal(
+        settled.view!.currentTurnPlayerId,
+        settled.view!.you.id,
+        "the turn is still theirs",
+      );
     } finally {
       await server.close();
     }

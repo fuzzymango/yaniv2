@@ -5,6 +5,11 @@ engine first, fully unit tested, then transport. TypeScript, npm workspaces. `so
 is the only runtime dependency, and only the server has it — `shared/` is types, the event
 contract and the rulebook, so it stays dependency-free for the client's sake.
 
+# behavior rules
+This section bullet points specific behavior patterns that you should follow when working in this repository. Do not modify this section.
+
+- **keep `README.me` and `CLAUDE.md` updated** - after implementing code changes, review the contents of `CLAUDE.md` and README.md and ensure they're kept up to date and relevant with the current state of the codebase. For example, if you add or modify an `npm run ...` command, ensure that the `README.md` is amended to reflect this change. Developers will look at `README.md` often and we don't want to have false/stale information present. The catch to ths is, we don't want `README.md` to become bloated with information so only maintain the high-level information necessary for navigating this project.  
+
 ## Where the rules live
 
 **`docs/rules.md` is the single source of truth for gameplay.** Every rule maps to at
@@ -118,12 +123,16 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 |---|---|
 | `main.tsx` | The entrypoint. Opens the socket and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
 | `session.ts` | The session core: owns the socket, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
+| `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `takeableIds`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
+| `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
 | `App.tsx` | Which screen: no view is the main menu, everything else is a function of `view.phase` |
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, start (host only), leave |
-| `Room.tsx` | Stands in for `playing`/`roundEnd`/`gameEnd` until each is built |
-| `styles.css` | Mobile-first. Cards, when they arrive, are drawn in CSS — no image assets |
+| `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, and a turn as two taps |
+| `PlayingCard.tsx` | One card, drawn in CSS. Presentational only — it does not know what a card means where it sits |
+| `Room.tsx` | Stands in for `roundEnd`/`gameEnd` until each is built |
+| `styles.css` | Mobile-first. Cards are drawn in CSS — no image assets |
 
 See "The client's session core" below for what the split buys.
 
@@ -392,7 +401,7 @@ Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` c
 identity, so a mutated object would leave React rendering a position that has already
 moved on.
 
-Three fields, and each answers a different question:
+Four fields, and each answers a different question:
 
 - **`view`** — the position, or `null`. Null *is* the main menu: the one screen that is
   not a function of `view.phase`, because before a room exists there is nothing for the
@@ -402,11 +411,33 @@ Three fields, and each answers a different question:
 - **`notice`** — news about the room that is *not* a refusal, today only `roomClosed`.
   Separate from `error` precisely because there is no action to blame and nothing to
   retry, and because it arrives while the player is sitting still.
+- **`selection`** — the cards tapped for the next turn, by id, in tap order. It lives here
+  rather than in a component because it is a fact that has to survive views arriving
+  underneath it: a card that leaves the hand leaves the selection with it, which is
+  `retainSelection` applied to every broadcast. That same filter is what empties it after
+  a committed turn — the cards it named have just been discarded.
 
-**`busy` locks on emit and settles on the ack.** Note the ordering trap this leaves: the
-server publishes a new position *before* it acks entry to a room, and *after* it acks an
-in-game action, so the first snapshot carrying a view is one the player still cannot act
-from. Tests wait on `view !== null && !busy` rather than on the view alone.
+**`busy` locks on emit, and settles two different ways.** Entering or leaving a room
+settles on the **ack**: entry has been broadcast before it is acked, and a departing
+connection is published to no longer. A **turn settles on a strictly newer position** —
+the CLI's `Position { view, version }` / `actedOn` watermark, kept in the session core.
+The server acks an in-game action *before* it broadcasts the result, so controls released
+on the ack would come back to life over a position still showing the mover's own turn and
+their discarded cards in hand. A rejected turn is the exception and releases at once:
+nothing was published, so no newer position is coming, and the turn is still theirs.
+
+The ordering trap is worth stating plainly: the first snapshot carrying a view after
+entering a room is one the player still cannot act from. Tests wait on
+`view !== null && !busy` rather than on the view alone.
+
+**A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
+`null`, `commitTurn` returns, and no error is published — the screen should not have
+offered a target that lands there, and a player who found a dead one has asked for nothing
+and been refused nothing. The legality of a *discard* is the only rule the client applies
+ahead of the server, and it applies it out of the same rulebook (ADR-0002), because a
+silent round trip to be told no is 50–200ms of nothing that a touch screen makes
+indistinguishable from a tap that did not register. Turn order and everything else the
+server owns are offered, sent, and answered with a `GameError`.
 
 **Leaving is the one action answered by the ack alone.** Everything else is confirmed by
 the broadcast behind it, but the server stops publishing to a connection that has left, so
@@ -468,8 +499,14 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **Choosing how many opponents you want.** `startGame` always fills to six. Adding bots
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
-- **The rest of the client.** The main menu and the lobby are built; the table, a scored
-  round and a finished match are not. `Room.tsx` stands in for all three (issue #31).
+- **The rest of the client.** The main menu, the lobby and the table are built; a scored
+  round and a finished match are not, and `Room.tsx` stands in for both (issue #31). Nor,
+  yet, is calling Yaniv (#36), pacing a chain of bot turns for a human to watch (#38), or
+  surfacing a dropped connection and a reload warning (#39).
+- **Disambiguating a joker that extends a run.** The browser client sends the selection in
+  tap order, so tap order decides where the joker sits (`docs/rules.md` §4) — which is
+  invisible on the screen. An accepted wart, and a deliberate one: a step that asked the
+  player which end they meant is deferred.
 
 ## Deviations from the original sketch (`docs/backend-archetechture.md`)
 
