@@ -1,29 +1,14 @@
-import type { Card, Rank } from "../src/index.ts";
-import { RANKS, SUITS } from "../src/index.ts";
+import type { Card } from "../src/cards.ts";
+import { RANKS, SUITS, rankToValue } from "../src/cards.ts";
 
 /**
  * A fixture deck, so tests name cards by id rather than hand-building them.
  *
- * The server builds the real deck (`server/src/deck.ts`), which `shared` cannot
- * import — so this mirrors the card contract documented on `Card`: ids read
- * `hearts-K` / `joker-1`, and values follow docs/rules.md §1. Any drift from the
- * server's deck shows up immediately as a wrong hand value here.
+ * `shared` cannot import the server's `createDeck`, so this builds the same 54 cards
+ * from the same `rankToValue` the server's deck uses — card values are a rule
+ * (docs/rules.md §1), so there is one definition, not a copy that could drift. Only
+ * the id format is restated here, and that is the contract documented on `Card`.
  */
-function rankToValue(rank: Rank): number {
-  switch (rank) {
-    case "Joker":
-      return 0;
-    case "A":
-      return 1;
-    case "J":
-    case "Q":
-    case "K":
-      return 10;
-    default:
-      return Number(rank);
-  }
-}
-
 const BY_ID = new Map<string, Card>();
 for (const suit of SUITS) {
   for (const rank of RANKS) {

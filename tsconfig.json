@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./shared" },
+    { "path": "./shared/tsconfig.test.json" },
     { "path": "./server" }
   ]
 }

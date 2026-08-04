@@ -1,5 +1,12 @@
 export type { Suit, Rank, Card } from "./cards.ts";
-export { SUITS, RANKS, rankOrder, compareCards, sortHand } from "./cards.ts";
+export {
+  SUITS,
+  RANKS,
+  rankOrder,
+  rankToValue,
+  compareCards,
+  sortHand,
+} from "./cards.ts";
 
 export {
   ASSAF_PENALTY,

@@ -1,0 +1,19 @@
+/*
+ * The tests are their own project so `shared/src` can stay dependency-free in a way
+ * the compiler enforces. The suites need `node:test`, and `types` is per-project — so
+ * granting it here rather than in `tsconfig.json` keeps `src` unable to import a Node
+ * builtin without a typecheck error, which is the guarantee `shared` exists to make.
+ */
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "test",
+    "outDir": "dist/test",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "types": ["node"]
+  },
+  "include": ["test/**/*.ts"],
+  "references": [{ "path": "./tsconfig.json" }]
+}

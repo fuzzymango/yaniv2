@@ -12,6 +12,12 @@ constants (`HAND_SIZE`, `YANIV_THRESHOLD`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS
 and `ROOM_CODE_*`, which are operational rather than rules, stay on the server. `shared/`
 remains dependency-free — every function in `rules.ts` is already pure over `Card` values.
 
+`rankToValue` went with them, from `deck.ts` to `cards.ts`. It was not in the original
+list, but the scoring table is `docs/rules.md` §1 as much as the threshold is §6, and the
+move exposed that: `shared`'s own tests need to build cards, and leaving the table on the
+server would have meant a second copy of a rule, free to disagree with the first. Building
+a deck stays on the server; deciding what a rank is worth does not.
+
 Moving only the handful of functions the client needs was considered and rejected. The
 constants are entangled: `canCallYaniv` reads `YANIV_THRESHOLD`, and `isRun` reads
 `MIN_RUN_LENGTH` and `MIN_RUN_REAL_CARDS`. Worse, `canonicalizeSet` — which would have

@@ -26,6 +26,27 @@ export interface Card {
   value: number;
 }
 
+/**
+ * Scoring value for a rank. docs/rules.md §1.
+ *
+ * Lives here rather than with the deck because it is a rule, not a construction
+ * detail: it is the single definition every `Card.value` is built from.
+ */
+export function rankToValue(rank: Rank): number {
+  switch (rank) {
+    case "Joker":
+      return 0;
+    case "A":
+      return 1;
+    case "J":
+    case "Q":
+    case "K":
+      return 10;
+    default:
+      return Number(rank);
+  }
+}
+
 export const SUITS: readonly Suit[] = ["hearts", "diamonds", "clubs", "spades"];
 
 /** Non-joker ranks, in run order (Ace low). */

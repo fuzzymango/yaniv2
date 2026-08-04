@@ -37,7 +37,7 @@ server/
 
 | File | Contents |
 |---|---|
-| `cards.ts` | `Card`/`Suit`/`Rank`, rank ordering, and `sortHand`/`compareCards` (display order only — see below) |
+| `cards.ts` | `Card`/`Suit`/`Rank`, rank ordering, `rankToValue` (the scoring table, `docs/rules.md` §1), and `sortHand`/`compareCards` (display order only — see below) |
 | `views.ts` | `PlayerGameView` and friends — what a client actually receives |
 | `errors.ts` | `GameErrorCode` union |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
@@ -131,7 +131,7 @@ persists across rounds.
 ### The discard pile is two parts, not a flat array
 
 `RoundState.lastDiscard: Card[]` is the most recent discarded set, face up; its **first
-and last cards only** are pickup-eligible (`pickupCandidates` in `rules.ts`).
+and last cards only** are pickup-eligible (`pickupCandidates` in `shared/src/rules.ts`).
 `RoundState.buried: Card[]` is everything discarded earlier — visible but permanently out
 of play until the draw pile empties and it gets reshuffled. A flat array can't express
 "only the two ends of the last discard are takeable," which is why this is two fields.
@@ -140,7 +140,7 @@ of play until the draw pile empties and it gets reshuffled. A flat array can't e
 
 - Jokers are wild **in runs only** — never in same-rank sets (`Jk 7♠ 7♣` is not a set).
 - A run needs **at least 2 real cards** to anchor it (`Jk Jk 5♥` is not a run).
-- `isRun` in `rules.ts` checks this via a span test, not a walk: real cards must fit in
+- `isRun` in `shared/src/rules.ts` checks this via a span test, not a walk: real cards fit in
   a window of `cards.length` consecutive ranks
   (`max(rank) - min(rank) + 1 <= cards.length`). No wrap past King/Ace falls out for
   free, since Ace and King are 12 apart.
@@ -369,6 +369,12 @@ Both workspaces have a `test` script, and the root `npm test` runs them with
 "test/**/*.test.ts"`) rather than bare `node --test` — the bare form also picks up
 `test/helpers.ts` and any stray `.d.ts` files `tsc --build` emits into `dist/test/`,
 which made test counts silently depend on whether a typecheck had run.
+
+**`shared`'s tests are a separate tsconfig project** (`shared/tsconfig.test.json`),
+unlike the server's, which includes `test/` in the one project. The suites need
+`node:test`, and `types` is per-project, so folding them in would grant `shared/src` the
+Node types too — and dependency-freedom would hold only by everyone remembering it.
+Split, `shared/src` importing a Node builtin is a typecheck error.
 
 ## Explicitly out of scope (for now)
 
