@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { callYaniv } from "../../src/game.ts";
 import { serializeStateForPlayer } from "../../src/serialize.ts";
-import { parseCommand } from "../../scripts/cli/commands.ts";
+import { parseCommand, parseMainMenuCommand } from "../../scripts/cli/commands.ts";
 import { makeState, unwrap } from "../helpers.ts";
 
 /** A view whose owner holds Jk 5♣ 7♦, with 8♥ 9♥ face up to pick from. */
@@ -43,6 +43,27 @@ function lobbyView() {
     }),
     "p1",
   );
+}
+
+/** A view of a match Ada has just won, seen by Ada — who is also the host. */
+function gameEndView() {
+  const ended = unwrap(
+    callYaniv(
+      makeState({
+        players: [
+          { id: "p1", name: "Ada" },
+          // One bad round from busting past 100, which is what ends the match.
+          { id: "p2", name: "Grace", score: 95 },
+        ],
+        hands: { p1: ["clubs-2", "clubs-3"], p2: ["hearts-K", "spades-Q"] },
+        lastDiscard: ["hearts-8"],
+        drawPile: ["spades-2"],
+        currentTurnPlayerId: "p1",
+      }),
+      "p1",
+    ),
+  );
+  return serializeStateForPlayer(ended, "p1");
 }
 
 describe("parseCommand", () => {
@@ -113,9 +134,44 @@ describe("parseCommand", () => {
     );
   });
 
+  it("reads 'menu' as leaving the lobby, distinct from quitting the harness", () => {
+    assert.deepEqual(parseCommand("menu", lobbyView()), { kind: "menu" });
+    assert.deepEqual(parseCommand("q", lobbyView()), { kind: "quit" });
+    // Mid-round there is no leaving without dropping the connection, so the word is
+    // just another unreadable line.
+    assert.equal(parseCommand("menu", midRoundView()).kind, "invalid");
+  });
+
   it("still quits from the lobby, and ignores a stray enter there", () => {
     assert.deepEqual(parseCommand("q", lobbyView()), { kind: "quit" });
     assert.deepEqual(parseCommand("", lobbyView()), { kind: "noop" });
+  });
+
+  it("reads 'again' and 'menu' as the two ways on from a finished match", () => {
+    assert.deepEqual(parseCommand("again", gameEndView()), { kind: "again" });
+    assert.deepEqual(parseCommand("menu", gameEndView()), { kind: "menu" });
+    // Mid-round neither means anything: there is no match to replay or leave yet.
+    assert.equal(parseCommand("again", midRoundView()).kind, "invalid");
+  });
+
+  it("turns down anything else typed at a finished match, without mentioning cards", () => {
+    const command = parseCommand("banana", gameEndView());
+
+    assert.equal(command.kind, "invalid");
+    const message = command.kind === "invalid" ? command.message : "";
+    assert.match(message, /again/, "the advice names the way on");
+    assert.match(message, /menu/, "and the way out");
+    assert.doesNotMatch(
+      message,
+      /number/,
+      "the hands on screen are a result, not a hand to play from",
+    );
+  });
+
+  it("still quits from a finished match, and ignores a stray enter there", () => {
+    // Unlike `roundEnd`, there is no next round for an enter to deal.
+    assert.deepEqual(parseCommand("q", gameEndView()), { kind: "quit" });
+    assert.deepEqual(parseCommand("", gameEndView()), { kind: "noop" });
   });
 
   it("reads a bare enter as 'deal the next round', but only once one has ended", () => {
@@ -140,5 +196,47 @@ describe("parseCommand", () => {
     });
     // Mid-round the same keystroke is just an accident: do nothing, ask again.
     assert.deepEqual(parseCommand("", midRoundView()), { kind: "noop" });
+  });
+});
+
+describe("parseMainMenuCommand", () => {
+  it("reads 'create' as opening a new room", () => {
+    assert.deepEqual(parseMainMenuCommand("create"), { kind: "create" });
+  });
+
+  it("reads 'join <code>' as joining that room, case-insensitively", () => {
+    assert.deepEqual(parseMainMenuCommand("join WXYZ"), {
+      kind: "join",
+      roomCode: "WXYZ",
+    });
+    assert.deepEqual(parseMainMenuCommand("JOIN wxyz"), {
+      kind: "join",
+      roomCode: "wxyz",
+    });
+  });
+
+  it("recognises q and quit as leaving the application", () => {
+    assert.deepEqual(parseMainMenuCommand("q"), { kind: "quit" });
+    assert.deepEqual(parseMainMenuCommand("quit"), { kind: "quit" });
+  });
+
+  it("treats a bare enter as nothing to do", () => {
+    assert.deepEqual(parseMainMenuCommand(""), { kind: "noop" });
+  });
+
+  it("explains itself rather than crashing on a line it cannot read", () => {
+    const command = parseMainMenuCommand("banana");
+
+    assert.equal(command.kind, "invalid");
+    assert.match(
+      command.kind === "invalid" ? command.message : "",
+      /create|join|quit/,
+      "an invalid command points at what the menu actually accepts",
+    );
+  });
+
+  it("rejects a bare 'join' with no code, rather than joining nothing", () => {
+    assert.equal(parseMainMenuCommand("join").kind, "invalid");
+    assert.equal(parseMainMenuCommand("join ").kind, "invalid");
   });
 });

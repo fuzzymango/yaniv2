@@ -52,7 +52,7 @@ contract can't drift between them.
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
 | `deck.ts` | `createDeck`, `shuffle`, `deal` — pure functions, no class |
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `handValue` — the rulebook, used by both the engine and the bot |
-| `game.ts` | `startGame`, `takeTurn`, `callYaniv`, `startNextRound` — the pure state transitions |
+| `game.ts` | `startGame`, `takeTurn`, `callYaniv`, `startNextRound`, `playAgain`, `removePlayer` — the pure state transitions |
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
 | `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
@@ -71,11 +71,19 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
 
 - **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
   their own terminals, over a **real socket connection** to a separately running server
-  (`npm run serve` first). Requires `--name`; also accepts `--url` and `--join <code>`.
+  (`npm run serve` first). Requires `--name`; also accepts `--url`, `--join <code>`, and
+  `--create`. Bare `--name` (neither `--join` nor `--create`) opens an interactive main
+  menu — `create` / `join <code>` / `q`/`quit` — rather than silently creating a room.
   Composition only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
-  - **`cli/render.ts`** — `PlayerGameView` → a printable frame. Pure.
-  - **`cli/commands.ts`** — a typed line + the current view → a `Command`. Pure and
-    total; bad input returns `invalid`, never throws.
+  - **`cli/render.ts`** — `PlayerGameView` → a printable frame, plus the one screen that
+    isn't a view: the main menu, rendered before any room exists. Pure. The final
+    standings are everyone the round result names, not just whoever is still seated:
+    a player who left after the match ended is listed from that record and marked
+    `(left)`. Dropping the row instead would take a departed winner's mark off the
+    board with them.
+  - **`cli/commands.ts`** — a typed line + the current view → a `Command`, and a
+    separate `parseMainMenuCommand` for the view-less main menu. Both pure and total;
+    bad input returns `invalid`, never throws.
   - **`cli/session.ts`** — the driver. Owns the socket, holds the loop, takes its input
     and output injected so tests can drive it. **It imports nothing from `src/` except
     types** — no `RoomManager`, no `GameState`. The moment it does, it stops being a
@@ -212,6 +220,13 @@ draw pile as a count only. Hands are revealed to everyone only at `phase: 'round
 in the serialized JSON string, and this has been mutation-tested (deliberately breaking
 the serializer to confirm the leak tests actually fail).
 
+**A finished round names its own players.** `PlayerRoundResult` carries a `name` copied
+in when the round is scored, and the serializer uses that rather than looking the id up
+in `players`. The duplication is deliberate: a seat can be given up once the match ends
+(`exitToMenu`), and a round result is the record of who played it — resolving names
+against the live roster left a departed player nameless on everyone else's scoreboard,
+with no way for a client to recover the name it was never sent.
+
 ### Player identity
 
 `Player.id` is a **server-issued stable id**, generated at `RoomManager.createRoom` /
@@ -260,6 +275,40 @@ it only leaks memory. That reasoning holds only while a room holds one human, an
 can now hold several (see `play --join`), so a player dropping out takes everyone else's
 match down with them. Known and deliberately not fixed here — it belongs with reconnect,
 which is the next thing on the out-of-scope list, not bolted onto the join flow.
+
+### Leaving a room without dropping the connection
+
+`exitToMenu` is the one exit that is not a disconnect, and `playAgain` is the one way out
+of `gameEnd` other than closing the room. Both are allowed only where the table is not
+mid-round — the lobby and `gameEnd` — for the same reason mid-match leaving is out of
+scope: a hand and a turn order the round is still being played against.
+
+Who invokes `exitToMenu` decides what it costs everyone else, and the caller does not get
+to choose: **a non-host frees only their own seat** (the room plays on for whoever
+remains, who are told by `playerLeft` and then handed the shrunk roster), while **the host
+closes the room outright** (everyone else gets `roomClosed(reason)` — there is no longer a
+state to publish, so this is the last thing they hear about that room). Identical in both
+phases, deliberately: "a non-host leaving a finished match ends it, since the match is
+over anyway" was the plausible drift, and one rule for both was chosen instead.
+
+The split across layers mirrors bot seating. `removePlayer` in `game.ts` is a pure
+transition that filters a player out; "the room must be destroyed" is not a `GameState` it
+could return, so that branch lives in `socketServer.ts`, where rooms and connections are
+owned — which is also why the `exitToMenu` handler is not `act()`-shaped.
+
+Leaving **clears `socket.data.session` and calls `socket.leave(roomCode)`**. Clearing the
+session is what stops `ALREADY_IN_ROOM` meaning "for the life of this connection": a
+sessionless socket is indistinguishable from a fresh one, so the same connection can go
+straight into another room. It also keeps the departing socket out of the next broadcast,
+which `broadcastState` skips it from — the serializer would refuse to build a view for a
+player no longer seated. The `leave` keeps a socket from lingering in a Socket.io room
+whose code a later room could be issued.
+
+**`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a
+table that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS` rather than
+quietly refilled. Reaching that over the wire takes a table that was six humans to begin
+with — `startGame` only fills seats nobody is in, and a bot never leaves — so five of them
+exiting is the one way a host is left with nobody to play against.
 
 ### Socket layer: wiring is separate from listening
 
@@ -365,17 +414,28 @@ npm run serve --workspace=@yaniv/server              # terminal 1
 npm run play --workspace=@yaniv/server -- --name Ada # terminal 2 — connects to localhost:3000
 ```
 
-`play` requires `-- --name <name>` and also accepts `--url <url>` and `--join <code>`.
-Without `--join` you create a room and are shown its 4-character code; everyone else
-joins it from their own terminal with `-- --name <name> --join <code>`
-(case-insensitive), up to six players. The host types `start` to begin, and every seat
-still empty is filled with a bot.
+`play` requires `-- --name <name>` and also accepts `--url <url>`, `--join <code>`, and
+`--create`. Three ways to enter:
+
+- `-- --name Ada` alone opens an interactive main menu — `create` a room, `join <CODE>`
+  one by code, or `q`/`quit` to exit. A bad or expired code typed here shows the error
+  and returns to the menu rather than ending the session.
+- `-- --name Ada --create` creates a room immediately and shows its 4-character code —
+  the same outcome the bare main menu's `create` gives you, without the extra prompt.
+- `-- --name Grace --join <code>` (case-insensitive) joins that room immediately.
+
+Everyone else joins by code, up to six players. The host types `start` to begin, and
+every seat still empty is filled with a bot.
 
 At the prompt: `start` begins the match (host only — anyone else is told `NOT_HOST`),
-`1 3` discards those cards by hand position and draws from the deck, `t1`/`t2` on the
-end takes a face-up card instead (`1 3 t2`), `yaniv` calls, enter deals the next round,
-`q` or Ctrl-D quits. Note that any player disconnecting still ends the room for
-everyone — see "Room lifecycle".
+`menu` leaves the room for the main menu without dropping the connection (a guest frees
+their seat; the host closes the room, and everyone else is told why and returned to their
+own menu), `1 3` discards those cards by hand position and draws from the deck, `t1`/`t2`
+on the end takes a face-up card instead (`1 3 t2`), `yaniv` calls, enter deals the next
+round, `q` or Ctrl-D quits. A finished match stops at the standings rather than ending the
+session: `again` deals a fresh one to the same table (host only) and `menu` leaves, the
+same way it does from the lobby. Note that any player disconnecting still ends the room
+for everyone — see "Room lifecycle".
 
 ## Agent skills
 

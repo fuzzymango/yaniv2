@@ -9,9 +9,9 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { callYaniv } from "../../src/game.ts";
+import { callYaniv, removePlayer } from "../../src/game.ts";
 import { serializeStateForPlayer } from "../../src/serialize.ts";
-import { renderView } from "../../scripts/cli/render.ts";
+import { renderMainMenu, renderView } from "../../scripts/cli/render.ts";
 import { makeState, unwrap } from "../helpers.ts";
 
 /** Colour is presentation; assertions read the text underneath it. */
@@ -92,6 +92,17 @@ describe("renderView", () => {
     );
   });
 
+  it("offers the way out of the lobby to everyone sitting in it", () => {
+    // Leaving is not the host's privilege the way starting is, so both screens say so.
+    for (const viewer of ["p1", "p2"]) {
+      assert.match(
+        plain(renderView(lobbyView(viewer))),
+        /menu/i,
+        `${viewer} should be told they can leave`,
+      );
+    }
+  });
+
   it("numbers the viewer's own hand so it can be selected by position", () => {
     const view = serializeStateForPlayer(
       makeState({
@@ -170,9 +181,10 @@ describe("renderView", () => {
     assert.match(frame, /ASSAF by Grace \(you\)/);
   });
 
-  it("shows final standings and the winner when the match is over", () => {
+  /** A match Ada wins outright, Grace having busted past 100. */
+  function endedMatch() {
     // Grace is one bad round from busting past 100.
-    const ended = unwrap(
+    return unwrap(
       callYaniv(
         makeState({
           players: [
@@ -187,7 +199,10 @@ describe("renderView", () => {
         "p1",
       ),
     );
-    const view = serializeStateForPlayer(ended, "p1");
+  }
+
+  it("shows final standings and the winner when the match is over", () => {
+    const view = serializeStateForPlayer(endedMatch(), "p1");
     assert.equal(view.phase, "gameEnd", "fixture should end the match");
 
     const frame = plain(renderView(view));
@@ -196,5 +211,66 @@ describe("renderView", () => {
     assert.match(frame, /Ada \(you\)\s+0\s+← winner/, "the viewer's own placing");
     assert.match(frame, /Grace\s+115/);
     assert.doesNotMatch(frame, /Grace \(you\)/, "and nobody else's");
+  });
+
+  it("offers the host another match, and everyone else the wait", () => {
+    const view = serializeStateForPlayer(endedMatch(), "p1");
+
+    const host = plain(renderView(view));
+    assert.match(host, /again/i, "the host is told they can deal another match");
+    assert.match(host, /menu/i, "and that they can leave instead");
+
+    const guest = plain(renderView(serializeStateForPlayer(endedMatch(), "p2")));
+    assert.match(guest, /waiting/i, "only the host may replay, so everyone else waits");
+    assert.match(guest, /menu/i, "but leaving is anyone's to do");
+    assert.doesNotMatch(guest, /type again/i);
+  });
+
+  /**
+   * A seat given up after the match ended. The player stays in the round result — the
+   * record of who played the match — but is gone from the roster, so the standings have
+   * to name them from that record and say they are no longer there.
+   */
+  it("keeps a departed player in the standings, named and marked as gone", () => {
+    const left = unwrap(removePlayer(endedMatch(), "p2"));
+    const frame = plain(renderView(serializeStateForPlayer(left, "p1")));
+
+    assert.match(frame, /Grace \(left\)\s+115/, "who left, and what they finished on");
+    assert.match(frame, /Ada \(you\)\s+0/, "alongside whoever stayed");
+  });
+
+  it("still names the winner of a match the winner has walked away from", () => {
+    // Ada busts, so Grace wins on the lower score — and then leaves.
+    const ended = unwrap(
+      callYaniv(
+        makeState({
+          players: [
+            { id: "p1", name: "Ada", score: 95 },
+            { id: "p2", name: "Grace" },
+          ],
+          hands: { p1: ["clubs-2", "clubs-3"], p2: ["diamonds-2", "diamonds-3"] },
+          lastDiscard: ["hearts-8"],
+          drawPile: ["spades-2"],
+          currentTurnPlayerId: "p1",
+        }),
+        "p1",
+      ),
+    );
+    assert.equal(ended.phase, "gameEnd", "fixture should end the match");
+    assert.deepEqual(ended.winnerIds, ["p2"], "fixture's winner is the one who leaves");
+
+    const frame = plain(renderView(serializeStateForPlayer(unwrap(removePlayer(ended, "p2")), "p1")));
+
+    assert.match(frame, /← winner/, "a finished match always has one");
+  });
+});
+
+describe("renderMainMenu", () => {
+  it("names the three options a player has before any room exists", () => {
+    const frame = plain(renderMainMenu());
+
+    assert.match(frame, /create/);
+    assert.match(frame, /join/i);
+    assert.match(frame, /quit|q\b/i);
   });
 });

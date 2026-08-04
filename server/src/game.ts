@@ -8,7 +8,7 @@ import {
 } from "./config.ts";
 import { createDeck, deal, shuffle } from "./deck.ts";
 import { err, ok } from "./result.ts";
-import type { Rng } from "./rng.ts";
+import { randomInt, type Rng } from "./rng.ts";
 import {
   canCallYaniv,
   canonicalizeSet,
@@ -66,7 +66,20 @@ function dealRound(
   };
 }
 
-/** Host starts the match from the lobby. The host takes the first turn. */
+/**
+ * Who opens a brand new match: a seat drawn uniformly at random, never the host by
+ * default — see ADR-0001. Rounds after the first are not chosen this way; the previous
+ * round's winner opens those.
+ */
+function randomOpener(state: GameState, rng: Rng): string {
+  return state.players[randomInt(rng, state.players.length)]!.id;
+}
+
+/**
+ * The host starts the match from the lobby, but does not necessarily take the first
+ * turn: the opening player is chosen uniformly at random from the seated players —
+ * see ADR-0001.
+ */
 export function startGame(
   state: GameState,
   requesterId: string,
@@ -84,7 +97,65 @@ export function startGame(
       `Need at least ${MIN_PLAYERS} players to start`,
     );
   }
-  return ok(dealRound(state, state.hostId, rng));
+  return ok(dealRound(state, randomOpener(state, rng), rng));
+}
+
+/**
+ * Restart the match in the same room, for whoever is still seated: scores and the round
+ * number go back to zero and the first round is dealt on the spot, so there is no stop
+ * in the lobby between one match and the next.
+ *
+ * Empty seats are deliberately not backfilled with bots — a seat given up by an exit to
+ * the menu stays given up — so a table that has shrunk below the minimum is turned away
+ * here exactly as `startGame` would turn it away.
+ */
+export function playAgain(
+  state: GameState,
+  requesterId: string,
+  rng: Rng,
+): ActionResult {
+  if (state.phase !== "gameEnd") {
+    return err("WRONG_PHASE", "No finished match to replay");
+  }
+  if (requesterId !== state.hostId) {
+    return err("NOT_HOST", "Only the host can start another match");
+  }
+  if (state.players.length < MIN_PLAYERS) {
+    return err(
+      "NOT_ENOUGH_PLAYERS",
+      `Need at least ${MIN_PLAYERS} players to start`,
+    );
+  }
+
+  // Reset before dealing, so the fresh round is dealt against the fresh match: the
+  // round number `dealRound` increments has to be the new match's, not the old one's.
+  const fresh: GameState = {
+    ...state,
+    players: state.players.map((p) => ({ ...p, score: 0 })),
+    roundNumber: 0,
+  };
+  return ok(dealRound(fresh, randomOpener(fresh, rng), rng));
+}
+
+/**
+ * Take a player out of the room, freeing their seat for good — no bot moves into it.
+ *
+ * Only from the lobby or a finished match: leaving mid-round would abandon a hand and a
+ * turn order that the round is still being played against, which is out of scope (see
+ * CLAUDE.md's room lifecycle notes).
+ *
+ * The host is not special here. "The room must be destroyed" is not a `GameState` this
+ * function could return, so that branch belongs to the layer that owns rooms — the same
+ * way bot seating is a helper folded in around a transition rather than baked into one.
+ */
+export function removePlayer(state: GameState, playerId: string): ActionResult {
+  if (state.phase !== "lobby" && state.phase !== "gameEnd") {
+    return err("WRONG_PHASE", "You can only leave from the lobby or a finished match");
+  }
+  if (!getPlayer(state, playerId)) {
+    return err("PLAYER_NOT_FOUND", "You are not in this game");
+  }
+  return ok({ ...state, players: state.players.filter((p) => p.id !== playerId) });
 }
 
 /** Host deals the next round. The previous round's winner takes the first turn. */
@@ -303,6 +374,7 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
     scores.set(id, scoreAfter);
     results.push({
       playerId: id,
+      name: getPlayer(state, id)?.name ?? "",
       hand: round.hands[id] ?? [],
       handValue: value,
       delta,

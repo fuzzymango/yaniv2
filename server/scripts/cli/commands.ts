@@ -18,6 +18,13 @@ export type Command =
   | { kind: "quit" }
   /** Begin the match. Only meaningful in the lobby, and only the host may do it. */
   | { kind: "start" }
+  /**
+   * Leave the room and go back to the main menu, keeping the connection. Deliberately
+   * not a flavour of `quit`: quitting closes the harness, this only gives up a seat.
+   */
+  | { kind: "menu" }
+  /** Another match for the same table. Only from a finished one, and only the host. */
+  | { kind: "again" }
   /** Deal the next round. What a bare enter means once a round has ended. */
   | { kind: "next" }
   /** Nothing to do; prompt again. */
@@ -30,17 +37,39 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
 
   /**
    * In the lobby nobody holds a hand and nothing is on the table, so none of the card
-   * commands below can mean anything: the one move available is the host's go-ahead.
-   * Handled before them so a mistyped card command is turned down with advice that
-   * applies, rather than being told to pick a card by number.
+   * commands below can mean anything: the moves available are the host's go-ahead and
+   * anyone's exit. Handled before them so a mistyped card command is turned down with
+   * lobby advice, rather than being told to pick a card by number. The advice names
+   * `start` alone — leaving is offered by the lobby frame itself, which is on screen
+   * directly above this message.
    *
    * Whether the typist is actually the host is not checked here — the server owns that,
    * and answers `NOT_HOST`. A second opinion in the harness could only ever disagree.
+   * `menu` is likewise sent for anyone: what it costs the rest of the table depends on
+   * whether the typist is the host, and that too is the server's call.
    */
   if (view.phase === "lobby") {
     if (line === "start") return { kind: "start" };
+    if (line === "menu") return { kind: "menu" };
     if (line === "") return { kind: "noop" };
     return { kind: "invalid", message: "waiting in the lobby — 'start' begins the match" };
+  }
+
+  /**
+   * A finished match reads like the lobby rather than like a round: the hands on screen
+   * are a result, not something anyone can still play from, so the card commands below
+   * are turned down here too. The two moves are the host's replay and anyone's exit —
+   * and, as in the lobby, which of them the typist may actually make is the server's
+   * call, answered with `NOT_HOST`.
+   */
+  if (view.phase === "gameEnd") {
+    if (line === "again") return { kind: "again" };
+    if (line === "menu") return { kind: "menu" };
+    if (line === "") return { kind: "noop" };
+    return {
+      kind: "invalid",
+      message: "the match is over — 'again' deals another, 'menu' leaves the room",
+    };
   }
 
   if (line === "yaniv") return { kind: "yaniv" };
@@ -80,5 +109,32 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
   return {
     kind: "turn",
     action: { discardCardIds: picked.map((card) => card!.id), draw },
+  };
+}
+
+export type MainMenuCommand =
+  | { kind: "create" }
+  | { kind: "join"; roomCode: string }
+  | { kind: "quit" }
+  | { kind: "noop" }
+  | { kind: "invalid"; message: string };
+
+/**
+ * What a typed line means at the main menu — before any room exists, so unlike
+ * `parseCommand` there is no view to read it against.
+ */
+export function parseMainMenuCommand(input: string): MainMenuCommand {
+  const line = input.trim();
+  const lower = line.toLowerCase();
+  if (lower === "") return { kind: "noop" };
+  if (lower === "q" || lower === "quit") return { kind: "quit" };
+  if (lower === "create") return { kind: "create" };
+
+  const joinMatch = line.match(/^join\s+(\S+)$/i);
+  if (joinMatch) return { kind: "join", roomCode: joinMatch[1]! };
+
+  return {
+    kind: "invalid",
+    message: "didn't understand that — try 'create', 'join <code>', or 'quit'",
   };
 }

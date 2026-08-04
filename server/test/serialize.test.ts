@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { callYaniv, startGame } from "../src/game.ts";
+import { callYaniv, removePlayer, startGame } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
 import { ids, makeState, unwrap } from "./helpers.ts";
@@ -183,5 +183,38 @@ describe("serializeStateForPlayer — round end", () => {
 
   it("stops highlighting a current turn", () => {
     assert.equal(serializeStateForPlayer(finished(), "p1").currentTurnPlayerId, null);
+  });
+
+  /**
+   * A finished round is a record of who played it, and a player may give their seat up
+   * once a match ends. Reading the name off the current roster would leave that record
+   * naming nobody — the one thing a client cannot recover, since the roster is all it
+   * ever sees.
+   */
+  it("still names a player who has left, in the round they played", () => {
+    // Leaving is only allowed once the match is over, so the fixture has to bust
+    // Grace past the score limit first.
+    const ended = unwrap(
+      callYaniv(
+        makeState({
+          players: [
+            { id: "p1", name: "Ada" },
+            { id: "p2", name: "Grace", score: 95 },
+          ],
+          hands: { p1: ["hearts-A", "hearts-2"], p2: ["spades-K", "spades-Q"] },
+        }),
+        "p1",
+      ),
+    );
+    const view = serializeStateForPlayer(unwrap(removePlayer(ended, "p2")), "p1");
+
+    assert.ok(view.roundResult);
+    assert.ok(
+      !view.opponents.some((o) => o.id === "p2"),
+      "the fixture should have freed Grace's seat",
+    );
+    const grace = view.roundResult.players.find((p) => p.playerId === "p2")!;
+    assert.equal(grace.name, "Grace");
+    assert.equal(grace.scoreAfter, 115, "and what the round cost her");
   });
 });

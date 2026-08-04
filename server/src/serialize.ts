@@ -7,13 +7,11 @@ import type {
 import { sortHand } from "@yaniv/shared";
 import type { GameState, RoundResult } from "./state.ts";
 
-function toRoundResultView(
-  state: GameState,
-  result: RoundResult,
-): RoundResultView {
-  const nameOf = (playerId: string) =>
-    state.players.find((p) => p.id === playerId)?.name ?? "";
-
+/**
+ * Names come from the result itself, not from the roster: a player may have given their
+ * seat up since the match ended, and the round they played is still theirs.
+ */
+function toRoundResultView(result: RoundResult): RoundResultView {
   return {
     roundNumber: result.roundNumber,
     callerId: result.callerId,
@@ -21,7 +19,7 @@ function toRoundResultView(
     winnerId: result.winnerId,
     players: result.players.map((p) => ({
       playerId: p.playerId,
-      name: nameOf(p.playerId),
+      name: p.name,
       hand: sortHand(p.hand),
       handValue: p.handValue,
       delta: p.delta,
@@ -118,7 +116,7 @@ export function serializeStateForPlayer(
     buriedCount: round.buried.length,
     roundResult:
       revealing && state.lastRoundResult
-        ? toRoundResultView(state, state.lastRoundResult)
+        ? toRoundResultView(state.lastRoundResult)
         : null,
     winnerIds: state.phase === "gameEnd" ? state.winnerIds : null,
   };

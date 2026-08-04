@@ -8,9 +8,16 @@
 
 import type { Server as HttpServer } from "node:http";
 import type { Ack, ClientToServerEvents, ServerToClientEvents } from "@yaniv/shared";
-import { Server } from "socket.io";
+import { Server, type Socket } from "socket.io";
 import { playBotTurns } from "./botTurns.ts";
-import { callYaniv, startGame, startNextRound, takeTurn } from "./game.ts";
+import {
+  callYaniv,
+  playAgain,
+  removePlayer,
+  startGame,
+  startNextRound,
+  takeTurn,
+} from "./game.ts";
 import { err } from "./result.ts";
 import type { RoomManager } from "./roomManager.ts";
 import type { Rng } from "./rng.ts";
@@ -36,6 +43,13 @@ interface SocketData {
 }
 
 export type YanivServer = Server<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  Record<string, never>,
+  SocketData
+>;
+
+type YanivSocket = Socket<
   ClientToServerEvents,
   ServerToClientEvents,
   Record<string, never>,
@@ -84,6 +98,42 @@ export function createSocketServer(
    */
   function runBotTurns(roomCode: string): void {
     playBotTurns(rooms, roomCode, () => broadcastState(roomCode));
+  }
+
+  /**
+   * Release a connection from the room it is bound to: no session, no membership.
+   *
+   * Both halves matter. Without the cleared session the connection would still be told
+   * `ALREADY_IN_ROOM` by every later create or join, so leaving a room would be as final
+   * as it is today. Without the `leave` it would stay a member of the Socket.io room, and
+   * a later room issued the same code would leak its broadcasts to a stranger.
+   *
+   * Clearing the session first is also what makes it safe to publish immediately
+   * afterwards: `broadcastState` skips sessionless sockets, so a player who has just left
+   * is never handed a view of a table they are no longer seated at — which the serializer
+   * would refuse to build in any case.
+   */
+  function release(target: YanivSocket, roomCode: string): void {
+    // Deleted rather than set to undefined: the field is genuinely absent on a connection
+    // that is not in a room, which is exactly the shape a fresh connection has.
+    delete target.data.session;
+    void target.leave(roomCode);
+  }
+
+  /**
+   * Shut a room down and turn everyone in it loose. Only the host does this, so everybody
+   * else is told why rather than being left staring at a table that has stopped
+   * answering. The closer hears it as their own ack instead.
+   */
+  function closeRoom(roomCode: string, reason: string, closer: YanivSocket): void {
+    // Copied first: `release` mutates the very membership set being walked.
+    for (const socketId of [...(io.sockets.adapter.rooms.get(roomCode) ?? [])]) {
+      const member = io.sockets.sockets.get(socketId);
+      if (!member) continue;
+      if (member.id !== closer.id) member.emit("roomClosed", reason);
+      release(member, roomCode);
+    }
+    rooms.removeRoom(roomCode);
   }
 
   io.on("connection", (socket) => {
@@ -211,6 +261,73 @@ export function createSocketServer(
       act(ack, (session, state, rng) =>
         startNextRound(state, session.playerId, rng),
       );
+    });
+
+    // Bots are deliberately not seated here the way `startGame` seats them: a seat given
+    // up by an exit to the menu stays given up. Otherwise ordinary — a randomly chosen
+    // opening player may well be a bot, which `act` plays out like any other handover.
+    socket.on("playAgain", (ack) => {
+      act(ack, (session, state, rng) => playAgain(state, session.playerId, rng));
+    });
+
+    /**
+     * Leave the room without dropping the connection — the one exit that is not a
+     * disconnect. Deliberately not `act`-shaped: its two outcomes are not both a
+     * `GameState` a single transition could return, so the branch lives here, where
+     * rooms and connections are owned.
+     *
+     * The caller does not choose which outcome they get. A non-host frees their own seat
+     * and the room plays on without them; the host closes it for everyone. See CONTEXT.md
+     * for why the two phases this is allowed from behave identically.
+     */
+    socket.on("exitToMenu", (ack) => {
+      const session = socket.data.session;
+      if (!session) {
+        ack(err("PLAYER_NOT_FOUND", "This connection is not in a room"));
+        return;
+      }
+
+      const state = rooms.getState(session.roomCode);
+      if (!state) {
+        ack(err("ROOM_NOT_FOUND", `No room with code ${session.roomCode}`));
+        return;
+      }
+      if (session.playerId === state.hostId) {
+        /*
+         * The host's leave is put to the same transition as everyone else's — it owns
+         * which phases a player may leave from, and repeating that rule here would give
+         * it two homes to drift between. Only the answer differs: the roster it hands
+         * back is thrown away, and the room closed instead.
+         */
+        const allowed = removePlayer(state, session.playerId);
+        if (!allowed.ok) {
+          ack({ ok: false, error: allowed.error });
+          return;
+        }
+
+        closeRoom(session.roomCode, "the host left the room", socket);
+        ack({ ok: true, value: null });
+        return;
+      }
+
+      // Read before the removal, since afterwards there is no player to read it from.
+      const name = getPlayer(state, session.playerId)?.name ?? "";
+
+      const result = rooms.apply(session.roomCode, (current) =>
+        removePlayer(current, session.playerId),
+      );
+      if (!result.ok) {
+        ack({ ok: false, error: result.error });
+        return;
+      }
+
+      release(socket, session.roomCode);
+      ack({ ok: true, value: null });
+
+      // The leaver is already out of the room, so this reaches exactly whoever stayed:
+      // who left, and then the table they are left with.
+      io.to(session.roomCode).emit("playerLeft", name);
+      broadcastState(session.roomCode);
     });
 
     /**

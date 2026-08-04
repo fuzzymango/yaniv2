@@ -28,6 +28,14 @@ export interface ClientToServerEvents {
   takeTurn: (action: TurnAction, ack: Ack<null>) => void;
   callYaniv: (ack: Ack<null>) => void;
   startNextRound: (ack: Ack<null>) => void;
+  /** Host only, from a finished match: another match for the same table, dealt at once. */
+  playAgain: (ack: Ack<null>) => void;
+  /**
+   * Leave the room, from the lobby or a finished match. What that costs the rest of the
+   * table is the server's decision, not the caller's: a non-host frees their own seat,
+   * the host closes the room. See CONTEXT.md.
+   */
+  exitToMenu: (ack: Ack<null>) => void;
 }
 
 export interface ServerToClientEvents {
@@ -35,5 +43,11 @@ export interface ServerToClientEvents {
   gameStateUpdate: (view: PlayerGameView) => void;
   playerJoined: (playerName: string) => void;
   playerLeft: (playerName: string) => void;
+  /**
+   * The room is gone and this connection is no longer in it. Distinct from a state
+   * update because there is no longer a state to publish — it is the last thing a
+   * player hears about that room.
+   */
+  roomClosed: (reason: string) => void;
   errorMessage: (error: GameError) => void;
 }

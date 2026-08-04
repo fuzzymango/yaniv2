@@ -37,8 +37,9 @@ multi-deck support is ever added, ids must gain a copy suffix or become UUIDs.
 - After dealing, one card is turned face up from the draw pile to start the discard.
   That card is available to be picked up by the first player.
 - Turn order is join order, and does not change between rounds.
-- The **host** starts round 1. In every later round, the player who *won* the previous
-  round starts (see §6).
+- The player who opens round 1 is chosen **uniformly at random** from the seated
+  players (see [ADR-0001](adr/0001-random-starting-player.md)). In every later round,
+  the player who *won* the previous round starts (see §6).
 
 ---
 
@@ -146,6 +147,11 @@ Round scores accumulate. The match ends as soon as any player's total is **great
 100**. The player with the **lowest** total wins; ties mean multiple winners.
 
 There is no score reduction on hitting a round number — see excluded variants.
+
+A finished match may be **played again** by the same table: every score returns to 0, the
+round count starts over, and round 1 is dealt straight away with its opening player drawn
+at random exactly as in §2. Anyone who has left in the meantime is simply not in the new
+match — their seat is not refilled.
 
 ---
 
