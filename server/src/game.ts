@@ -374,6 +374,7 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
     scores.set(id, scoreAfter);
     results.push({
       playerId: id,
+      name: getPlayer(state, id)?.name ?? "",
       hand: round.hands[id] ?? [],
       handValue: value,
       delta,

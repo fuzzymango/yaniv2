@@ -45,6 +45,27 @@ function lobbyView() {
   );
 }
 
+/** A view of a match Ada has just won, seen by Ada — who is also the host. */
+function gameEndView() {
+  const ended = unwrap(
+    callYaniv(
+      makeState({
+        players: [
+          { id: "p1", name: "Ada" },
+          // One bad round from busting past 100, which is what ends the match.
+          { id: "p2", name: "Grace", score: 95 },
+        ],
+        hands: { p1: ["clubs-2", "clubs-3"], p2: ["hearts-K", "spades-Q"] },
+        lastDiscard: ["hearts-8"],
+        drawPile: ["spades-2"],
+        currentTurnPlayerId: "p1",
+      }),
+      "p1",
+    ),
+  );
+  return serializeStateForPlayer(ended, "p1");
+}
+
 describe("parseCommand", () => {
   it("reads hand positions as a discard, drawing from the deck by default", () => {
     const command = parseCommand("2 3", midRoundView());
@@ -124,6 +145,33 @@ describe("parseCommand", () => {
   it("still quits from the lobby, and ignores a stray enter there", () => {
     assert.deepEqual(parseCommand("q", lobbyView()), { kind: "quit" });
     assert.deepEqual(parseCommand("", lobbyView()), { kind: "noop" });
+  });
+
+  it("reads 'again' and 'menu' as the two ways on from a finished match", () => {
+    assert.deepEqual(parseCommand("again", gameEndView()), { kind: "again" });
+    assert.deepEqual(parseCommand("menu", gameEndView()), { kind: "menu" });
+    // Mid-round neither means anything: there is no match to replay or leave yet.
+    assert.equal(parseCommand("again", midRoundView()).kind, "invalid");
+  });
+
+  it("turns down anything else typed at a finished match, without mentioning cards", () => {
+    const command = parseCommand("banana", gameEndView());
+
+    assert.equal(command.kind, "invalid");
+    const message = command.kind === "invalid" ? command.message : "";
+    assert.match(message, /again/, "the advice names the way on");
+    assert.match(message, /menu/, "and the way out");
+    assert.doesNotMatch(
+      message,
+      /number/,
+      "the hands on screen are a result, not a hand to play from",
+    );
+  });
+
+  it("still quits from a finished match, and ignores a stray enter there", () => {
+    // Unlike `roundEnd`, there is no next round for an enter to deal.
+    assert.deepEqual(parseCommand("q", gameEndView()), { kind: "quit" });
+    assert.deepEqual(parseCommand("", gameEndView()), { kind: "noop" });
   });
 
   it("reads a bare enter as 'deal the next round', but only once one has ended", () => {

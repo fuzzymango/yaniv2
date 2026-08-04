@@ -76,7 +76,11 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
   menu — `create` / `join <code>` / `q`/`quit` — rather than silently creating a room.
   Composition only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
   - **`cli/render.ts`** — `PlayerGameView` → a printable frame, plus the one screen that
-    isn't a view: the main menu, rendered before any room exists. Pure.
+    isn't a view: the main menu, rendered before any room exists. Pure. The final
+    standings are everyone the round result names, not just whoever is still seated:
+    a player who left after the match ended is listed from that record and marked
+    `(left)`. Dropping the row instead would take a departed winner's mark off the
+    board with them.
   - **`cli/commands.ts`** — a typed line + the current view → a `Command`, and a
     separate `parseMainMenuCommand` for the view-less main menu. Both pure and total;
     bad input returns `invalid`, never throws.
@@ -215,6 +219,13 @@ draw pile as a count only. Hands are revealed to everyone only at `phase: 'round
 `'gameEnd'`, when the rules require it. Tests assert no hidden card id appears anywhere
 in the serialized JSON string, and this has been mutation-tested (deliberately breaking
 the serializer to confirm the leak tests actually fail).
+
+**A finished round names its own players.** `PlayerRoundResult` carries a `name` copied
+in when the round is scored, and the serializer uses that rather than looking the id up
+in `players`. The duplication is deliberate: a seat can be given up once the match ends
+(`exitToMenu`), and a round result is the record of who played it — resolving names
+against the live roster left a departed player nameless on everyone else's scoreboard,
+with no way for a client to recover the name it was never sent.
 
 ### Player identity
 
@@ -417,12 +428,14 @@ Everyone else joins by code, up to six players. The host types `start` to begin,
 every seat still empty is filled with a bot.
 
 At the prompt: `start` begins the match (host only — anyone else is told `NOT_HOST`),
-`menu` leaves the lobby for the main menu without dropping the connection (a guest frees
-their seat; the host closes the lobby, and everyone else is told why and returned to their
+`menu` leaves the room for the main menu without dropping the connection (a guest frees
+their seat; the host closes the room, and everyone else is told why and returned to their
 own menu), `1 3` discards those cards by hand position and draws from the deck, `t1`/`t2`
 on the end takes a face-up card instead (`1 3 t2`), `yaniv` calls, enter deals the next
-round, `q` or Ctrl-D quits. Note that any player disconnecting still ends the room for
-everyone — see "Room lifecycle".
+round, `q` or Ctrl-D quits. A finished match stops at the standings rather than ending the
+session: `again` deals a fresh one to the same table (host only) and `menu` leaves, the
+same way it does from the lobby. Note that any player disconnecting still ends the room
+for everyone — see "Room lifecycle".
 
 ## Agent skills
 

@@ -44,6 +44,16 @@ function seatName(
 }
 
 /**
+ * Said on both screens a player may leave from, in the same words, because leaving means
+ * the same thing on both. What it costs the rest of the table is the server's decision
+ * and depends on who is asking, so the line promises neither outcome.
+ */
+const EXIT_HINT = dim("  or menu to leave the room");
+
+/** How a seat that has been given up is marked, wherever it is still worth listing. */
+const DEPARTED = "(left)";
+
+/**
  * An open lobby: the code to read aloud, who has arrived so far, and what happens next.
  *
  * Shares nothing with the mid-round frame — there is no hand, no table and no deck yet.
@@ -66,11 +76,25 @@ function renderLobby(view: PlayerGameView): string[] {
         ? "  type start when everyone has joined"
         : "  waiting for the host to start",
     ),
+    EXIT_HINT,
   );
-  // Said to everyone, because everyone may leave — what it costs the rest of the table
-  // is the server's decision, so the line does not promise one outcome or the other.
-  lines.push(dim("  or menu to leave the room"));
   return lines;
+}
+
+/**
+ * What is left to do once a match is over: the host deals another, everyone else waits
+ * on them. The same shape as the lobby's line, and for the same reason — who may replay
+ * is the server's call, which answers anyone else with `NOT_HOST`.
+ */
+function renderGameEndOptions(view: PlayerGameView): string[] {
+  return [
+    dim(
+      view.hostId === view.you.id
+        ? "  type again for another match with this table"
+        : "  waiting for the host to deal another match",
+    ),
+    EXIT_HINT,
+  ];
 }
 
 /**
@@ -141,9 +165,28 @@ function renderRoundResult(result: RoundResultView, viewerId: string): string[] 
 
 /** Final standings, lowest score first — in Yaniv, least is best. */
 function renderStandings(view: PlayerGameView): string[] {
-  const rows = [view.you, ...view.opponents]
-    .sort((a, b) => a.score - b.score)
-    .map((p) => ({ id: p.id, score: p.score, name: seatName(p.name, p.id, view.you.id) }));
+  const seated = [view.you, ...view.opponents].map((p) => ({
+    id: p.id,
+    score: p.score,
+    name: seatName(p.name, p.id, view.you.id),
+  }));
+
+  /**
+   * Seats given up since the match ended: on the round result, which records who played
+   * the match, but no longer on the roster. Leaving does not undo how the match
+   * finished, so the standings are everyone who played it, not only whoever stayed —
+   * otherwise a winner who walked away would take the winner's mark off the board with
+   * them.
+   */
+  const departed = (view.roundResult?.players ?? [])
+    .filter((p) => !seated.some((s) => s.id === p.playerId))
+    .map((p) => ({
+      id: p.playerId,
+      score: p.scoreAfter,
+      name: `${p.name} ${DEPARTED}`,
+    }));
+
+  const rows = [...seated, ...departed].sort((a, b) => a.score - b.score);
   const width = columnWidth(rows.map((r) => r.name));
   const lines = [`\n${bold("══ Match over ══════════════════════════════════")}`];
 
@@ -171,11 +214,16 @@ export function renderView(view: PlayerGameView): string {
   if (view.phase === "lobby") return renderLobby(view).join("\n");
 
   if (view.phase === "gameEnd") {
-    // Both: the round that ended it, then where everyone finished.
+    // All three: the round that ended it, where everyone finished, and what is left to
+    // do about it.
     const result = view.roundResult
       ? renderRoundResult(view.roundResult, view.you.id)
       : [];
-    return [...result, ...renderStandings(view)].join("\n");
+    return [
+      ...result,
+      ...renderStandings(view),
+      ...renderGameEndOptions(view),
+    ].join("\n");
   }
 
   if (view.roundResult)

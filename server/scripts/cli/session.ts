@@ -284,11 +284,9 @@ export async function runSession(
       const prompted = await waitFor(
         (position) => position.version > actedOn && isOurMove(position.view),
       );
-      // A finished match still ends the session outright, as it always has. The lobby
-      // is the one screen `menu` is offered from so far; the same way out of `gameEnd`,
-      // alongside playing again, is a later ticket's job.
-      if (prompted.view.phase === "gameEnd") return;
-
+      // A finished match is a screen with its own moves — another match, or the way
+      // out — so it is prompted at like any other rather than ending the session. The
+      // only thing that ends a session now is the player saying so.
       const prompt =
         prompted.view.phase === "roundEnd"
           ? dim("  [enter] for the next round ")
@@ -340,6 +338,7 @@ export async function runSession(
         if (command.kind === "turn") socket.emit("takeTurn", command.action, ack);
         else if (command.kind === "yaniv") socket.emit("callYaniv", ack);
         else if (command.kind === "start") socket.emit("startGame", ack);
+        else if (command.kind === "again") socket.emit("playAgain", ack);
         else if (command.kind === "menu") socket.emit("exitToMenu", ack);
         else socket.emit("startNextRound", ack);
       });

@@ -65,19 +65,28 @@ are filled with bots. Everyone plays through to a winner. At the prompt:
 | Input | Meaning |
 |---|---|
 | `start` | (host only) begin the match once everyone has arrived |
-| `menu` | (in the lobby) leave the room and go back to the main menu |
+| `menu` | (in the lobby, or at a finished match) leave the room for the main menu |
 | `1` or `2 3 4` | discard those cards by hand position, drawing from the deck |
 | `1 3 t2` | the same, but take face-up card 2 off the table instead |
 | `yaniv` | call Yaniv |
 | enter | deal the next round, once one has ended |
+| `again` | (host only, at a finished match) deal a fresh match to the same table |
 | `q` or Ctrl-D | quit |
 
+A finished match stops at the standings rather than ending the session. `again` starts
+another one immediately for everyone still seated — scores back to zero, hands dealt, no
+stop at a lobby — and is the host's alone; anyone else is told `NOT_HOST`, and the host is
+told `NOT_ENOUGH_PLAYERS` if too few people are left to play. A seat given up stays given
+up: nobody is replaced by a bot, and departed players show as `(left)` in the standings so
+the final scores still add up.
+
 Leaving with `menu` is not quitting: the connection stays up and you land back at the main
-menu, free to create or join another room. What it costs the rest of the table depends on
-who typed it — a guest frees only their own seat and the lobby carries on without them,
-while the host leaving closes the lobby for everyone, who are told why and returned to
-their own main menu. Mid-match there is still no graceful exit; `q` or Ctrl-D disconnects,
-which ends the room for everyone in it.
+menu, free to create or join another room. It works the same way from the lobby and from a
+finished match, and what it costs the rest of the table depends on who typed it — a guest
+frees only their own seat and the others carry on without them, while the host leaving
+closes the room for everyone, who are told why and returned to their own main menu.
+Mid-match there is still no graceful exit; `q` or Ctrl-D disconnects, which ends the room
+for everyone in it.
 
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot

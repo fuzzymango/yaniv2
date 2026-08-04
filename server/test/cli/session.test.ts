@@ -733,6 +733,227 @@ describe("runSession", () => {
     });
   });
 
+  /**
+   * The finished-match screen: the host's replay, and either player's way out of it.
+   *
+   * Every test here plays a real match to its end first — there is no shortcut, since
+   * `gameEnd` is reached by someone busting past the score limit and nothing else.
+   */
+  describe("a finished match", () => {
+    /**
+     * A scripted human who plays a match out and hands the prompt over once it is done.
+     *
+     * Until then: shed the highest card when it is our turn, deal the next round if we
+     * are the host, and otherwise wait — which is what a person in front of a terminal
+     * does while somebody else is thinking. Waiting inside the prompt is deliberate: the
+     * session reads a typed line against the newest position, so a line decided on a
+     * position that has since moved would be answering the wrong screen.
+     */
+    function playingTo(
+      latest: () => PlayerGameView | null,
+      atGameEnd: () => Promise<string | null>,
+    ): Ask {
+      /** Is this seat's move, rather than one it is waiting on somebody else for? */
+      const ours = (view: PlayerGameView) => {
+        const host = view.hostId === view.you.id;
+        if (view.phase === "lobby") return host && view.opponents.length > 0;
+        if (view.phase === "playing") return view.currentTurnPlayerId === view.you.id;
+        // Only the host deals the next round; everyone else waits for them to.
+        if (view.phase === "roundEnd") return host;
+        return true;
+      };
+
+      return async () => {
+        await waitUntil("something for this player to do", () => {
+          const view = latest();
+          return view !== null && ours(view);
+        });
+
+        const view = latest()!;
+        if (view.phase === "lobby") return "start";
+        if (view.phase === "roundEnd") return "";
+        if (view.phase === "gameEnd") return atGameEnd();
+        return String(view.you.hand.length);
+      };
+    }
+
+    /**
+     * Two humans and four bots, played through to a winner. Each side's `atGameEnd` is
+     * handed its own screen, since what a player does at the standings is mostly a
+     * reaction to what the other one has already done there.
+     */
+    async function twoHumanMatch(
+      server: Harness,
+      screens: { host: string[]; guest: string[] },
+      atGameEnd: {
+        host: (screen: string[]) => Promise<string | null>;
+        guest: (screen: string[]) => Promise<string | null>;
+      },
+    ): Promise<void> {
+      const { host, guest } = screens;
+      let hostView: PlayerGameView | null = null;
+      let guestView: PlayerGameView | null = null;
+
+      const hostSocket = await server.connect();
+      hostSocket.on("gameStateUpdate", (v) => {
+        hostView = v;
+      });
+      const hostSession = runSession(
+        hostSocket,
+        {
+          ask: playingTo(() => hostView, () => atGameEnd.host(host)),
+          output: (text) => host.push(text),
+        },
+        { playerName: "Ada", entry: { kind: "create" } },
+      );
+
+      const roomCode = await readRoomCode(host);
+
+      const guestSocket = await server.connect();
+      guestSocket.on("gameStateUpdate", (v) => {
+        guestView = v;
+      });
+      const guestSession = runSession(
+        guestSocket,
+        {
+          ask: playingTo(() => guestView, () => atGameEnd.guest(guest)),
+          output: (text) => guest.push(text),
+        },
+        { playerName: "Grace", entry: { kind: "join", roomCode } },
+      );
+
+      await Promise.all([hostSession, guestSession]);
+    }
+
+    it("deals another match on the same table when the host asks again", async () => {
+      const server = await startServer(7);
+      const printed: string[] = [];
+      const GUARD = 2000;
+      let view: PlayerGameView | null = null;
+      let prompts = 0;
+      let replayed = false;
+      /** The first position of the new match, captured where the developer sees it. */
+      let restarted: PlayerGameView | null = null;
+
+      try {
+        const socket = await server.connect();
+        socket.on("gameStateUpdate", (v) => {
+          view = v;
+        });
+
+        await runSession(
+          socket,
+          {
+            ask: hostAsk(async () => {
+              prompts += 1;
+              if (prompts > GUARD) return null;
+              const current = view!;
+              if (current.phase === "gameEnd") {
+                if (replayed) return null;
+                replayed = true;
+                return "again";
+              }
+              // The next prompt after the replay is the new match asking for a move:
+              // enough to see it dealt, and where this developer stops.
+              if (replayed) {
+                restarted ??= current;
+                return null;
+              }
+              return current.phase === "roundEnd" ? "" : String(current.you.hand.length);
+            }),
+            output: (text) => printed.push(text),
+          },
+          { playerName: "Ada", entry: { kind: "create" } },
+        );
+      } finally {
+        await server.close();
+      }
+
+      assert.ok(prompts <= GUARD, "the match should finish on its own, not hit the guard");
+      assert.ok(replayed, "the fixture should have reached a finished match");
+
+      const fresh = restarted!;
+      assert.equal(fresh.phase, "playing", "the new match is dealt, with no stop at a lobby");
+      assert.equal(fresh.roundNumber, 1, "and it is a new match, not another round");
+      assert.equal(fresh.you.hand.length, 5, "with a fresh hand");
+      for (const player of [fresh.you, ...fresh.opponents]) {
+        assert.equal(player.score, 0, `${player.name} starts the new match on nothing`);
+      }
+
+      const screen = plain(printed.join("\n"));
+      assert.match(screen, /Match over/, "the standings were on screen to reply to");
+      assert.doesNotMatch(screen, /✗/, "nothing scripted here should have been refused");
+    });
+
+    it("turns a guest's replay down, and lets them leave the host to it", async () => {
+      const server = await startServer(7);
+      const screens = { host: [] as string[], guest: [] as string[] };
+
+      try {
+        let guestTurns = 0;
+        await twoHumanMatch(server, screens, {
+          // The host sits at the standings until Grace has gone, then quits.
+          host: async (screen) => {
+            await waitUntil("Grace's seat to be freed", () =>
+              plain(screen.join("\n")).includes("Grace left"),
+            );
+            return null;
+          },
+          guest: async () => {
+            guestTurns += 1;
+            // Replaying is the host's alone — the server says so, not the harness.
+            if (guestTurns === 1) return "again";
+            if (guestTurns === 2) return "menu";
+            return "quit";
+          },
+        });
+      } finally {
+        await server.close();
+      }
+
+      const guest = plain(screens.guest.join("\n"));
+      assert.match(guest, /NOT_HOST/, "a guest is told whose call a replay is");
+      assert.match(guest, /join <code>/, "and lands back at the main menu when they leave");
+
+      const frames = screens.host.map(plain).filter((f) => /Match over/.test(f));
+      assert.ok(frames.length > 1, "the host is still looking at the finished match");
+      assert.match(
+        frames.at(-1)!,
+        /Grace \(left\)/,
+        "with the departed seat still named in the standings",
+      );
+    });
+
+    it("closes a finished match for everyone when the host leaves it", async () => {
+      const server = await startServer(7);
+      const screens = { host: [] as string[], guest: [] as string[] };
+
+      try {
+        let hostTurns = 0;
+        await twoHumanMatch(server, screens, {
+          host: async () => {
+            hostTurns += 1;
+            return hostTurns === 1 ? "menu" : "quit";
+          },
+          // Sitting at the standings with nothing to type: the close has to reach them
+          // there, and the prompt they were at carries over to the menu it drops them on.
+          guest: async (screen) => {
+            await waitUntil("Grace to be told the room closed", () =>
+              plain(screen.join("\n")).includes("room closed"),
+            );
+            return "quit";
+          },
+        });
+      } finally {
+        await server.close();
+      }
+
+      const guest = plain(screens.guest.join("\n"));
+      assert.match(guest, /host left/i, "the same reason the lobby gives, from this screen");
+      assert.match(guest, /join <code>/, "and the same main menu to land on");
+    });
+  });
+
   it("plays a full match through to a winner", async () => {
     const server = await startServer(7);
     const printed: string[] = [];
@@ -757,6 +978,9 @@ describe("runSession", () => {
             prompts += 1;
             if (prompts > GUARD) return null;
             const current = view!;
+            // A finished match no longer ends the session on its own — the standings
+            // are a screen with its own options — so this developer quits from it.
+            if (current.phase === "gameEnd") return null;
             return current.phase === "roundEnd" ? "" : String(current.you.hand.length);
           }),
           output: (text) => printed.push(text),
@@ -768,7 +992,7 @@ describe("runSession", () => {
     }
 
     assert.ok(prompts <= GUARD, "the match should finish on its own, not hit the guard");
-    assert.equal(view!.phase, "gameEnd", "the session returns once the match is over");
+    assert.equal(view!.phase, "gameEnd", "the match is played out to its end");
     assert.ok(view!.roundNumber > 1, "a full match runs several rounds");
 
     const screen = plain(printed.join("\n"));

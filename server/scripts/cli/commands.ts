@@ -23,6 +23,8 @@ export type Command =
    * not a flavour of `quit`: quitting closes the harness, this only gives up a seat.
    */
   | { kind: "menu" }
+  /** Another match for the same table. Only from a finished one, and only the host. */
+  | { kind: "again" }
   /** Deal the next round. What a bare enter means once a round has ended. */
   | { kind: "next" }
   /** Nothing to do; prompt again. */
@@ -51,6 +53,23 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
     if (line === "menu") return { kind: "menu" };
     if (line === "") return { kind: "noop" };
     return { kind: "invalid", message: "waiting in the lobby — 'start' begins the match" };
+  }
+
+  /**
+   * A finished match reads like the lobby rather than like a round: the hands on screen
+   * are a result, not something anyone can still play from, so the card commands below
+   * are turned down here too. The two moves are the host's replay and anyone's exit —
+   * and, as in the lobby, which of them the typist may actually make is the server's
+   * call, answered with `NOT_HOST`.
+   */
+  if (view.phase === "gameEnd") {
+    if (line === "again") return { kind: "again" };
+    if (line === "menu") return { kind: "menu" };
+    if (line === "") return { kind: "noop" };
+    return {
+      kind: "invalid",
+      message: "the match is over — 'again' deals another, 'menu' leaves the room",
+    };
   }
 
   if (line === "yaniv") return { kind: "yaniv" };
