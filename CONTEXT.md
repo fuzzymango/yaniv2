@@ -41,6 +41,21 @@ everyone. It is asymmetric by who invokes it, the same way in both phases:
 - The **host** exiting closes the room outright — every other human player is booted to
   the main menu, told the room closed because the host quit.
 
+## Selection
+
+The cards a player has chosen for their turn but has not yet discarded. A selection belongs
+to the player whose turn it is and to nobody else: it exists only in front of them, is sent
+nowhere until the turn is committed, and has no representation in `GameState` — the engine
+learns of it only as the finished discard of a completed turn.
+
+A selection is **ordered**, not a set, despite reading as one. For most discards the order
+is immaterial, but a joker extending a run takes its position from where it sits in the
+submitted order (`docs/rules.md` §4), so the same cards chosen in two different orders are
+two different moves — and they offer the next player different cards to pick up.
+
+Committing a selection is indivisible with drawing, so there is no moment at which a
+selection has been discarded but the turn is unfinished. A selection is pending or gone.
+
 ## Play again
 
 Starts a fresh match in the same room, for the same host and the same seated players
