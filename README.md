@@ -50,7 +50,9 @@ to choose them (chosen cards are outlined in yellow, tapped again to unchoose), 
 either the deck or one of the two end cards of the face-up discard. That second tap is the
 move — the chosen cards are discarded and the tapped card drawn, in one action. The deck
 and the face-up cards do nothing until what you have chosen is a legal discard, so a move
-the rules refuse is never offered in the first place.
+the rules refuse is never offered in the first place. Your own move lands immediately; the
+opponents' then play out one at a time, so you can see what each of them discarded rather
+than the table jumping straight back to your turn.
 
 The **Yaniv** button above your hand is the exception — the one control that is not a card.
 It lights up the moment your hand is worth 7 or less and is dead until then, and pressing

@@ -33,12 +33,21 @@ import { RoomManager } from "@yaniv/server/src/roomManager.ts";
 import { mulberry32 } from "@yaniv/server/src/rng.ts";
 import { createSocketServer } from "@yaniv/server/src/socketServer.ts";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
+import type { Clock } from "../src/pacing.ts";
 import { createSession, type Session, type SessionSnapshot } from "../src/session.ts";
 import { isLegalCall } from "../src/turn.ts";
+import { testClock } from "./helpers.ts";
 
 interface Harness {
-  /** A session on its own connection — one per player, as in a browser tab each. */
-  openSession: () => Promise<Session>;
+  /**
+   * A session on its own connection — one per player, as in a browser tab each.
+   *
+   * On a clock that runs every beat the moment it is asked for, unless the test hands one
+   * in: a suite about anything other than pacing wants the positions as the server sent
+   * them, not spread over seconds of real time. A test that *is* about pacing hands in a
+   * clock it holds.
+   */
+  openSession: (clock?: Clock) => Promise<Session>;
   close: () => Promise<void>;
 }
 
@@ -58,13 +67,13 @@ async function startServer(seed: number): Promise<Harness> {
   const clients: ClientSocket[] = [];
 
   return {
-    openSession: () =>
+    openSession: (clock = testClock()) =>
       new Promise((resolve) => {
         const client = connectClient(`http://localhost:${port}`, {
           transports: ["websocket"],
         });
         clients.push(client);
-        client.on("connect", () => resolve(createSession(client)));
+        client.on("connect", () => resolve(createSession(client, clock)));
       }),
     close: async () => {
       for (const client of clients) client.disconnect();
@@ -110,8 +119,12 @@ function waitForSnapshot(
  * the lobby *before* it acks the creation — so the first snapshot with a view in it is
  * one the host still cannot act from.
  */
-async function hostARoom(server: Harness, name: string): Promise<[Session, string]> {
-  const host = await server.openSession();
+async function hostARoom(
+  server: Harness,
+  name: string,
+  clock?: Clock,
+): Promise<[Session, string]> {
+  const host = await server.openSession(clock);
   host.createRoom(name);
   const snapshot = await waitForSnapshot(
     host,
@@ -144,8 +157,8 @@ async function hostAndGuest(server: Harness): Promise<[Session, Session]> {
  * before it stops, so waiting for our own turn is the only way to know the table has
  * come to rest — and the only position a turn can be taken from.
  */
-async function soloMatch(server: Harness): Promise<Session> {
-  const [host] = await hostARoom(server, "Ada");
+async function soloMatch(server: Harness, clock?: Clock): Promise<Session> {
+  const [host] = await hostARoom(server, "Ada", clock);
   host.startGame();
   await waitForSnapshot(
     host,
@@ -760,6 +773,122 @@ describe("taking a turn", () => {
         settled.view!.you.id,
         "the turn is still theirs",
       );
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("watching the bots play", () => {
+  /**
+   * Every position the session has published, in order and without repeats — a screen's
+   * whole experience of a chain. Snapshots change for reasons other than a new position
+   * (a card chosen, the controls locking), so identity is what says a move was drawn.
+   */
+  function positionsShownTo(session: Session): PlayerGameView[] {
+    let drawn = session.getSnapshot().view;
+    const shown: PlayerGameView[] = [];
+    session.subscribe(() => {
+      const { view } = session.getSnapshot();
+      if (view !== null && view !== drawn) shown.push(view);
+      drawn = view;
+    });
+    return shown;
+  }
+
+  it("shows a run of bot turns one move at a time", async () => {
+    const server = await startServer(7);
+    try {
+      const clock = testClock();
+      const host = await soloMatch(server, clock);
+      const ours = host.getSnapshot().view!;
+
+      // From here the test owns time, so nothing moves except when it says so.
+      clock.hold();
+      const shown = positionsShownTo(host);
+
+      takeATurn(host, ours);
+      await waitForSnapshot(host, "our own move", (s) => s.view !== ours);
+
+      // Our own move is on screen before the bots have finished arriving, which is the
+      // point of it going straight through: a player's own play never waits on a queue.
+      assert.equal(shown.length, 1, "shown at once, with no beat asked for first");
+      assert.equal(host.getSnapshot().busy, false, "and the controls came straight back");
+
+      // The rest of the chain lands within milliseconds — the server paces nothing.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.equal(
+        shown.length,
+        1,
+        "the bots' moves are waiting, not drawn over each other on arrival",
+      );
+
+      for (let beat = 0; clock.pending() > 0; beat++) {
+        assert.ok(beat < 20, "the chain should have played out long before this");
+        const before = shown.length;
+        clock.tick();
+        assert.ok(shown.length - before <= 1, "a beat is one move, never a jump");
+      }
+
+      // Our move and one per bot seat behind it. An early Yaniv would cut the chain short
+      // and this is not the seed for that — the number is what "five bot turns read as
+      // five moves" means when it is counted.
+      assert.equal(shown.length, MAX_PLAYERS, "one position drawn per move, and no more");
+      assert.deepEqual(
+        shown[shown.length - 1],
+        host.getSnapshot().view,
+        "and the chain ends on the position the server actually left the table in",
+      );
+
+      // What each bot discarded was on the table while its move was being shown. Card ids
+      // are unique within a round, so a repeated face-up discard would mean a move whose
+      // own discard was never drawn.
+      const discards = shown
+        .filter((view) => view.phase === "playing")
+        .map((view) => view.lastDiscard.map((card) => card.id).join(" "));
+      assert.equal(
+        new Set(discards).size,
+        discards.length,
+        "every move was watched with its own discard face up",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("drops what a closed room still had left to show", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, roomCode] = await hostARoom(server, "Ada");
+
+      const clock = testClock();
+      clock.hold();
+      const guest = await server.openSession(clock);
+      guest.joinRoom(roomCode, "Grace");
+      await seated(guest, "the guest");
+
+      // Two more players arrive while the first position is still on the guest's screen,
+      // so there are seats filled that they have not been shown yet. Any burst queues —
+      // a lobby filling up is the one that needs no match under way to arrange.
+      for (const name of ["Alan", "Edsger"]) {
+        const other = await server.openSession();
+        other.joinRoom(roomCode, name);
+        await seated(other, name);
+      }
+      assert.equal(
+        guest.getSnapshot().view!.opponents.length,
+        1,
+        "the guest is a position or two behind, so there is something waiting",
+      );
+
+      host.exitToMenu();
+
+      // What was waiting is a room that no longer exists. Drawing it a beat later would
+      // put the guest back in a lobby they have already been told is gone.
+      const closed = await waitForSnapshot(guest, "the room closing", (s) => s.view === null);
+      assert.match(closed.notice ?? "", /host/);
+      assert.equal(clock.pending(), 0, "the beat stopped with the room");
+      assert.equal(guest.getSnapshot().view, null, "and nothing was drawn behind it");
     } finally {
       await server.close();
     }

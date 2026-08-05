@@ -24,6 +24,8 @@ import type {
   ServerToClientEvents,
 } from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
+import type { Clock } from "./pacing.ts";
+import { createPacer, systemClock } from "./pacing.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, retainSelection, toggleSelection, turnFrom } from "./turn.ts";
 
@@ -150,7 +152,24 @@ const EMPTY_NAME: GameError = {
   message: "Enter a name before creating or joining a room",
 };
 
-export function createSession(socket: YanivClientSocket): Session {
+/**
+ * A position as it arrived, and how many had arrived when it did.
+ *
+ * The same pair the CLI keeps, and for the same reason — but the two halves are now used
+ * a moment apart: positions are queued on the way in and drawn on a beat (see
+ * `pacing.ts`), so "is this newer than the move we sent?" has to be asked of when it
+ * *landed*, not of when it reached the screen. A view drawn out of a chain that was
+ * already in flight when the move went out is not an answer to it.
+ */
+interface Position {
+  readonly view: PlayerGameView;
+  readonly version: number;
+}
+
+export function createSession(
+  socket: YanivClientSocket,
+  clock: Clock = systemClock,
+): Session {
   let snapshot: SessionSnapshot = {
     view: null,
     error: null,
@@ -168,8 +187,8 @@ export function createSession(socket: YanivClientSocket): Session {
   /**
    * How many positions have arrived, and which one a turn is waiting to be played past.
    *
-   * The counter is the CLI's `Position { view, version }` and `actedOn` watermark, kept
-   * here rather than in a component because it is the same fact about the same wire: the
+   * The counter is the CLI's `Position` and `actedOn` watermark, kept here rather than in
+   * a component because it is the same fact about the same wire: the
    * server acks a turn *before* it broadcasts the result, so for a moment after a move
    * the last view still shows the mover's own turn and their discarded cards in hand.
    * Controls released on the ack would come back to life over that stale position.
@@ -183,10 +202,7 @@ export function createSession(socket: YanivClientSocket): Session {
   let committedAt: number | null = null;
 
   /**
-   * Every broadcast is published the moment it lands. A run of bot turns arrives as one
-   * update per move, so a screen that renders on arrival shows the moves as moves — the
-   * pacing that makes them watchable belongs here too, but it is not needed until there
-   * is a table to watch.
+   * A position reaching the screen.
    *
    * A committed turn's lock is released here and only here, on a strictly newer position
    * than the one it was played from. That same filtering of the selection against the
@@ -198,9 +214,8 @@ export function createSession(socket: YanivClientSocket): Session {
    * in every round of a match — the deck is rebuilt, not shuffled on — so a choice carried
    * across a deal would come back chosen over whatever card inherited its id.
    */
-  socket.on("gameStateUpdate", (view) => {
-    version += 1;
-    const played = committedAt !== null && version > committedAt;
+  const show = ({ view, version: arrivedAt }: Position): void => {
+    const played = committedAt !== null && arrivedAt > committedAt;
     if (played) committedAt = null;
 
     publish({
@@ -211,6 +226,18 @@ export function createSession(socket: YanivClientSocket): Session {
           : [],
       busy: played ? false : snapshot.busy,
     });
+  };
+
+  /**
+   * The queue between the wire and the screen. A run of bot turns arrives as one update
+   * per move with no delay behind it, so drawing each on arrival would show only the last
+   * — see `pacing.ts` for why the pacing is the client's job and not the server's.
+   */
+  const paced = createPacer(show, clock);
+
+  socket.on("gameStateUpdate", (view) => {
+    version += 1;
+    paced.offer({ view, version });
   });
 
   /**
@@ -225,7 +252,10 @@ export function createSession(socket: YanivClientSocket): Session {
    */
   socket.on("roomClosed", (reason) => {
     // A turn in flight is one nobody will answer now, and a selection is a tap or two
-    // made in front of a table that is no longer there. Neither goes to the next room.
+    // made in front of a table that is no longer there. Neither goes to the next room —
+    // and neither does whatever the chain still had left to show, which would otherwise
+    // draw the closed room back over the menu, one beat at a time.
+    paced.reset();
     committedAt = null;
     publish({
       view: null,
@@ -303,6 +333,9 @@ export function createSession(socket: YanivClientSocket): Session {
         refuse(result.error);
         return;
       }
+      // Anything still queued belongs to a table this player has got up from, and a beat
+      // later would sit them back down at it.
+      if (leavesRoom) paced.reset();
       publish({
         error: null,
         busy: false,

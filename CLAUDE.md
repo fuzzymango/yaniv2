@@ -128,6 +128,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `main.tsx` | The entrypoint. Opens the socket and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
 | `session.ts` | The session core: owns the socket, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
+| `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
 | `App.tsx` | Which screen: no view is the main menu, everything else is a function of `view.phase` |
@@ -443,6 +444,39 @@ The ordering trap is worth stating plainly: the first snapshot carrying a view a
 entering a room is one the player still cannot act from. Tests wait on
 `view !== null && !busy` rather than on the view alone.
 
+**Positions are drawn on a clock, not on arrival.** A run of bot turns lands as one
+broadcast per move within a few milliseconds of itself (see "Broadcasting" above), so a
+session that published each on arrival would show only the last — the table jumping from
+the player's own move to their next turn with everything in between invisible. `pacing.ts`
+queues them instead: **the first arrival goes straight through, and anything landing in the
+beat behind it is let go one per `PACE_MS` (700ms)**. A move of the player's own is a lone
+arrival and is therefore never delayed, which is the whole reason the rule is "first one
+free" rather than "one every beat". The queue is phase-blind: any burst is spaced, a lobby
+filling up as much as a chain of bot turns. A round that a bot's Yaniv ends is *why* —
+the scored position is the last link of the chain, and pacing only `playing` would skip
+straight past the move that ended it.
+
+The accepted cost is stated in `pacing.ts` and worth repeating: a beat is armed after
+every release, so a position landing inside the beat behind a drawn one waits out the rest
+of it — up to `PACE_MS`, and with `busy` still held if it is the player's own move.
+Nothing in a queue can tell a lone arrival from the first of a chain except by giving the
+chain a beat to appear in. What it buys is that no position is replaced before it has been
+readable for a beat, which is the whole point.
+
+Two things fall out of the queue and are worth keeping straight:
+
+- **The watermark counts arrivals, not drawings.** A queued position carries the `version`
+  it *landed* on, and `busy` releases on drawing one newer than the move. Counting
+  drawings would let a position that was already in flight when the move went out pass for
+  an answer to it.
+- **A room that has gone takes its queue with it.** `roomClosed` and a successful
+  `exitToMenu` both `reset` the pacer; otherwise the next beat would draw a table the
+  player has already left back over the main menu.
+
+The clock is injected (`systemClock` by default) so the queue is driven a beat at a time
+under `node:test`. Every other client suite passes a clock that runs each beat the instant
+it is asked for, which is the same behaviour those suites had before pacing existed.
+
 **A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
 `null`, `commitTurn` returns, and no error is published — the screen should not have
 offered a target that lands there, and a player who found a dead one has asked for nothing
@@ -515,9 +549,9 @@ Not oversights — deferred on purpose, in this order of likely next work:
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
 - **The rest of the client.** Every screen a match passes through is built — main menu,
-  lobby, table, scored round, finished match — so a browser plays one end to end. What is
-  left is pacing a chain of bot turns for a human to watch (#38) and surfacing a dropped
-  connection and a reload warning (#39).
+  lobby, table, scored round, finished match — so a browser plays one end to end, and a run
+  of bot turns plays out as separate moves. What is left is surfacing a dropped connection
+  and a reload warning (#39).
 - **Disambiguating a joker that extends a run.** The browser client sends the selection in
   tap order, so tap order decides where the joker sits (`docs/rules.md` §4) — which is
   invisible on the screen. An accepted wart, and a deliberate one: a step that asked the
