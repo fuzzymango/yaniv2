@@ -25,7 +25,7 @@ import type {
 } from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
 import type { DrawSource } from "./turn.ts";
-import { retainSelection, toggleSelection, turnFrom } from "./turn.ts";
+import { isLegalCall, retainSelection, toggleSelection, turnFrom } from "./turn.ts";
 
 /**
  * Declared here rather than imported from the CLI harness, which has the identical
@@ -111,6 +111,21 @@ export interface Session {
    * been refused nothing.
    */
   commitTurn: (source: DrawSource) => void;
+  /**
+   * End the round on a hand worth the threshold or less (docs/rules.md §6). It replaces a
+   * turn rather than being part of one, which is why it is its own intent and takes no
+   * selection.
+   *
+   * A call the rules do not permit sends nothing and says nothing, exactly as a turn does:
+   * the control should have been inert, and a player who tapped a dead one has asked for
+   * nothing.
+   */
+  callYaniv: () => void;
+  /**
+   * Deal the next round from a scored one. Host only — and, as with `startGame`, the
+   * server is what says so, answering anyone else with `NOT_HOST`.
+   */
+  startNextRound: () => void;
 }
 
 /**
@@ -166,6 +181,11 @@ export function createSession(socket: YanivClientSocket): Session {
    * than the one it was played from. That same filtering of the selection against the
    * arriving hand is what empties it afterwards: the cards it named have just been
    * discarded, so nothing survives the move that made them.
+   *
+   * A position with no move to make from it takes the selection with it, rather than
+   * filtering it. A round that has been scored is over, and a card id is the same string
+   * in every round of a match — the deck is rebuilt, not shuffled on — so a choice carried
+   * across a deal would come back chosen over whatever card inherited its id.
    */
   socket.on("gameStateUpdate", (view) => {
     version += 1;
@@ -174,7 +194,10 @@ export function createSession(socket: YanivClientSocket): Session {
 
     publish({
       view,
-      selection: retainSelection(snapshot.selection, view.you.hand),
+      selection:
+        view.phase === "playing"
+          ? retainSelection(snapshot.selection, view.you.hand)
+          : [],
       busy: played ? false : snapshot.busy,
     });
   });
@@ -278,6 +301,32 @@ export function createSession(socket: YanivClientSocket): Session {
     });
   };
 
+  /**
+   * How a move goes out — a turn, or a call that replaces one.
+   *
+   * Unlike `act`, the lock is not released by the ack: the server acks a move before it
+   * broadcasts the position it produced, so the controls would come back to life over a
+   * table that still shows the move as unplayed. The watermark is taken before the emit,
+   * so the ack cannot be mistaken for the position being waited on.
+   *
+   * A refusal is the exception and lets go at once. Nothing was published, so no newer
+   * position is coming — and the move is still theirs to make.
+   *
+   * Unlike `act` it takes no `busy` guard of its own: each caller has already turned back
+   * for reasons of its own — a locked screen, no room, a move the rules do not permit —
+   * before there is a move worth sending.
+   */
+  const play = (emit: (ack: Ack<null>) => void): void => {
+    committedAt = version;
+    publish({ error: null, busy: true });
+
+    emit((result) => {
+      if (result.ok) return;
+      committedAt = null;
+      refuse(result.error);
+    });
+  };
+
   return {
     subscribe: (listener) => {
       listeners.add(listener);
@@ -330,19 +379,23 @@ export function createSession(socket: YanivClientSocket): Session {
       const action = turnFrom(snapshot.selection, snapshot.view, source);
       if (action === null) return;
 
-      // Watermarked before the emit, so the ack — which arrives ahead of the broadcast —
-      // cannot be mistaken for the position the lock is waiting on.
-      committedAt = version;
-      publish({ error: null, busy: true });
-
-      socket.emit("takeTurn", action, (result) => {
-        // A success is settled by the broadcast behind it, not here.
-        if (result.ok) return;
-        // A refusal publishes nothing, so no newer position is coming and the lock has
-        // to be let go now — the turn is still theirs, and so is what they chose.
-        committedAt = null;
-        refuse(result.error);
-      });
+      play((ack) => socket.emit("takeTurn", action, ack));
     },
+
+    callYaniv: () => {
+      if (snapshot.busy || snapshot.view === null) return;
+
+      // The same rulebook the server will judge the call by, and the same silence when it
+      // says no: an inert control that was tapped anyway has asked for nothing. Whether it
+      // is this player's turn is left to the server, exactly as it is for a discard.
+      if (!isLegalCall(snapshot.view.you.hand)) return;
+
+      play((ack) => socket.emit("callYaniv", ack));
+    },
+
+    // Ack-settled, like `startGame` and for the same reason: dealing is answered by the
+    // ack itself rather than by a move landing in a position already on the screen. The
+    // lock still holds across the round trip, which is what a double tap needs it to.
+    startNextRound: () => act((ack) => socket.emit("startNextRound", ack)),
   };
 }

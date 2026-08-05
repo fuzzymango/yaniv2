@@ -67,7 +67,7 @@ export function Lobby({ view, error, busy, onStart, onExit }: LobbyProps) {
         ) : (
           // Its own class rather than `notice`, which carries news that has just
           // arrived. This is a standing fact about the screen.
-          <p className="lobby__hint">The host starts the match.</p>
+          <p className="hint">The host starts the match.</p>
         )}
 
         {/*

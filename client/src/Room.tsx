@@ -1,12 +1,12 @@
 /**
- * The two screens still to be built — a scored round and a finished match — standing in
- * for each other until they are.
+ * The screen still to be built — a finished match — and the fallback for a scored round
+ * that arrives without the round it scored.
  *
- * The lobby and the table have their own screens now (`Lobby.tsx`, `Table.tsx`), so what
- * is left here is the two phases that show a round already played. Each is a function of
- * `view.phase` and each is built as it is reached; until then this at least says which
- * room a player is in and what is happening in it, so a finished round does not look like
- * a blank page.
+ * Everything else has a screen of its own now (`Lobby.tsx`, `Table.tsx`, `RoundEnd.tsx`),
+ * so what is left here is `gameEnd`, which is built when it is reached. `roundEnd` reaches
+ * this only in the position the wire type allows and the server does not produce — a
+ * scored round with a null `roundResult` — where saying what is happening beats a blank
+ * page or a crash.
  */
 
 import type { Phase, PlayerGameView } from "@yaniv/shared";

@@ -9,8 +9,9 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { pickupCandidates } from "@yaniv/shared";
+import { YANIV_THRESHOLD, canCallYaniv, handValue, pickupCandidates } from "@yaniv/shared";
 import {
+  isLegalCall,
   isLegalSelection,
   retainSelection,
   takeableIds,
@@ -87,6 +88,34 @@ describe("isLegalSelection", () => {
     // Tapping cannot produce this, but the module is total: a repeated id would read
     // as a pair of equal ranks and be sent as a legal discard the server then refuses.
     assert.equal(isLegalSelection(["hearts-7", "hearts-7"], HAND), false);
+  });
+});
+
+describe("isLegalCall", () => {
+  it("offers the call on a hand worth exactly the threshold", () => {
+    const hand = cards("hearts-4", "spades-3");
+    assert.equal(handValue(hand), YANIV_THRESHOLD, "the boundary, not near it");
+    assert.equal(isLegalCall(hand), true);
+  });
+
+  it("offers the call on a hand under the threshold", () => {
+    assert.equal(isLegalCall(cards("joker-1", "clubs-A")), true);
+  });
+
+  it("withholds it on a hand one point over", () => {
+    const hand = cards("hearts-4", "spades-4");
+    assert.equal(handValue(hand), YANIV_THRESHOLD + 1);
+    assert.equal(isLegalCall(hand), false);
+  });
+
+  it("withholds it on a freshly dealt hand", () => {
+    assert.equal(isLegalCall(HAND), false);
+  });
+
+  it("answers exactly what the rulebook does, so the control is never one the server refuses", () => {
+    for (const hand of [HAND, cards("hearts-4", "spades-3"), cards("joker-1")]) {
+      assert.equal(isLegalCall(hand), canCallYaniv(hand));
+    }
   });
 });
 

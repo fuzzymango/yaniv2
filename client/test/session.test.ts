@@ -19,12 +19,20 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
-import { HAND_SIZE, MAX_PLAYERS, isValidSet } from "@yaniv/shared";
+import {
+  HAND_SIZE,
+  MAX_PLAYERS,
+  handValue,
+  isValidSet,
+  legalDiscards,
+  pickupCandidates,
+} from "@yaniv/shared";
 import { RoomManager } from "@yaniv/server/src/roomManager.ts";
 import { mulberry32 } from "@yaniv/server/src/rng.ts";
 import { createSocketServer } from "@yaniv/server/src/socketServer.ts";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
 import { createSession, type Session, type SessionSnapshot } from "../src/session.ts";
+import { isLegalCall } from "../src/turn.ts";
 
 interface Harness {
   /** A session on its own connection — one per player, as in a browser tab each. */
@@ -169,6 +177,61 @@ async function twoHumanMatch(server: Harness): Promise<[Session, Session]> {
     waitForSnapshot(guest, "the guest's table", restsOnAHuman),
   ]);
   return seenByHost.view!.currentTurnPlayerId === hostId ? [host, guest] : [guest, host];
+}
+
+/**
+ * The seed the Yaniv tests are played on.
+ *
+ * Reaching a callable hand is a race: five bots are shedding as fast as this seat is and
+ * each of them calls the instant it is legal, so on most deals a bot ends the round first.
+ * This one is a deal where the human seat gets there — in two turns, which also keeps the
+ * suite quick. Nothing else about it is special, and `playUntilCallable` says so out loud
+ * if it ever stops being true.
+ */
+const HUMAN_CALLS_FIRST = 27;
+
+/** Worth taking face up rather than gambling on the deck, for the driver below. */
+const CHEAP_PICKUP = 3;
+
+/**
+ * Play the one human seat down to a hand it may call Yaniv on, and stop there.
+ *
+ * The policy is: shed the most valuable set the rules allow, and take a face-up card only
+ * when it is cheap enough to be worth having. That is roughly what the bots do, which is
+ * the point — a seat playing worse than they do never gets to call at all. It reads the
+ * rulebook for what is legal, exactly as the client does, and decides for itself what is
+ * wise; there is no import from `bot.ts` here, and a smarter bot must not quietly change
+ * what this drives.
+ */
+async function playUntilCallable(session: Session): Promise<SessionSnapshot> {
+  for (let move = 0; move < 100; move++) {
+    const resting = await waitForSnapshot(
+      session,
+      "a move of our own",
+      (s) =>
+        s.view !== null &&
+        !s.busy &&
+        (s.view.phase !== "playing" || s.view.currentTurnPlayerId === s.view.you.id),
+    );
+    const view = resting.view!;
+    assert.equal(view.phase, "playing", "a bot called Yaniv before this seat could");
+    if (isLegalCall(view.you.hand)) return resting;
+
+    const heaviest = legalDiscards(view.you.hand).sort(
+      (a, b) => handValue(b) - handValue(a),
+    )[0]!;
+    for (const card of heaviest) session.toggleCard(card.id);
+
+    const cheapest = [...pickupCandidates(view.lastDiscard)].sort(
+      (a, b) => a.value - b.value,
+    )[0];
+    session.commitTurn(
+      cheapest !== undefined && cheapest.value <= CHEAP_PICKUP
+        ? { kind: "discard", cardId: cheapest.id }
+        : { kind: "deck" },
+    );
+  }
+  throw new Error("the hand never came down to one Yaniv could be called on");
 }
 
 describe("the session core", () => {
@@ -619,6 +682,118 @@ describe("taking a turn", () => {
         settled.view!.you.id,
         "the turn is still theirs",
       );
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("calling Yaniv", () => {
+  it("ends the round and turns every hand face up", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const host = await soloMatch(server);
+      await playUntilCallable(host);
+
+      host.callYaniv();
+      assert.equal(host.getSnapshot().busy, true, "locked the instant the call went out");
+
+      const scored = await waitForSnapshot(host, "the round to be scored", (s) => !s.busy);
+
+      // The same timing the lock on a turn is about: the server acks the call before it
+      // broadcasts the scored round, so a lock released on the ack would let go over a
+      // position still showing a round in progress.
+      assert.equal(scored.view!.phase, "roundEnd", "released on the scored round, not the ack");
+      assert.equal(scored.error, null);
+
+      const result = scored.view!.roundResult;
+      assert.ok(result, "a finished round comes with the round it finished");
+      assert.equal(result.callerId, scored.view!.you.id, "this seat called it");
+      assert.equal(result.players.length, MAX_PLAYERS, "every seat is accounted for");
+      assert.ok(
+        result.players.every((p) => p.hand.length > 0),
+        "every hand is face up, which is what makes the call checkable",
+      );
+
+      const you = result.players.find((p) => p.playerId === scored.view!.you.id)!;
+      assert.equal(
+        you.scoreAfter,
+        scored.view!.you.score,
+        "the round's points and the score they made are the same story",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("never calls Yaniv on a hand the rules do not permit it on", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const host = await soloMatch(server);
+      const hand = host.getSnapshot().view!.you.hand;
+      assert.equal(isLegalCall(hand), false, "five dealt cards are worth more than the threshold");
+
+      // A control that is inert should send nothing when it is tapped anyway, and say
+      // nothing either: nothing was asked for, so nothing was refused.
+      host.callYaniv();
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const settled = host.getSnapshot();
+      assert.equal(settled.busy, false, "nothing was sent, so nothing is locked");
+      assert.equal(settled.error, null);
+      assert.equal(settled.view!.phase, "playing", "the round is still being played");
+      assert.equal(settled.view!.currentTurnPlayerId, settled.view!.you.id, "the turn is still theirs");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("leaves nothing chosen behind on the round that ended", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const host = await soloMatch(server);
+      const ready = await playUntilCallable(host);
+
+      // Choosing cards and then calling instead is an ordinary way to change your mind,
+      // and what it leaves behind matters: a card id is the same string every round (the
+      // deck is rebuilt, not shuffled on), so a choice carried across a deal would come
+      // back highlighted over whatever card inherited its id.
+      host.toggleCard(ready.view!.you.hand[0]!.id);
+      host.callYaniv();
+
+      const scored = await waitForSnapshot(
+        host,
+        "the scored round",
+        (s) => s.view?.phase === "roundEnd" && !s.busy,
+      );
+      assert.deepEqual(scored.selection, [], "a scored round has no move to make from it");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("deals the next round when the host asks for it", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const host = await soloMatch(server);
+      await playUntilCallable(host);
+      host.callYaniv();
+      await waitForSnapshot(
+        host,
+        "the scored round",
+        (s) => s.view?.phase === "roundEnd" && !s.busy,
+      );
+
+      host.startNextRound();
+
+      const dealt = await waitForSnapshot(
+        host,
+        "the next round",
+        (s) => s.view?.phase === "playing",
+      );
+      assert.equal(dealt.view!.roundNumber, 2);
+      assert.equal(dealt.view!.you.hand.length, HAND_SIZE, "a fresh hand, not the scored one");
+      assert.equal(dealt.view!.roundResult, null, "the last round's hands are off the table");
     } finally {
       await server.close();
     }

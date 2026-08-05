@@ -9,6 +9,7 @@
 import { Lobby } from "./Lobby.tsx";
 import { MainMenu } from "./MainMenu.tsx";
 import { Room } from "./Room.tsx";
+import { RoundEnd } from "./RoundEnd.tsx";
 import { Table } from "./Table.tsx";
 import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
@@ -53,6 +54,25 @@ export function App({ session }: { session: Session }) {
         busy={busy}
         onToggleCard={session.toggleCard}
         onCommitTurn={session.commitTurn}
+        onCallYaniv={session.callYaniv}
+      />
+    );
+  }
+
+  /*
+   * A scored round comes with the round it scored — the serializer populates `roundResult`
+   * at `roundEnd` and `gameEnd` and nowhere else. The wire type still allows a null, so the
+   * screen that needs one is reached only when there is one, and the stand-in below catches
+   * a position that should not exist rather than a component asserting its way past it.
+   */
+  if (phase === "roundEnd" && view.roundResult !== null) {
+    return (
+      <RoundEnd
+        view={view}
+        result={view.roundResult}
+        error={error}
+        busy={busy}
+        onNextRound={session.startNextRound}
       />
     );
   }

@@ -52,6 +52,12 @@ move — the chosen cards are discarded and the tapped card drawn, in one action
 and the face-up cards do nothing until what you have chosen is a legal discard, so a move
 the rules refuse is never offered in the first place.
 
+The **Yaniv** button above your hand is the exception — the one control that is not a card.
+It lights up the moment your hand is worth 7 or less and is dead until then, and pressing
+it ends the round. Every hand is then turned face up on a scoreboard showing who called,
+whether they were Assafed, and what the round cost each player against their new total. The
+host deals the next round from there.
+
 **Play in the terminal (`play`).** A real socket client, so it needs a server running.
 Start the server first:
 
@@ -154,6 +160,6 @@ npm run demo --workspace=@yaniv/server -- --seed 42 --players 4
 
 Disconnect/reconnect handling (dropping a connection currently ends the room for everyone),
 persistence (rooms are in-memory, so a restart drops games in progress), and the last of
-the client screens (the main menu, lobby, and table exist; calling Yaniv, round results,
-and game-end standings are still placeholders, so a browser match plays turns but cannot
-yet be ended from the browser).
+the client screens (the main menu, lobby, table and scored round exist; the game-end
+standings are still a placeholder, so a browser match plays and scores rounds but the
+finish is only announced, not shown).

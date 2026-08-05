@@ -123,15 +123,16 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 |---|---|
 | `main.tsx` | The entrypoint. Opens the socket and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
 | `session.ts` | The session core: owns the socket, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
-| `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `takeableIds`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
+| `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
 | `App.tsx` | Which screen: no view is the main menu, everything else is a function of `view.phase` |
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, start (host only), leave |
-| `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, and a turn as two taps |
+| `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, a turn as two taps, and the Yaniv call |
+| `RoundEnd.tsx` | `phase: 'roundEnd'` — every hand face up, who called, whether they were Assafed, and what the round cost each player |
 | `PlayingCard.tsx` | One card, drawn in CSS. Presentational only — it does not know what a card means where it sits |
-| `Room.tsx` | Stands in for `roundEnd`/`gameEnd` until each is built |
+| `Room.tsx` | Stands in for `gameEnd` until it is built, and for a `roundEnd` with no result behind it |
 | `styles.css` | Mobile-first. Cards are drawn in CSS — no image assets |
 
 See "The client's session core" below for what the split buys.
@@ -414,17 +415,24 @@ Four fields, and each answers a different question:
 - **`selection`** — the cards tapped for the next turn, by id, in tap order. It lives here
   rather than in a component because it is a fact that has to survive views arriving
   underneath it: a card that leaves the hand leaves the selection with it, which is
-  `retainSelection` applied to every broadcast. That same filter is what empties it after
-  a committed turn — the cards it named have just been discarded.
+  `retainSelection` applied to every broadcast of a position still being played. That same
+  filter is what empties it after a committed turn — the cards it named have just been
+  discarded. A broadcast of any *other* phase empties it outright rather than filtering it:
+  a scored round has no move to make from it, and a card id is the same string in every
+  round of a match (the deck is rebuilt, not shuffled on), so a choice carried across a
+  deal would come back chosen over whatever card inherited its id.
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room
 settles on the **ack**: entry has been broadcast before it is acked, and a departing
-connection is published to no longer. A **turn settles on a strictly newer position** —
-the CLI's `Position { view, version }` / `actedOn` watermark, kept in the session core.
-The server acks an in-game action *before* it broadcasts the result, so controls released
-on the ack would come back to life over a position still showing the mover's own turn and
-their discarded cards in hand. A rejected turn is the exception and releases at once:
-nothing was published, so no newer position is coming, and the turn is still theirs.
+connection is published to no longer. So does dealing the next round, which produces a
+position rather than moving within one. A **move settles on a strictly newer position** —
+that is a turn, or the Yaniv call that replaces one, both sent through the same `play`
+helper, which keeps the CLI's `Position { view, version }` / `actedOn` watermark in the
+session core. The server acks an in-game action *before* it broadcasts the result, so
+controls released on the ack would come back to life over a position still showing the
+mover's own turn and their discarded cards in hand. A rejected move is the exception and
+releases at once: nothing was published, so no newer position is coming, and the turn is
+still theirs.
 
 The ordering trap is worth stating plainly: the first snapshot carrying a view after
 entering a room is one the player still cannot act from. Tests wait on
@@ -433,11 +441,13 @@ entering a room is one the player still cannot act from. Tests wait on
 **A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
 `null`, `commitTurn` returns, and no error is published — the screen should not have
 offered a target that lands there, and a player who found a dead one has asked for nothing
-and been refused nothing. The legality of a *discard* is the only rule the client applies
-ahead of the server, and it applies it out of the same rulebook (ADR-0002), because a
-silent round trip to be told no is 50–200ms of nothing that a touch screen makes
-indistinguishable from a tap that did not register. Turn order and everything else the
-server owns are offered, sent, and answered with a `GameError`.
+and been refused nothing. `callYaniv` is the same shape: `isLegalCall` says no, the intent
+returns, the inert control that was tapped anyway has asked for nothing. **What is legal
+about the cards** — a discard being a set, a hand being low enough to call on — is the whole
+of what the client applies ahead of the server, and it applies it out of the same rulebook
+(ADR-0002), because a silent round trip to be told no is 50–200ms of nothing that a touch
+screen makes indistinguishable from a tap that did not register. Turn order and everything
+else the server owns are offered, sent, and answered with a `GameError`.
 
 **Leaving is the one action answered by the ack alone.** Everything else is confirmed by
 the broadcast behind it, but the server stops publishing to a connection that has left, so
@@ -499,10 +509,10 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **Choosing how many opponents you want.** `startGame` always fills to six. Adding bots
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
-- **The rest of the client.** The main menu, the lobby and the table are built; a scored
-  round and a finished match are not, and `Room.tsx` stands in for both (issue #31). Nor,
-  yet, is calling Yaniv (#36), pacing a chain of bot turns for a human to watch (#38), or
-  surfacing a dropped connection and a reload warning (#39).
+- **The rest of the client.** The main menu, the lobby, the table and a scored round are
+  built; a finished match is not, and `Room.tsx` stands in for it (issue #31). Nor, yet, is
+  pacing a chain of bot turns for a human to watch (#38), or surfacing a dropped connection
+  and a reload warning (#39).
 - **Disambiguating a joker that extends a run.** The browser client sends the selection in
   tap order, so tap order decides where the joker sits (`docs/rules.md` §4) — which is
   invisible on the screen. An accepted wart, and a deliberate one: a step that asked the

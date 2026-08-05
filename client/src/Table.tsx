@@ -22,7 +22,7 @@ import { handValue } from "@yaniv/shared";
 import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
 import { bySeat } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
-import { isLegalSelection, takeableIds } from "./turn.ts";
+import { isLegalCall, isLegalSelection, takeableIds } from "./turn.ts";
 
 interface TableProps {
   view: PlayerGameView;
@@ -32,6 +32,8 @@ interface TableProps {
   onToggleCard: (cardId: string) => void;
   /** The tap that plays the turn — a draw target, because the draw *is* the commit. */
   onCommitTurn: (source: DrawSource) => void;
+  /** End the round. Offered only on a hand the rules allow it on — see below. */
+  onCallYaniv: () => void;
 }
 
 export function Table({
@@ -41,6 +43,7 @@ export function Table({
   busy,
   onToggleCard,
   onCommitTurn,
+  onCallYaniv,
 }: TableProps) {
   const yourTurn = view.currentTurnPlayerId === view.you.id;
 
@@ -51,6 +54,14 @@ export function Table({
    */
   const canDraw = !busy && isLegalSelection(selection, view.you.hand);
   const takeable = takeableIds(view.lastDiscard);
+
+  /**
+   * Whether the Yaniv control does anything — the hand, and nothing but the hand
+   * (docs/rules.md §6). Being off turn leaves it live and is answered by the server with
+   * `NOT_YOUR_TURN`, the same way a draw target is: this screen enforces the rules of the
+   * cards and none of the rules about whose go it is.
+   */
+  const canCall = !busy && isLegalCall(view.you.hand);
 
   const opponents = [...view.opponents].sort(bySeat(view));
 
@@ -127,6 +138,24 @@ export function Table({
       </p>
 
       {/*
+        The call that replaces a turn rather than taking one, so it is a button where
+        nothing else on this screen is one — there is no set to choose and nothing to draw.
+
+        Always on the screen and inert until the hand is low enough, rather than appearing
+        when it becomes legal: a control that materialises under a thumb already on its way
+        down is one nobody meant to press, and a permanent one also tells a player what
+        they are playing towards.
+      */}
+      <button
+        className={`button call ${canCall ? "call--live" : ""}`}
+        type="button"
+        disabled={!canCall}
+        onClick={onCallYaniv}
+      >
+        Yaniv!
+      </button>
+
+      {/*
         In the order the server sorted them and in no other: sorting again here would
         rearrange a hand under a player's finger between one move and the next. See
         "Hand display order is presentation only" in CLAUDE.md.
@@ -154,8 +183,8 @@ export function Table({
       <footer className="you">
         <span className="player__name">{view.you.name}</span>
         {/*
-          The number that decides whether Yaniv can be called, so it is worth a player
-          knowing without adding their own hand up. What to do about it is #36's screen.
+          The number the Yaniv control turns on, so it is worth a player knowing without
+          adding their own hand up — and it is what says how far off a call still is.
         */}
         <span className="you__value">{handValue(view.you.hand)} in hand</span>
         <span className="player__score">{view.you.score} pts</span>

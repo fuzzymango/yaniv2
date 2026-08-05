@@ -2,9 +2,10 @@
  * What a tap means, given what is on the table.
  *
  * The browser's counterpart to `server/scripts/cli/commands.ts`: pure and total, a
- * selection plus a tapped source in, a `TurnAction` or nothing out. Nothing here throws
- * and nothing here reaches a socket — a component asks it what to offer, and the session
- * core asks it what to send.
+ * selection plus a tapped source in, a `TurnAction` or nothing out — and, for the Yaniv
+ * call that replaces a turn rather than taking one, whether the hand permits it at all.
+ * Nothing here throws and nothing here reaches a socket — a component asks it what to
+ * offer, and the session core asks it what to send.
  *
  * Legality is answered from `@yaniv/shared`'s rulebook and nowhere else, which is what
  * ADR-0002 moved it there for: a draw target that lit up on a set the server would
@@ -17,7 +18,7 @@
  */
 
 import type { Card, DrawAction, PlayerGameView, TurnAction } from "@yaniv/shared";
-import { isValidSet, pickupCandidates } from "@yaniv/shared";
+import { canCallYaniv, isValidSet, pickupCandidates } from "@yaniv/shared";
 
 /**
  * The tap that commits a turn: the deck, or one of the face-up cards. Distinct from
@@ -83,6 +84,19 @@ export function isLegalSelection(
 ): boolean {
   const cards = resolve(selection, hand);
   return cards !== null && isValidSet(cards);
+}
+
+/**
+ * Whether calling Yaniv is a move at all: the hand is worth the threshold or less
+ * (docs/rules.md §6).
+ *
+ * Here for the same reason `takeableIds` is — the screen asks this module what to offer
+ * and this module asks the rulebook, so a control that lights up and a call the server
+ * accepts cannot come apart. It is the hand and nothing else: whose turn it is belongs to
+ * the server, exactly as it does for a discard.
+ */
+export function isLegalCall(hand: readonly Card[]): boolean {
+  return canCallYaniv(hand);
 }
 
 /**
