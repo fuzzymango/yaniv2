@@ -56,6 +56,17 @@ two different moves — and they offer the next player different cards to pick u
 Committing a selection is indivisible with drawing, so there is no moment at which a
 selection has been discarded but the turn is unfinished. A selection is pending or gone.
 
+## Draw target
+
+What a selection is committed *against*: the deck, or one of the two takeable ends of the
+last discard (`pickupCandidates` in `shared/src/rules.ts`). Tapping a draw target is what
+turns a pending selection into a finished turn — the two are a pair, and neither means
+anything alone. A draw target is *live* only while the current selection is a legal
+discard; otherwise it is inert, and a tap on it asks for nothing and is refused nothing
+(see "The turn is two taps" in `CLAUDE.md`). This is the same fact the wire already
+carries as `DrawAction` — which pile, and which card if it came off the discard — named for
+the tap that produces it rather than the message it sends.
+
 ## Standings
 
 The final table of a finished match: every player who played it, ordered lowest score

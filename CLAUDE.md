@@ -396,6 +396,28 @@ their session, apply, and on success ack, broadcast, then run any bot turns. A r
 acks the error and publishes nothing, so a refused action costs the player nothing — the
 turn is still theirs.
 
+### The turn is two taps, and draw targets are inert until legal
+
+A turn on the client is never a button — it is built from two taps. Tapping a card in
+hand adds it to an ordered **selection** (`CONTEXT.md`'s **Selection**); tapping a draw
+target — the deck, or one of the two takeable ends of the last discard — commits it: the
+selection is discarded and the tapped card drawn, in the same action. This mirrors the
+server's atomic `takeTurn` (see "Turn model" above) rather than splitting discard and draw
+into two client-side steps the engine has no matching state for — a "discard" button
+followed by a "draw" button would imply a moment in between that does not exist.
+
+Draw targets stay inert — untappable — until the current selection is a legal discard
+(`isValidSet`, from `@yaniv/shared`'s rulebook). This is the reason the rulebook moved to
+`shared/` at all (ADR-0002): without it on the client, an illegal set could only be caught
+by sending it and being told no, which is exactly the silent-round-trip cost "A tap the
+rules do not permit..." below describes. `client/src/turn.ts` is the pure module this
+lives in — `turnFrom` takes a selection, the current view and the tapped source, and
+returns a `TurnAction` or `null`; alongside it, `isLegalSelection`, `isLegalCall` and
+`takeableIds` are what decide which controls light up. It is the client's analogue of
+`scripts/cli/commands.ts`: pure, total and never throwing on nonsense — nothing here
+reaches a socket, and nothing here knows whose turn it is, since turn order is the
+server's alone and comes back as a `GameError`, exactly as it does for the CLI.
+
 ### The client's session core
 
 The browser client's logic lives in `client/src/session.ts`, a plain module outside React
@@ -404,7 +426,9 @@ of intents to call. `useSession` subscribes to it with `useSyncExternalStore` an
 logic — **if that hook ever grows a branch, the branch is in the wrong place.** The point
 is testability: the session core is driven under `node:test` against a real socket server,
 with no browser, no jsdom and no React test dependencies. Components are not tested at
-all, which is a consequence of that split rather than a gap.
+all, which is a consequence of that split rather than a gap: if a component held behaviour
+worth testing on its own, that behaviour would be in the wrong place and belongs in the
+session core instead.
 
 Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` compares by
 identity, so a mutated object would leave React rendering a position that has already
@@ -601,10 +625,11 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **Choosing how many opponents you want.** `startGame` always fills to six. Adding bots
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
-- **The rest of the client.** Every screen a match passes through is built — main menu,
-  lobby, table, scored round, finished match — so a browser plays one end to end; a run of
-  bot turns plays out as separate moves, a lost connection says so, and a reload mid-match
-  is argued with first. What is left is deployment, and reconnect ahead of it.
+- **Deployment.** The engine, bots, rooms, the socket contract and the browser client all
+  work end to end from a checkout, but nothing is deployed — running either half means a
+  checkout, Node 24, and `npm run serve` / `npm run dev` in separate terminals. ADR-0003
+  records the plan (one Railway service, the game server serving the client's static
+  files) and ADR-0004 the order it's deferred behind: client, then reconnect, then deploy.
 - **Disambiguating a joker that extends a run.** The browser client sends the selection in
   tap order, so tap order decides where the joker sits (`docs/rules.md` §4) — which is
   invisible on the screen. An accepted wart, and a deliberate one: a step that asked the

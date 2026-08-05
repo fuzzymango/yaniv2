@@ -166,8 +166,8 @@ npm run demo --workspace=@yaniv/server -- --seed 42 --players 4
 ## Not yet built
 
 Disconnect/reconnect handling (dropping a connection currently ends the room for everyone),
-persistence (rooms are in-memory, so a restart drops games in progress), and the polish the
-browser client still wants — a chain of bot turns arrives as fast as the wire delivers it
-rather than paced for a human to watch, and a dropped connection is not surfaced at all. A
-match itself plays end to end in the browser now: create or join, deal, take turns, call
-Yaniv, and finish on the standings with another match one tap away.
+persistence (rooms are in-memory, so a restart drops games in progress), and deployment —
+running either half means a checkout and two terminals. A match plays end to end in the
+browser now: create or join, deal, take turns, watch a paced run of bot turns, call Yaniv,
+and finish on the standings with another match one tap away; a dropped connection says so
+on screen rather than leaving you tapping at a dead table.
