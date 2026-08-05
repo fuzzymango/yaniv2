@@ -70,6 +70,17 @@ export interface SessionSnapshot {
    */
   readonly busy: boolean;
   /**
+   * Whether there is a socket to play over. False means every control on the screen is
+   * dead, whatever it looks like — which is the whole reason this is a field rather than
+   * something left to a socket the components cannot see.
+   *
+   * It starts true, before the socket has finished connecting: socket.io buffers what is
+   * emitted before then and sends it on connect, so a player who is quick off the mark on
+   * a fresh page load has not lost anything, and a screen that announced a dropped
+   * connection for the first moment of every load would be crying wolf.
+   */
+  readonly connected: boolean;
+  /**
    * The cards chosen for the next turn, by id, **in tap order** — the order decides where
    * a joker extending a run sits (docs/rules.md §4), so it is the move and not merely a
    * way of writing it down. See "Selection" in CONTEXT.md.
@@ -153,6 +164,17 @@ const EMPTY_NAME: GameError = {
 };
 
 /**
+ * What a player who was in a room is told once the connection comes back. News rather than
+ * a refusal, the same shape as a room closing under them: they did nothing to cause it and
+ * there is nothing to retry.
+ *
+ * It says the room ended rather than that it might have, because it did — a connection
+ * dropping destroys its room outright, and reconnect is the next piece of work rather than
+ * this one (ADR-0004).
+ */
+const DROPPED = "The connection dropped, and the room ended with it.";
+
+/**
  * A position as it arrived, and how many had arrived when it did.
  *
  * The same pair the CLI keeps, and for the same reason — but the two halves are now used
@@ -175,6 +197,7 @@ export function createSession(
     error: null,
     notice: null,
     busy: false,
+    connected: true,
     selection: [],
   };
   const listeners = new Set<() => void>();
@@ -264,6 +287,88 @@ export function createSession(
       busy: false,
       selection: [],
     });
+  });
+
+  /**
+   * Whether the drop took a room down with it, remembered across the gap so the player can
+   * be told what became of it once there is a screen to tell them on. A drop at the main
+   * menu costs nothing and is worth saying nothing about.
+   */
+  let lostARoom = false;
+
+  /**
+   * The socket has gone. Every control on the screen is now dead, whatever it looks like,
+   * and the room has gone with it: the server destroys a room the moment a connection in
+   * it drops, and there is no resuming one (ADR-0004).
+   *
+   * The lock goes, because nothing is in flight over a socket that is not there — the ack
+   * a move was waiting on is never arriving, and neither is the position behind it. What
+   * is left on the screen is the last position anybody saw, which the disconnected screen
+   * covers over rather than clears: there is nothing to replace it with until the socket
+   * comes back, and clearing it would send a player who is about to reconnect to the menu
+   * a beat early.
+   */
+  socket.on("disconnect", () => {
+    lostARoom = snapshot.view !== null;
+    // Whatever the chain still had left to show belongs to a table nobody is at.
+    paced.reset();
+    committedAt = null;
+    publish({ connected: false, busy: false });
+  });
+
+  /**
+   * A connection that never arrived, rather than one that went — the server is down, or
+   * the page was opened with no signal. The same dead screen from the player's side, so
+   * the same answer: say there is no connection instead of buffering their taps into a
+   * socket that has never reached anything.
+   *
+   * It cannot have cost a room, which is why it leaves `lostARoom` alone: a failed attempt
+   * has never carried one, and after a drop the flag it must not tread on is already set.
+   * Retries fire this once each, and only the first is news.
+   */
+  socket.on("connect_error", () => {
+    if (!snapshot.connected) return;
+    publish({ connected: false, busy: false });
+  });
+
+  /**
+   * The socket is back — and with a new identity, since nothing resumes a session yet: the
+   * server has never heard of this connection, and the room it was in was destroyed when
+   * the old one dropped. So the honest place to put the player is the main menu, told why
+   * they are looking at it.
+   *
+   * `connected` already being true is the page's *first* connection rather than a return,
+   * which has nothing to announce and no room to have lost.
+   */
+  socket.on("connect", () => {
+    if (snapshot.connected) return;
+    publish({
+      connected: true,
+      view: null,
+      notice: lostARoom ? DROPPED : null,
+      error: null,
+      busy: false,
+      selection: [],
+    });
+    lostARoom = false;
+  });
+
+  /**
+   * A refusal the server sent unprompted, rather than as the answer to something asked of
+   * it. It shows exactly where a rejected ack would, because it is the same news to a
+   * player: something they might have expected to happen did not.
+   *
+   * Which means it is dropped where a rejected ack is dropped, and for the same reason —
+   * an error with no room to be about is one a player on the main menu can do nothing
+   * with, and being shown a red refusal for a table they are no longer at is exactly what
+   * `refuse` exists to prevent.
+   *
+   * It does not touch `busy`, and that is the difference from an ack — whatever is in
+   * flight is still in flight, and releasing the controls on news that answers none of it
+   * would let a second copy of that action go out behind the first.
+   */
+  socket.on("errorMessage", (error) => {
+    if (snapshot.view !== null) publish({ error });
   });
 
   /*

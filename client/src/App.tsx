@@ -4,8 +4,13 @@
  * There is no router and there are no URLs: the main menu is the screen with no view at
  * all — no room exists, so there is nothing for the server to have sent — and every
  * other screen is a function of the view it renders. See docs/adr/0004.
+ *
+ * Two screens are not a function of the view, and both are asked about before the phase
+ * is: a lost connection, which makes every control on every other screen a lie, and then
+ * the main menu.
  */
 
+import { Disconnected } from "./Disconnected.tsx";
 import { GameEnd } from "./GameEnd.tsx";
 import { Lobby } from "./Lobby.tsx";
 import { MainMenu } from "./MainMenu.tsx";
@@ -16,7 +21,15 @@ import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
 
 export function App({ session }: { session: Session }) {
-  const { view, error, notice, busy, selection } = useSession(session);
+  const { view, error, notice, busy, connected, selection } = useSession(session);
+
+  /*
+   * Before anything else, and whatever position was last drawn: with no socket there is
+   * nothing behind any of it, and every control on the table would still look live. What
+   * the last position was does not matter, because there is no going back to it — see
+   * `Disconnected.tsx`.
+   */
+  if (!connected) return <Disconnected />;
 
   if (view === null) {
     return (

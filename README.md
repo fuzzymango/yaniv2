@@ -60,6 +60,11 @@ it ends the round. Every hand is then turned face up on a scoreboard showing who
 whether they were Assafed, and what the round cost each player against their new total. The
 host deals the next round from there.
 
+Closing or reloading the tab mid-match asks you to confirm first, because a dropped
+connection ends the room for everyone in it — there is no reconnecting to a match yet. If
+the connection does go, the screen says so rather than leaving you tapping at a dead table,
+and you land back at the main menu once it comes back.
+
 **Play in the terminal (`play`).** A real socket client, so it needs a server running.
 Start the server first:
 

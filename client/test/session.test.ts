@@ -27,12 +27,18 @@ import {
   isValidSet,
   legalDiscards,
   pickupCandidates,
+  type GameError,
   type PlayerGameView,
 } from "@yaniv/shared";
 import { RoomManager } from "@yaniv/server/src/roomManager.ts";
 import { mulberry32 } from "@yaniv/server/src/rng.ts";
 import { createSocketServer } from "@yaniv/server/src/socketServer.ts";
-import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
+import {
+  io as connectClient,
+  type ManagerOptions,
+  type Socket as ClientSocket,
+  type SocketOptions,
+} from "socket.io-client";
 import type { Clock } from "../src/pacing.ts";
 import { createSession, type Session, type SessionSnapshot } from "../src/session.ts";
 import { isLegalCall } from "../src/turn.ts";
@@ -48,8 +54,37 @@ interface Harness {
    * clock it holds.
    */
   openSession: (clock?: Clock) => Promise<Session>;
+  /**
+   * Take a session's connection away, the way a tunnel or a locked phone does.
+   *
+   * `keepTrying` is the difference between the two kinds of drop a browser sees. A
+   * transport closed underneath the client leaves socket.io reconnecting on its own,
+   * which is what actually happens on a flaky network; `disconnect()` is a deliberate
+   * hang-up and stays down.
+   */
+  drop: (session: Session, keepTrying?: boolean) => void;
+  /**
+   * Push an `errorMessage` at every connected client — the one thing in the contract the
+   * server may say unprompted that is not about a room going away.
+   *
+   * Emitted through the real server's `io`, so the session hears it over the wire exactly
+   * as it would in production. Nothing in the server sends one today, which is precisely
+   * why a test has to.
+   */
+  announce: (error: GameError) => void;
   close: () => Promise<void>;
 }
+
+/**
+ * How every connection in this suite is opened. The reconnection delays are far shorter
+ * than the second a browser waits, so a test that watches a connection come back does not
+ * spend one waiting for it.
+ */
+const CONNECTION: Partial<ManagerOptions & SocketOptions> = {
+  transports: ["websocket"],
+  reconnectionDelay: 20,
+  reconnectionDelayMax: 50,
+};
 
 /** A server on an OS-assigned port, seeded so every run deals the same cards. */
 async function startServer(seed: number): Promise<Harness> {
@@ -64,19 +99,34 @@ async function startServer(seed: number): Promise<Harness> {
 
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
   const { port } = httpServer.address() as AddressInfo;
-  const clients: ClientSocket[] = [];
+  /**
+   * Which connection belongs to which session, so a test can take one away without the
+   * session core having to hand its socket back out. It owns the socket and nothing else
+   * reaches for it — including this suite.
+   */
+  const connections = new Map<Session, ClientSocket>();
 
   return {
     openSession: (clock = testClock()) =>
       new Promise((resolve) => {
-        const client = connectClient(`http://localhost:${port}`, {
-          transports: ["websocket"],
+        const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
+        // `once`, because a connection that comes back fires this again — and a second
+        // session on the same socket would double every handler the first one attached.
+        client.once("connect", () => {
+          const session = createSession(client, clock);
+          connections.set(session, client);
+          resolve(session);
         });
-        clients.push(client);
-        client.on("connect", () => resolve(createSession(client, clock)));
       }),
+    drop: (session, keepTrying = false) => {
+      const client = connections.get(session);
+      if (!client) throw new Error("that session was never opened here");
+      if (keepTrying) client.io.engine.close();
+      else client.disconnect();
+    },
+    announce: (error) => io.emit("errorMessage", error),
     close: async () => {
-      for (const client of clients) client.disconnect();
+      for (const client of connections.values()) client.disconnect();
       await io.close();
     },
   };
@@ -1126,6 +1176,134 @@ describe("a finished match", () => {
       const another = await waitForSnapshot(host, "a room of their own", (s) => s.view !== null);
       assert.equal(another.error, null);
       assert.equal(another.view!.phase, "lobby");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The ways a session goes wrong, and what a player is told about each.
+ *
+ * A dropped connection is the one that matters most on a phone: the tab is backgrounded,
+ * the socket is torn down with no chance to react, and the room goes with it (ADR-0004).
+ * Nothing on the screen would say so, and every control on the table would still look
+ * live, which is the state this covers.
+ */
+describe("when the connection goes", () => {
+  it("says so when the connection drops", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      assert.equal(host.getSnapshot().connected, true, "the table was being played on");
+
+      server.drop(host);
+
+      const gone = await waitForSnapshot(host, "the drop", (s) => !s.connected);
+      assert.equal(gone.busy, false, "nothing is in flight over a socket that is not there");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not leave the controls locked when a move's connection drops", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      const view = host.getSnapshot().view!;
+
+      // A turn on its way out when the socket goes: the ack that would have released the
+      // lock is never coming, and neither is the position behind it.
+      takeATurn(host, view);
+      assert.equal(host.getSnapshot().busy, true, "the move is in flight");
+
+      server.drop(host);
+
+      const gone = await waitForSnapshot(host, "the drop", (s) => !s.connected);
+      assert.equal(gone.busy, false);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns to the main menu, saying why, when the connection comes back", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+
+      // The transport closed underneath the client rather than hung up, so socket.io
+      // reconnects by itself — the flaky-network case, and the only one that comes back.
+      server.drop(host, true);
+      await waitForSnapshot(host, "the drop", (s) => !s.connected);
+
+      const back = await waitForSnapshot(host, "the connection", (s) => s.connected);
+      assert.equal(
+        back.view,
+        null,
+        "the room did not survive the drop, so there is no table to return to",
+      );
+      assert.ok(back.notice, "and the player is told where it went");
+      assert.equal(back.error, null, "which is news, not a refusal of anything they did");
+      assert.deepEqual(back.selection, [], "nothing chosen carries into a room that is gone");
+
+      // A working connection, not merely a hopeful screen: the proof is a room on it.
+      host.createRoom("Ada");
+      const another = await waitForSnapshot(host, "a fresh room", (s) => s.view !== null);
+      assert.equal(another.view!.phase, "lobby");
+      assert.equal(another.notice, null, "and the news goes when they act again");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says so when there is no server to reach", async () => {
+    // A port nothing is listening on: the page opened with the server down, or with no
+    // signal at all. Never connected rather than disconnected, and the same dead screen
+    // from the player's side — taps buffered into a socket that has reached nothing.
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, resolve));
+    const { port } = probe.address() as AddressInfo;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
+    try {
+      const session = createSession(client, testClock());
+
+      const nothing = await waitForSnapshot(session, "the failure", (s) => !s.connected);
+      assert.equal(nothing.view, null, "there was never a room to be in");
+      assert.equal(nothing.notice, null, "and so nothing was lost to say anything about");
+    } finally {
+      client.disconnect();
+    }
+  });
+
+  it("shows an error the server sends unprompted", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      const pushed: GameError = { code: "WRONG_PHASE", message: "Something went wrong" };
+
+      server.announce(pushed);
+
+      const told = await waitForSnapshot(host, "the error", (s) => s.error !== null);
+      assert.deepEqual(told.error, pushed);
+      assert.equal(told.view!.phase, "playing", "the table is still there to show it on");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not push an error at a player with no room to be in", async () => {
+    const server = await startServer(7);
+    try {
+      const menu = await server.openSession();
+
+      // The same rule a rejected ack goes by: an error with no room to be about is one
+      // nothing on the main menu can explain, and nothing there can act on.
+      server.announce({ code: "WRONG_PHASE", message: "Something went wrong" });
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(menu.getSnapshot().error, null);
     } finally {
       await server.close();
     }

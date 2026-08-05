@@ -130,13 +130,15 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by |
+| `unload.ts` | `guardUnload` — the `beforeunload` warning, on while a round is live and off otherwise. Injected target, so it is driven under `node:test` with no browser |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
-| `App.tsx` | Which screen: no view is the main menu, everything else is a function of `view.phase` |
+| `App.tsx` | Which screen: no connection comes first, then no view is the main menu, then everything else is a function of `view.phase` |
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, start (host only), leave |
 | `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, a turn as two taps, and the Yaniv call |
 | `RoundEnd.tsx` | `phase: 'roundEnd'` — every hand face up, who called, whether they were Assafed, and what the round cost each player |
 | `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and leaving |
+| `Disconnected.tsx` | No socket — the second screen with no view behind it. One screen for a connection that went and one that never arrived, since neither leaves anything to tap |
 | `PlayingCard.tsx` | One card, drawn in CSS. Presentational only — it does not know what a card means where it sits |
 | `Room.tsx` | The fallback for a `roundEnd` with no result behind it — a position the wire type allows and the server does not produce |
 | `styles.css` | Mobile-first. Cards are drawn in CSS — no image assets |
@@ -408,16 +410,20 @@ Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` c
 identity, so a mutated object would leave React rendering a position that has already
 moved on.
 
-Four fields, and each answers a different question:
+Five fields, and each answers a different question:
 
 - **`view`** — the position, or `null`. Null *is* the main menu: the one screen that is
   not a function of `view.phase`, because before a room exists there is nothing for the
   server to have sent. See `docs/adr/0004`.
-- **`error`** — a `GameError`, i.e. something the player asked for and was refused.
-  Cleared the moment they try again, because a refused action costs them nothing.
-- **`notice`** — news about the room that is *not* a refusal, today only `roomClosed`.
-  Separate from `error` precisely because there is no action to blame and nothing to
-  retry, and because it arrives while the player is sitting still.
+- **`error`** — a `GameError`, i.e. something the player asked for and was refused, or one
+  the server pushed as `errorMessage`. Cleared the moment they try again, because a refused
+  action costs them nothing.
+- **`notice`** — news about the room that is *not* a refusal: `roomClosed`, and a
+  connection that dropped and took its room with it. Separate from `error` precisely
+  because there is no action to blame and nothing to retry, and because it arrives while
+  the player is sitting still.
+- **`connected`** — whether there is a socket to play over. See "A session that loses its
+  socket" below.
 - **`selection`** — the cards tapped for the next turn, by id, in tap order. It lives here
   rather than in a component because it is a fact that has to survive views arriving
   underneath it: a card that leaves the hand leaves the selection with it, which is
@@ -501,6 +507,16 @@ exists. They are already on the menu being told why, and a red error blaming the
 would be exactly what "a refused action costs the player nothing" rules out. The session
 therefore drops an error whenever `view` is already null.
 
+**An `errorMessage` shows where a rejected ack does, is dropped where one is dropped, and
+does not touch `busy`.** It is the same news to a player — something that might have
+happened did not — so it lands in `error` and is drawn by whichever screen is up, and it
+goes by the rule above when `view` is null: an error with no room to be about is one
+nothing on the main menu can explain and nothing there can act on. Unlike an ack it is
+nobody's answer, so it releases no lock: whatever is in flight still is, and letting go on
+news that answers none of it would put a second copy of that action on the wire. Nothing in
+the server sends one today; the handler exists because the contract does, and the client's
+suite is what pushes one.
+
 **`playerJoined`/`playerLeft` are deliberately unhandled.** The roster arrives right
 behind each of them as a fresh view, and a screen that re-renders in place shows a seat
 filling or emptying by itself. The CLI needs those nudges only because its frames scroll
@@ -511,6 +527,43 @@ host alone is a courtesy so a guest is not hunting for a button that was never t
 rule is `NOT_HOST`, and the server is what says it. Refusing an empty name locally is the
 one exception, and only because the server enforces the same rule — it is the client
 declining to offer a move it knows will be refused, not a rule of its own.
+
+### A session that loses its socket
+
+**`connected` is asked about before the view is.** A dropped socket makes every control on
+every screen a lie, whatever the last position drawn still shows, so `App` renders
+`Disconnected.tsx` above everything — the second screen that is not a function of
+`view.phase`. It starts `true`, before the socket has finished connecting: socket.io buffers
+what is emitted before then, and a page that announced a lost connection for the first
+moment of every load would be crying wolf.
+
+**A drop takes its room with it, and the session says so once there is a screen to say it
+on.** `disconnect` resets the pacer, drops the watermark and releases `busy` — nothing is in
+flight over a socket that is not there — but leaves the view alone, since there is nothing
+to replace it with and the disconnected screen is over the top of it anyway. The *reconnect*
+is what clears it: the socket comes back with a new identity the server has never heard of,
+and the room it was in was destroyed when the old one dropped (ADR-0004), so the honest
+place to put the player is the main menu with a `notice` saying where the table went. A drop
+at the menu costs nothing and says nothing.
+
+**A connection that never arrived is the same screen.** `connect_error` is treated the way
+`disconnect` is, because the two are indistinguishable to whoever is looking at them: taps
+buffered into a socket that has reached nothing is the same dead screen. Only the first of a
+run of failed retries is news.
+
+**The `beforeunload` warning is registered while a round is live and not otherwise**
+(`unload.ts`). A reload drops the socket and so destroys the room for everyone in it, which
+is worth an argument at `playing` and `roundEnd` — and not worth one at the main menu, the
+lobby or a finished match, where a control on the screen already does exactly that.
+`connected` is part of the same question rather than a separate one: a dropped connection's
+room was destroyed when it dropped, so the table still on the screen is a match that is
+already lost, and arguing over the tab is arguing over nothing. It is
+added and removed rather than left listening and deciding when it fires, because a page with
+a `beforeunload` listener is held out of the back/forward cache either way. The target is
+injected, so it is the one global the client touches and `main.tsx` is the only place that
+hands one over. Whether the warning actually appears is the browser's call, not the page's —
+a tab the player has never interacted with is closed without argument, and the wording is
+always the browser's own.
 
 ### Tooling
 
@@ -549,9 +602,9 @@ Not oversights — deferred on purpose, in this order of likely next work:
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
 - **The rest of the client.** Every screen a match passes through is built — main menu,
-  lobby, table, scored round, finished match — so a browser plays one end to end, and a run
-  of bot turns plays out as separate moves. What is left is surfacing a dropped connection
-  and a reload warning (#39).
+  lobby, table, scored round, finished match — so a browser plays one end to end; a run of
+  bot turns plays out as separate moves, a lost connection says so, and a reload mid-match
+  is argued with first. What is left is deployment, and reconnect ahead of it.
 - **Disambiguating a joker that extends a run.** The browser client sends the selection in
   tap order, so tap order decides where the joker sits (`docs/rules.md` §4) — which is
   invisible on the screen. An accepted wart, and a deliberate one: a step that asked the
