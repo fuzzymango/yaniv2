@@ -1,0 +1,21 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "jsx": "react-jsx",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    /*
+     * `vite/client` for the CSS import and nothing else — no Node types, deliberately:
+     * everything here runs in a browser, and the session core is also loaded by
+     * `node:test` from the test project, so a stray `process` or `node:` import would
+     * only fail somewhere far from where it was written.
+     */
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "references": [{ "path": "../shared" }]
+}

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Card, DrawAction } from "@yaniv/shared";
+import { canCallYaniv, handValue, legalDiscards } from "@yaniv/shared";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
-import { canCallYaniv, handValue, legalDiscards } from "../src/rules.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState, GameStateActive } from "../src/state.ts";
 import { mulberry32 } from "../src/rng.ts";

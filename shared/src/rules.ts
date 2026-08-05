@@ -1,5 +1,5 @@
-import type { Card } from "@yaniv/shared";
-import { RANKS, rankOrder } from "@yaniv/shared";
+import type { Card } from "./cards.ts";
+import { RANKS, rankOrder } from "./cards.ts";
 import {
   MIN_RUN_LENGTH,
   MIN_RUN_REAL_CARDS,
@@ -16,10 +16,6 @@ function partition(cards: readonly Card[]): { reals: Card[]; jokers: Card[] } {
   const jokers = cards.filter((c) => c.suit === null);
   return { reals, jokers };
 }
-
-// Rank ordering lives in shared so the client sorts hands the same way the engine
-// validates runs. Re-exported here because runs are a rules concern.
-export { rankOrder };
 
 export function handValue(hand: readonly Card[]): number {
   return hand.reduce((total, card) => total + card.value, 0);

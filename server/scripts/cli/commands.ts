@@ -10,7 +10,7 @@
  */
 
 import type { DrawAction, PlayerGameView, TurnAction } from "@yaniv/shared";
-import { pickupCandidates } from "../../src/rules.ts";
+import { pickupCandidates } from "@yaniv/shared";
 
 export type Command =
   | { kind: "turn"; action: TurnAction }

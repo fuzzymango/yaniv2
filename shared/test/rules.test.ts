@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { RANKS } from "@yaniv/shared";
+import { RANKS, rankOrder } from "../src/cards.ts";
 import {
   canCallYaniv,
   canonicalizeSet,
@@ -8,7 +8,6 @@ import {
   isValidSet,
   legalDiscards,
   pickupCandidates,
-  rankOrder,
 } from "../src/rules.ts";
 import { cards, ids } from "./helpers.ts";
 

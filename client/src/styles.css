@@ -1,0 +1,808 @@
+/*
+ * Mobile-first: every rule here is written for a phone held in one hand, and the few
+ * media queries widen it for a desktop rather than the other way round. Nothing scales
+ * a phone screen across a monitor — the layout is capped and centred instead.
+ *
+ * No images and no icon fonts. Cards, when they arrive, are drawn in CSS.
+ */
+
+:root {
+  --felt: #14532d;
+  --felt-dark: #0b3018;
+  --ink: #f8fafc;
+  --ink-dim: #cbd5e1;
+  --accent: #fde047;
+  --danger: #fca5a5;
+  --surface: rgb(0 0 0 / 25%);
+
+  /* The smallest comfortable tap target, used for every control. */
+  --tap: 2.75rem;
+
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: radial-gradient(circle at 50% 0%, var(--felt), var(--felt-dark));
+  color: var(--ink);
+}
+
+/*
+ * Every screen is one column that fills the viewport and no more: the whole table has
+ * to be readable on a phone without pinching, so nothing here is allowed to scroll
+ * sideways. `dvh` rather than `vh` so a mobile browser's collapsing address bar does
+ * not leave the bottom of the screen off it.
+ */
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem
+    max(1.25rem, env(safe-area-inset-bottom));
+  max-width: 30rem;
+}
+
+@media (min-width: 48rem) {
+  .screen {
+    justify-content: center;
+    gap: 1.5rem;
+  }
+}
+
+/* --- main menu --- */
+
+.menu {
+  justify-content: center;
+}
+
+.menu__title {
+  margin: 0;
+  font-size: clamp(2.5rem, 12vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.menu__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.menu__or {
+  margin: 0.5rem 0 0;
+  color: var(--ink-dim);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field__label {
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+}
+
+.field__input {
+  min-height: var(--tap);
+  padding: 0 0.75rem;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: inherit;
+  /* 1rem is the floor iOS Safari will accept without zooming the page on focus. */
+  font: inherit;
+  font-size: 1rem;
+}
+
+.field__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.field__input--code {
+  font-size: 1.5rem;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+}
+
+.button {
+  min-height: var(--tap);
+  padding: 0 1rem;
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button--primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #1c1917;
+}
+
+.notice {
+  margin: 0;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.notice--error {
+  color: var(--danger);
+}
+
+/* --- a lost connection --- */
+
+/*
+ * Centred and alone, with nothing to tap: there is nothing to be done here and no other
+ * screen behind it, so the whole page is the message. On a wide screen the column caps and
+ * centres like every other, rather than stretching a sentence across a monitor.
+ */
+.dropped {
+  justify-content: center;
+}
+
+.dropped__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.5rem 1.25rem;
+  border-radius: 0.75rem;
+  background: var(--surface);
+  text-align: center;
+}
+
+.dropped__title {
+  margin: 0;
+  color: var(--danger);
+  font-size: clamp(1.75rem, 8vw, 2.25rem);
+  font-weight: 800;
+}
+
+.dropped__detail {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+/* --- the room code --- */
+
+.code {
+  text-align: center;
+}
+
+.code__label {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+}
+
+/*
+ * The loudest thing on the screen, because reading it out is the only way anybody else
+ * gets into the room.
+ */
+.code__value {
+  margin: 0;
+  font-size: clamp(3rem, 20vw, 4.5rem);
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  /* Half the tracking is added to the right of the last character; this re-centres. */
+  text-indent: 0.15em;
+}
+
+.code__hint {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.9rem;
+}
+
+/* --- the lobby --- */
+
+/*
+ * The seats take whatever height is left between the code and the controls, so the
+ * controls sit at the bottom of the phone where a thumb is rather than floating under a
+ * short list. Pinned to exactly the viewport rather than the `min-height` every other
+ * screen gets: a table that fills up to six has to push the *list* to scroll, and a
+ * container that can grow would push the page instead — taking the controls off the
+ * bottom of the screen with it.
+ */
+.lobby {
+  justify-content: flex-start;
+  height: 100dvh;
+}
+
+.seats {
+  flex: 1;
+  /*
+   * Without this a flex item refuses to shrink below its content (`min-height: auto`),
+   * and `overflow-y` on it would never have anything to do.
+   */
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.seat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap);
+  padding: 0 0.875rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.seat__name {
+  /* Names are bounded server-side but not narrow; the marks keep their place. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.seat__mark {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 0.75rem;
+  color: var(--ink-dim);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.lobby__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/*
+ * Where the host's control sits on the host's own screen — starting the match in the
+ * lobby, dealing the next round at a scored one — so everybody else sees the reason there
+ * is no button rather than a gap. Sized like the control it stands in for, but plainly not
+ * one.
+ */
+.hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  margin: 0;
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+/*
+ * A desktop has room to spare, so the table is centred in it rather than stretched down
+ * it — the seats stop claiming the leftover height and the column sits in the middle.
+ */
+@media (min-width: 48rem) {
+  .lobby {
+    justify-content: center;
+  }
+
+  .seats {
+    flex: 0 1 auto;
+  }
+}
+
+/* --- cards, drawn rather than loaded --- */
+
+/*
+ * One width, inherited, so a card and everything that positions against it stay in
+ * proportion when the size changes. `vw` under the cap is what keeps a row of them inside
+ * a narrow phone: at 320px a hand of five and a deck plus a five-card discard both still
+ * fit, and on anything wider the cap takes over so cards do not grow across a monitor.
+ */
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: var(--card-w);
+  aspect-ratio: 5 / 7;
+  border-radius: 0.375rem;
+  background: #fdfdfb;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 45%);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.card__rank {
+  font-size: calc(var(--card-w) * 0.4);
+}
+
+.card__suit {
+  font-size: calc(var(--card-w) * 0.34);
+}
+
+.card--red {
+  color: #b91c1c;
+}
+
+.card--black {
+  color: #1c1917;
+}
+
+/* A joker is neither red nor black, and reads as neither. */
+.card--joker {
+  color: #7c3aed;
+}
+
+.card--back {
+  border: 2px solid #fdfdfb;
+  background: repeating-linear-gradient(45deg, #1e3a8a 0 6px, #1e40af 6px 12px);
+}
+
+/* --- the table --- */
+
+/*
+ * Pinned to the viewport, like the lobby: the hand has to sit at the bottom where a thumb
+ * is, and a page that grew with a long discard would push it off the screen.
+ */
+.table {
+  --card-w: min(3.5rem, 15vw);
+
+  justify-content: flex-start;
+  height: 100dvh;
+  gap: 0.75rem;
+}
+
+.players {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.player,
+.you {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0 0.625rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  font-size: 0.9rem;
+}
+
+.player__name {
+  flex: 1;
+  /* Names are bounded server-side but not narrow; the counts keep their place. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.player__cards,
+.you__value {
+  color: var(--ink-dim);
+  font-size: 0.8rem;
+}
+
+.player__score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+/* Whose turn it is, on the seat itself as well as in words below the table. */
+.player--turn {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/*
+ * The deck and the discard, floating in whatever height is left between the opponents
+ * and the hand.
+ *
+ * It wraps, and that is the whole answer to sizing: a card is `--tap` wide or wider on
+ * every screen, which for a five-card discard beside the deck is more than a 320px phone
+ * has across — so on the rare hand that produces one, the discard drops to its own line
+ * rather than every card on the table shrinking under a finger to accommodate it.
+ */
+.felt {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-content: center;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 0;
+}
+
+.discard {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Any card that can be tapped, wherever it is: in the hand, or on the table. */
+.pick {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pick:disabled {
+  cursor: default;
+}
+
+.pick:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pick--deck {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.pick__count {
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A live draw target. The ring appears the moment the selection becomes a legal discard
+ * and is the whole of the invitation to commit — there is no button.
+ *
+ * Pointedly not the accent: yellow means "chosen" on this screen, and a draw target is
+ * never chosen. It is where the choice gets played.
+ */
+.felt .pick:enabled .card {
+  box-shadow: 0 0 0 2px var(--ink), 0 1px 3px rgb(0 0 0 / 45%);
+}
+
+/*
+ * The cards between the ends of the discard, which cannot be taken. Rendered without a
+ * control at all rather than as buttons that do nothing, and dimmed and sunk so that is
+ * visible before anybody tries.
+ */
+.discard__out {
+  transform: translateY(0.25rem);
+  opacity: 0.4;
+  filter: grayscale(0.5);
+}
+
+/*
+ * The hand: bigger than the table's cards, because these are the ones a player picks out
+ * one at a time.
+ */
+.hand {
+  --card-w: min(3.75rem, 16vw);
+
+  display: flex;
+  justify-content: center;
+  gap: 0.25rem;
+  margin: 0;
+  /* Room above for a chosen card to rise into without moving the row. */
+  padding: 0.75rem 0 0;
+  list-style: none;
+}
+
+/* Chosen, and not yet sent anywhere. */
+.pick--chosen {
+  transform: translateY(-0.5rem);
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.turn {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.turn--yours {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/*
+ * The Yaniv call: the one button on a screen whose every other control is a card. It sits
+ * where it always sits, above the hand, and is dead until the hand is low enough — a
+ * control that appeared at that moment would appear under a thumb already moving.
+ */
+.call {
+  align-self: center;
+  padding: 0 2rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/*
+ * Live. Loud on purpose: reaching seven or less is the thing the whole hand is played
+ * towards, and a player who cannot see that they have got there has lost the round they
+ * won. The accent means "chosen and not yet sent" on the cards below, which is near enough
+ * to what this is.
+ */
+.call--live {
+  border-color: transparent;
+  background: var(--accent);
+  color: #1c1917;
+  animation: call-in 200ms ease-out;
+}
+
+/*
+ * Grows into place rather than blinking on, so the change catches a player's eye where a
+ * colour swap on a control they were not looking at would not. Suppressed for anyone who
+ * has asked for less motion; the colour alone still carries it.
+ */
+@keyframes call-in {
+  from {
+    transform: scale(0.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call--live {
+    animation: none;
+  }
+}
+
+/*
+ * A desktop has height to spare, so the table sits in the middle of it rather than being
+ * stretched down it.
+ */
+@media (min-width: 48rem) {
+  .table {
+    justify-content: center;
+  }
+
+  .felt {
+    flex: 0 1 auto;
+    padding: 2rem 0;
+  }
+}
+
+/* --- a scored round --- */
+
+/*
+ * Six hands laid out at once, so the cards are the smallest they get anywhere: they are
+ * read here, not tapped. Pinned to the viewport like the lobby and the table, with the
+ * rows taking the leftover height, so the control to deal the next round stays at the
+ * bottom where a thumb is however many players are being scored.
+ */
+.round {
+  --card-w: min(2.25rem, 10vw);
+
+  justify-content: flex-start;
+  height: 100dvh;
+  gap: 0.75rem;
+}
+
+.round__header {
+  text-align: center;
+}
+
+.round__call {
+  margin: 0.25rem 0 0;
+  font-size: clamp(1.35rem, 6vw, 1.75rem);
+  font-weight: 800;
+}
+
+/* Assaf is bad news for the caller, and the colour is the first thing that says so. */
+.round__verdict {
+  margin: 0.25rem 0 0;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.round__verdict--stood {
+  color: var(--accent);
+}
+
+.results {
+  flex: 1;
+  /* As on the lobby's seats: a flex item will not shrink below its content without this. */
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+.result__line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* What this round cost them, kept apart from the total it made. */
+.result__delta {
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.result__hand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.result__cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.result__value {
+  color: var(--ink-dim);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.round__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* A desktop has height to spare, so the scoreboard sits in it rather than stretching. */
+@media (min-width: 48rem) {
+  .round {
+    justify-content: center;
+  }
+
+  .results {
+    flex: 0 1 auto;
+  }
+}
+
+/* --- a finished match --- */
+
+/*
+ * Pinned to the viewport like the lobby and the scored round, and for the same reason: a
+ * table of up to six rows, plus anyone who has left since, has to push the *list* to scroll
+ * rather than the page — otherwise the controls slide off the bottom of the phone, and
+ * playing again is the whole point of being on this screen.
+ */
+.final {
+  justify-content: flex-start;
+  height: 100dvh;
+}
+
+.final__header {
+  text-align: center;
+}
+
+/* Who won. The largest thing here, because it is the only question this screen answers. */
+.final__headline {
+  margin: 0.25rem 0 0.25rem;
+  font-size: clamp(1.5rem, 7vw, 2rem);
+  font-weight: 800;
+}
+
+.standings {
+  flex: 1;
+  /* As on the lobby's seats: a flex item will not shrink below its content without this. */
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.standing {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap);
+  padding: 0 0.875rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+/*
+ * The winner, marked the way the turn is marked on the table — an inset ring rather than a
+ * fill, so a row stays readable and the accent keeps meaning "this one".
+ */
+.standing--winner {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+
+/*
+ * A seat given up since the match ended. Only the name is dimmed, not the row: leaving does
+ * not undo how the match finished, so the score stands and a winner who walked away keeps
+ * their mark at full strength.
+ */
+.standing--departed .player__name {
+  color: var(--ink-dim);
+  font-weight: 500;
+}
+
+.final__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* A desktop has height to spare, so the standings sit in it rather than stretching down. */
+@media (min-width: 48rem) {
+  .final {
+    justify-content: center;
+  }
+
+  .standings {
+    flex: 0 1 auto;
+  }
+}
+
+/* --- a round scored without the round behind it --- */
+
+.room {
+  justify-content: center;
+  text-align: center;
+}
+
+.room__phase {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}

@@ -16,11 +16,10 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import type { PlayerGameView } from "@yaniv/shared";
+import { YANIV_THRESHOLD, handValue } from "@yaniv/shared";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
-import { YANIV_THRESHOLD } from "../../src/config.ts";
 import { RoomManager } from "../../src/roomManager.ts";
 import { mulberry32 } from "../../src/rng.ts";
-import { handValue } from "../../src/rules.ts";
 import { createSocketServer } from "../../src/socketServer.ts";
 import { runSession } from "../../scripts/cli/session.ts";
 

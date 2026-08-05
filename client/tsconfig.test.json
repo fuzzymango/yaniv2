@@ -1,0 +1,24 @@
+/*
+ * The tests are their own project, the same way `shared`'s are, and for the same
+ * reason: they need `node:test` and a real socket server, and `types` is per-project —
+ * granting Node types here keeps `client/src` unable to reach for a Node builtin that
+ * a browser would not have.
+ *
+ * `vite.config.ts` rides along rather than getting a third project of its own. It is
+ * not test code, but it is the other file here that runs under Node rather than in a
+ * browser, and leaving it out would leave it the one unchecked file in the workspace.
+ */
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "lib": ["es2023", "dom"],
+    "types": ["node"]
+  },
+  "include": ["test/**/*.ts", "vite.config.ts"],
+  "references": [{ "path": "./tsconfig.json" }, { "path": "../server" }]
+}

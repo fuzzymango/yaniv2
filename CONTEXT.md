@@ -41,6 +41,49 @@ everyone. It is asymmetric by who invokes it, the same way in both phases:
 - The **host** exiting closes the room outright — every other human player is booted to
   the main menu, told the room closed because the host quit.
 
+## Selection
+
+The cards a player has chosen for their turn but has not yet discarded. A selection belongs
+to the player whose turn it is and to nobody else: it exists only in front of them, is sent
+nowhere until the turn is committed, and has no representation in `GameState` — the engine
+learns of it only as the finished discard of a completed turn.
+
+A selection is **ordered**, not a set, despite reading as one. For most discards the order
+is immaterial, but a joker extending a run takes its position from where it sits in the
+submitted order (`docs/rules.md` §4), so the same cards chosen in two different orders are
+two different moves — and they offer the next player different cards to pick up.
+
+Committing a selection is indivisible with drawing, so there is no moment at which a
+selection has been discarded but the turn is unfinished. A selection is pending or gone.
+
+## Draw target
+
+What a selection is committed *against*: the deck, or one of the two takeable ends of the
+last discard (`pickupCandidates` in `shared/src/rules.ts`). Tapping a draw target is what
+turns a pending selection into a finished turn — the two are a pair, and neither means
+anything alone. A draw target is *live* only while the current selection is a legal
+discard; otherwise it is inert, and a tap on it asks for nothing and is refused nothing
+(see "The turn is two taps" in `CLAUDE.md`). This is the same fact the wire already
+carries as `DrawAction` — which pile, and which card if it came off the discard — named for
+the tap that produces it rather than the message it sends.
+
+## Standings
+
+The final table of a finished match: every player who played it, ordered lowest score
+first, with the winner (or winners, on a tie) marked. Not the same thing as the roster —
+the standings are the record of a match that is over, so they include a player who has
+exited to the main menu since it ended, marked as **departed**. Their name and final score
+come from the round result that ended the match, which carries its own copy of both; the
+roster no longer holds either. A departed player can still be the winner, and is still
+shown as one. Level scores are separated by where the two were sitting, so every screen
+lists the same match the same way round; a player who has left has no seat to be placed by
+and sits after whoever stayed.
+
+Who is on the standings, and in what order, is `standings` in `shared/src` — one answer for
+both clients, the same way the rulebook is (see
+[ADR-0002](docs/adr/0002-shared-owns-the-rulebook.md)). How a row is *drawn* is each
+client's own business.
+
 ## Play again
 
 Starts a fresh match in the same room, for the same host and the same seated players

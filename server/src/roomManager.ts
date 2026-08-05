@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto";
-import {
-  BOT_NAMES,
-  MAX_PLAYERS,
-  ROOM_CODE_ALPHABET,
-  ROOM_CODE_LENGTH,
-} from "./config.ts";
+import { MAX_PLAYERS } from "@yaniv/shared";
+import { BOT_NAMES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "./config.ts";
 import { err, ok, type Result } from "./result.ts";
 import { randomInt, systemRng, type Rng } from "./rng.ts";
 import type { ActionResult, GameState, GameStateLobby, Player } from "./state.ts";

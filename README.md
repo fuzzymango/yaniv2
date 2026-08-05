@@ -6,8 +6,9 @@ Multiplayer [Yaniv](docs/rules.md) — TypeScript, npm workspaces, no runtime de
 
 | Workspace | Contents |
 |-----------|----------|
-| `shared/` | Card types, the per-player client view, error codes, and the Socket.io event contract. Imported by the server and (later) the client, so the wire contract can't drift. |
+| `shared/` | Card types, the per-player client view, error codes, and the Socket.io event contract. Imported by the server and the client, so the wire contract can't drift. |
 | `server/` | The game engine: deck, rules, pure state transitions, per-player serialization, and the room registry. |
+| `client/` | The React browser client: the session core, screen components, and Socket.io connection. |
 
 `docs/rules.md` is the source of truth for gameplay. `docs/backend-archetechture.md` is the
 original design sketch — where the two disagree, the code and `rules.md` are current.
@@ -27,10 +28,44 @@ no test-runner dependency. This constrains the codebase to *erasable* TypeScript
 
 ## Playing
 
-There's no client yet, but there are two terminal harnesses. They answer different
-questions, so neither replaces the other.
+**Play in the browser.** The React client runs on its own dev server and talks to a
+separately running backend. Start the server first:
 
-**Play a match yourself (`play`).** A real socket client, so it needs a server running.
+```sh
+npm run serve --workspace=@yaniv/server   # terminal 1 — PORT, default 3000
+```
+
+Then start the frontend in a second terminal:
+
+```sh
+npm run dev                               # terminal 2 — opens on http://localhost:5173
+```
+
+Open http://localhost:5173 in your browser. The frontend proxies `/socket.io` requests to
+port 3000, so the client and server talk to each other automatically.
+
+Enter a name, create a room or join one by its code, and the host starts the match — every
+empty seat is filled with a bot. A turn is two taps and no button: tap cards in your hand
+to choose them (chosen cards are outlined in yellow, tapped again to unchoose), then tap
+either the deck or one of the two end cards of the face-up discard. That second tap is the
+move — the chosen cards are discarded and the tapped card drawn, in one action. The deck
+and the face-up cards do nothing until what you have chosen is a legal discard, so a move
+the rules refuse is never offered in the first place. Your own move lands immediately; the
+opponents' then play out one at a time, so you can see what each of them discarded rather
+than the table jumping straight back to your turn.
+
+The **Yaniv** button above your hand is the exception — the one control that is not a card.
+It lights up the moment your hand is worth 7 or less and is dead until then, and pressing
+it ends the round. Every hand is then turned face up on a scoreboard showing who called,
+whether they were Assafed, and what the round cost each player against their new total. The
+host deals the next round from there.
+
+Closing or reloading the tab mid-match asks you to confirm first, because a dropped
+connection ends the room for everyone in it — there is no reconnecting to a match yet. If
+the connection does go, the screen says so rather than leaving you tapping at a dead table,
+and you land back at the main menu once it comes back.
+
+**Play in the terminal (`play`).** A real socket client, so it needs a server running.
 Start the server first:
 
 ```sh
@@ -131,4 +166,8 @@ npm run demo --workspace=@yaniv/server -- --seed 42 --players 4
 ## Not yet built
 
 Disconnect/reconnect handling (dropping a connection currently ends the room for everyone),
-persistence (rooms are in-memory, so a restart drops games in progress), and the React client.
+persistence (rooms are in-memory, so a restart drops games in progress), and deployment —
+running either half means a checkout and two terminals. A match plays end to end in the
+browser now: create or join, deal, take turns, watch a paced run of bot turns, call Yaniv,
+and finish on the standings with another match one tap away; a dropped connection says so
+on screen rather than leaving you tapping at a dead table.

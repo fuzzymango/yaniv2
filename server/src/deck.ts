@@ -1,22 +1,6 @@
 import type { Card, Rank, Suit } from "@yaniv/shared";
-import { RANKS, SUITS } from "@yaniv/shared";
+import { RANKS, SUITS, rankToValue } from "@yaniv/shared";
 import type { Rng } from "./rng.ts";
-
-/** Scoring value for a rank. docs/rules.md §1. */
-export function rankToValue(rank: Rank): number {
-  switch (rank) {
-    case "Joker":
-      return 0;
-    case "A":
-      return 1;
-    case "J":
-    case "Q":
-    case "K":
-      return 10;
-    default:
-      return Number(rank);
-  }
-}
 
 export function makeCard(suit: Suit, rank: Rank): Card {
   return { id: `${suit}-${rank}`, suit, rank, value: rankToValue(rank) };

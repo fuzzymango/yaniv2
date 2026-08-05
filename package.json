@@ -4,11 +4,13 @@
   "type": "module",
   "workspaces": [
     "shared",
-    "server"
+    "server",
+    "client"
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "tsc --build --force"
+    "typecheck": "tsc --build --force",
+    "dev": "npm run dev --workspace=@yaniv/client"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
