@@ -677,7 +677,90 @@ body {
   }
 }
 
-/* --- the phases still to be built --- */
+/* --- a finished match --- */
+
+/*
+ * Pinned to the viewport like the lobby and the scored round, and for the same reason: a
+ * table of up to six rows, plus anyone who has left since, has to push the *list* to scroll
+ * rather than the page — otherwise the controls slide off the bottom of the phone, and
+ * playing again is the whole point of being on this screen.
+ */
+.final {
+  justify-content: flex-start;
+  height: 100dvh;
+}
+
+.final__header {
+  text-align: center;
+}
+
+/* Who won. The largest thing here, because it is the only question this screen answers. */
+.final__headline {
+  margin: 0.25rem 0 0.25rem;
+  font-size: clamp(1.5rem, 7vw, 2rem);
+  font-weight: 800;
+}
+
+.standings {
+  flex: 1;
+  /* As on the lobby's seats: a flex item will not shrink below its content without this. */
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.standing {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap);
+  padding: 0 0.875rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+/*
+ * The winner, marked the way the turn is marked on the table — an inset ring rather than a
+ * fill, so a row stays readable and the accent keeps meaning "this one".
+ */
+.standing--winner {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+
+/*
+ * A seat given up since the match ended. Only the name is dimmed, not the row: leaving does
+ * not undo how the match finished, so the score stands and a winner who walked away keeps
+ * their mark at full strength.
+ */
+.standing--departed .player__name {
+  color: var(--ink-dim);
+  font-weight: 500;
+}
+
+.final__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* A desktop has height to spare, so the standings sit in it rather than stretching down. */
+@media (min-width: 48rem) {
+  .final {
+    justify-content: center;
+  }
+
+  .standings {
+    flex: 0 1 auto;
+  }
+}
+
+/* --- a round scored without the round behind it --- */
 
 .room {
   justify-content: center;

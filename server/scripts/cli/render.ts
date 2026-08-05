@@ -7,6 +7,7 @@
  */
 
 import type { PlayerGameView, RoundResultView } from "@yaniv/shared";
+import { standings } from "@yaniv/shared";
 import { bold, cyan, dim, green, pad, red, renderCard, renderHand } from "../lib/cardDisplay.ts";
 
 /** The narrowest a name column goes: wide enough for a bot's "(bot)"-suffixed name. */
@@ -163,30 +164,22 @@ function renderRoundResult(result: RoundResultView, viewerId: string): string[] 
   return lines;
 }
 
-/** Final standings, lowest score first — in Yaniv, least is best. */
+/**
+ * Final standings, lowest score first — in Yaniv, least is best.
+ *
+ * Who is on them, and in what order, is `standings` in `shared`: it is the same question
+ * the browser client answers, and a match that is already over cannot be allowed to finish
+ * two different ways depending on which client is looking. What is left here is the marks —
+ * "(you)" depends on whose frame this is, and "(left)" on a seat given up since.
+ */
 function renderStandings(view: PlayerGameView): string[] {
-  const seated = [view.you, ...view.opponents].map((p) => ({
-    id: p.id,
+  const rows = standings(view).map((p) => ({
+    id: p.playerId,
     score: p.score,
-    name: seatName(p.name, p.id, view.you.id),
+    name: p.departed
+      ? `${p.name} ${DEPARTED}`
+      : seatName(p.name, p.playerId, view.you.id),
   }));
-
-  /**
-   * Seats given up since the match ended: on the round result, which records who played
-   * the match, but no longer on the roster. Leaving does not undo how the match
-   * finished, so the standings are everyone who played it, not only whoever stayed —
-   * otherwise a winner who walked away would take the winner's mark off the board with
-   * them.
-   */
-  const departed = (view.roundResult?.players ?? [])
-    .filter((p) => !seated.some((s) => s.id === p.playerId))
-    .map((p) => ({
-      id: p.playerId,
-      score: p.scoreAfter,
-      name: `${p.name} ${DEPARTED}`,
-    }));
-
-  const rows = [...seated, ...departed].sort((a, b) => a.score - b.score);
   const width = columnWidth(rows.map((r) => r.name));
   const lines = [`\n${bold("══ Match over ══════════════════════════════════")}`];
 

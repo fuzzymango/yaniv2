@@ -6,6 +6,7 @@
  * other screen is a function of the view it renders. See docs/adr/0004.
  */
 
+import { GameEnd } from "./GameEnd.tsx";
 import { Lobby } from "./Lobby.tsx";
 import { MainMenu } from "./MainMenu.tsx";
 import { Room } from "./Room.tsx";
@@ -29,8 +30,9 @@ export function App({ session }: { session: Session }) {
     );
   }
 
-  // Pulled out so the early return narrows it: everything past this point is a phase
-  // with a round dealt behind it, and `Room` is typed to accept only those.
+  // Pulled out so the early returns narrow it: what reaches the bottom of this function is
+  // whatever has no screen of its own, and `Room` is typed to accept only that. Adding a
+  // phase is then a typecheck here rather than a blank screen in a browser.
   const { phase } = view;
 
   if (phase === "lobby") {
@@ -55,6 +57,23 @@ export function App({ session }: { session: Session }) {
         onToggleCard={session.toggleCard}
         onCommitTurn={session.commitTurn}
         onCallYaniv={session.callYaniv}
+      />
+    );
+  }
+
+  /*
+   * The standings need no round behind them — they are a function of the roster and the
+   * scores on it, and the round result only adds back whoever has left since. So this
+   * screen is reached on the phase alone, unlike the one below.
+   */
+  if (phase === "gameEnd") {
+    return (
+      <GameEnd
+        view={view}
+        error={error}
+        busy={busy}
+        onPlayAgain={session.playAgain}
+        onExit={session.exitToMenu}
       />
     );
   }

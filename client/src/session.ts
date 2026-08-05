@@ -126,6 +126,17 @@ export interface Session {
    * server is what says so, answering anyone else with `NOT_HOST`.
    */
   startNextRound: () => void;
+  /**
+   * Deal another match to the same table from a finished one — scores back to zero and the
+   * first round dealt on the spot, with no stop in the lobby. Host only, and the server
+   * says so.
+   *
+   * A seat given up since the match ended stays given up: nothing refills it, and a table
+   * that has shrunk below two is refused with `NOT_ENOUGH_PLAYERS` rather than quietly
+   * seated with bots. That is the server's rule and the client does not anticipate it —
+   * unlike a discard, there is no rulebook here for a client to read.
+   */
+  playAgain: () => void;
 }
 
 /**
@@ -397,5 +408,9 @@ export function createSession(socket: YanivClientSocket): Session {
     // ack itself rather than by a move landing in a position already on the screen. The
     // lock still holds across the round trip, which is what a double tap needs it to.
     startNextRound: () => act((ack) => socket.emit("startNextRound", ack)),
+
+    // The same shape, and for the same reason: another match is a position produced rather
+    // than a move within one.
+    playAgain: () => act((ack) => socket.emit("playAgain", ack)),
   };
 }

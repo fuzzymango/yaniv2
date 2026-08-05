@@ -52,12 +52,16 @@ client/
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `handValue` — the rulebook, used by the engine, the bot and (later) the client |
 | `config.ts` | Every rule constant (`HAND_SIZE`, `YANIV_THRESHOLD`, `ASSAF_PENALTY`, `MAX_SCORE`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS`, `MIN_PLAYERS`, `MAX_PLAYERS`), each pointing at a `docs/rules.md` section |
+| `standings.ts` | `standings` — a finished match's final table, lowest score first, including whoever has left since. Read by both clients |
 
-Imported by the server now, and will be imported by the client later, so the wire
-contract can't drift between them. The rulebook is here rather than in `server/src` for
-the same reason: a client must offer exactly the moves the server will accept, and it
-cannot reach into `server/src` to find out. Every function is pure over `Card` values, so
-this costs `shared` none of its dependency-freedom. See `docs/adr/0002`.
+Imported by the server and the client, so the wire contract can't drift between them. The
+rulebook is here rather than in `server/src` for the same reason: a client must offer
+exactly the moves the server will accept, and it cannot reach into `server/src` to find
+out. `standings` is here on the same grounds — the browser and the terminal harness both
+have to say who won, and a match that is over cannot be allowed to finish two different
+ways depending on which client is looking. Every function is pure over values the wire
+already carries, so this costs `shared` none of its dependency-freedom. See
+`docs/adr/0002`.
 
 ### `server/src/`
 
@@ -131,8 +135,9 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, start (host only), leave |
 | `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, a turn as two taps, and the Yaniv call |
 | `RoundEnd.tsx` | `phase: 'roundEnd'` — every hand face up, who called, whether they were Assafed, and what the round cost each player |
+| `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and leaving |
 | `PlayingCard.tsx` | One card, drawn in CSS. Presentational only — it does not know what a card means where it sits |
-| `Room.tsx` | Stands in for `gameEnd` until it is built, and for a `roundEnd` with no result behind it |
+| `Room.tsx` | The fallback for a `roundEnd` with no result behind it — a position the wire type allows and the server does not produce |
 | `styles.css` | Mobile-first. Cards are drawn in CSS — no image assets |
 
 See "The client's session core" below for what the split buys.
@@ -424,13 +429,13 @@ Four fields, and each answers a different question:
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room
 settles on the **ack**: entry has been broadcast before it is acked, and a departing
-connection is published to no longer. So does dealing the next round, which produces a
-position rather than moving within one. A **move settles on a strictly newer position** —
-that is a turn, or the Yaniv call that replaces one, both sent through the same `play`
-helper, which keeps the CLI's `Position { view, version }` / `actedOn` watermark in the
-session core. The server acks an in-game action *before* it broadcasts the result, so
-controls released on the ack would come back to life over a position still showing the
-mover's own turn and their discarded cards in hand. A rejected move is the exception and
+connection is published to no longer. So do dealing the next round and dealing another
+match, which produce a position rather than moving within one. A **move settles on a
+strictly newer position** — that is a turn, or the Yaniv call that replaces one, both sent
+through the same `play` helper, which keeps the CLI's `Position { view, version }` /
+`actedOn` watermark in the session core. The server acks an in-game action *before* it
+broadcasts the result, so controls released on the ack would come back to life over a
+position still showing the mover's own turn and their discarded cards in hand. A rejected move is the exception and
 releases at once: nothing was published, so no newer position is coming, and the turn is
 still theirs.
 
@@ -509,10 +514,10 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **Choosing how many opponents you want.** `startGame` always fills to six. Adding bots
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
 - **Persistence.** Rooms are in-memory only.
-- **The rest of the client.** The main menu, the lobby, the table and a scored round are
-  built; a finished match is not, and `Room.tsx` stands in for it (issue #31). Nor, yet, is
-  pacing a chain of bot turns for a human to watch (#38), or surfacing a dropped connection
-  and a reload warning (#39).
+- **The rest of the client.** Every screen a match passes through is built — main menu,
+  lobby, table, scored round, finished match — so a browser plays one end to end. What is
+  left is pacing a chain of bot turns for a human to watch (#38) and surfacing a dropped
+  connection and a reload warning (#39).
 - **Disambiguating a joker that extends a run.** The browser client sends the selection in
   tap order, so tap order decides where the joker sits (`docs/rules.md` §4) — which is
   invisible on the screen. An accepted wart, and a deliberate one: a step that asked the

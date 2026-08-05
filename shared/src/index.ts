@@ -39,6 +39,9 @@ export type {
   PlayerGameView,
 } from "./views.ts";
 
+export { standings } from "./standings.ts";
+export type { Standing } from "./standings.ts";
+
 export type {
   DrawAction,
   TurnAction,

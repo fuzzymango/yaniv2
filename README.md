@@ -159,7 +159,8 @@ npm run demo --workspace=@yaniv/server -- --seed 42 --players 4
 ## Not yet built
 
 Disconnect/reconnect handling (dropping a connection currently ends the room for everyone),
-persistence (rooms are in-memory, so a restart drops games in progress), and the last of
-the client screens (the main menu, lobby, table and scored round exist; the game-end
-standings are still a placeholder, so a browser match plays and scores rounds but the
-finish is only announced, not shown).
+persistence (rooms are in-memory, so a restart drops games in progress), and the polish the
+browser client still wants — a chain of bot turns arrives as fast as the wire delivers it
+rather than paced for a human to watch, and a dropped connection is not surfaced at all. A
+match itself plays end to end in the browser now: create or join, deal, take turns, call
+Yaniv, and finish on the standings with another match one tap away.

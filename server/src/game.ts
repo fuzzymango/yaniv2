@@ -119,9 +119,12 @@ export function playAgain(
     return err("NOT_HOST", "Only the host can start another match");
   }
   if (state.players.length < MIN_PLAYERS) {
+    // Said in terms of the table that is left rather than the lobby's "to start": whoever
+    // reads this is looking at the standings of a match that has already been played, and
+    // the seats it was played with are the thing that has since gone.
     return err(
       "NOT_ENOUGH_PLAYERS",
-      `Need at least ${MIN_PLAYERS} players to start`,
+      `Too many players have left — another match needs at least ${MIN_PLAYERS}`,
     );
   }
 
