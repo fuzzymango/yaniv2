@@ -2,6 +2,9 @@
   "name": "yaniv2",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "workspaces": [
     "shared",
     "server",
@@ -10,7 +13,8 @@
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "typecheck": "tsc --build --force",
-    "dev": "npm run dev --workspace=@yaniv/client"
+    "dev": "npm run dev --workspace=@yaniv/client",
+    "build": "npm run build --workspace=@yaniv/client"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

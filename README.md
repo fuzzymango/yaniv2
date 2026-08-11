@@ -19,6 +19,7 @@ original design sketch — where the two disagree, the code and `rules.md` are c
 npm install
 npm test          # all workspaces
 npm run typecheck # tsc --build across the monorepo
+npm run build      # builds the client; the server serves it (see Deploying below)
 ```
 
 TypeScript runs directly on Node 24 via native type stripping — there is no build step and
@@ -163,11 +164,21 @@ npm run demo --workspace=@yaniv/server -- --seed 42 --players 4
   pile order, and must never be sent to a client. `serializeStateForPlayer` builds a
   per-viewer view; tests assert no hidden card id appears in the serialized payload.
 
+## Deploying
+
+One Railway service serves both halves (`docs/adr/0003`): `npm run build` builds the client,
+and the server's `index.ts` serves `client/dist` as static files (SPA fallback to
+`index.html`) alongside Socket.io on the same port. `railway.json` at the repo root pins the
+start command to `npm run serve --workspace=@yaniv/server`; Nixpacks runs `npm run build`
+automatically as part of the build phase.
+
 ## Not yet built
 
-Disconnect/reconnect handling (dropping a connection currently ends the room for everyone),
-persistence (rooms are in-memory, so a restart drops games in progress), and deployment —
-running either half means a checkout and two terminals. A match plays end to end in the
-browser now: create or join, deal, take turns, watch a paced run of bot turns, call Yaniv,
-and finish on the standings with another match one tap away; a dropped connection says so
-on screen rather than leaving you tapping at a dead table.
+Disconnect/reconnect handling (dropping a connection currently ends the room for everyone)
+and persistence (rooms are in-memory, so a restart or redeploy drops games in progress). A
+match plays end to end in the browser now: create or join, deal, take turns, watch a paced
+run of bot turns, call Yaniv, and finish on the standings with another match one tap away; a
+dropped connection says so on screen rather than leaving you tapping at a dead table. Because
+reconnect isn't built yet, a backgrounded mobile tab still drops the socket and ends the
+match for everyone at the table — fine solo against bots, not yet safe to invite others to
+(`docs/adr/0004`).

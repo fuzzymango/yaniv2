@@ -78,6 +78,7 @@ already carries, so this costs `shared` none of its dependency-freedom. See
 | `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
 | `botTurns.ts` | `playBotTurns` — runs the seats the server owns until the turn returns to a human |
 | `socketServer.ts` | `createSocketServer` — wires the event contract onto an `io` instance. Never calls `listen` |
+| `staticServer.ts` | `serveStatic` — serves the built client (`client/dist`) same-origin alongside Socket.io, per ADR-0003. Hand-rolled, no framework |
 | `index.ts` | The entrypoint. Binds a port and composes the above. `npm run serve` |
 
 `bot.ts` is shipped, not a dev tool: bot opponents are part of the real game, so the
@@ -624,12 +625,17 @@ Not oversights — deferred on purpose, in this order of likely next work:
   bots, so anyone who has not joined by then is playing the next match, not this one.
 - **Choosing how many opponents you want.** `startGame` always fills to six. Adding bots
   one at a time from the lobby, with its own rejections, is deferred (issue #2).
-- **Persistence.** Rooms are in-memory only.
-- **Deployment.** The engine, bots, rooms, the socket contract and the browser client all
-  work end to end from a checkout, but nothing is deployed — running either half means a
-  checkout, Node 24, and `npm run serve` / `npm run dev` in separate terminals. ADR-0003
-  records the plan (one Railway service, the game server serving the client's static
-  files) and ADR-0004 the order it's deferred behind: client, then reconnect, then deploy.
+- **Persistence.** Rooms are in-memory only, so a redeploy drops every match in progress —
+  same as a restart, and the reason splitting client and server into two services (giving
+  up same-origin, ADR-0003) would be the fix if that cost ever matters.
+- **Deployment happened ahead of reconnect.** ADR-0004 orders this client, then reconnect,
+  then deploy, specifically because a backgrounded mobile tab drops its socket and — with
+  no reconnect — currently ends the room for everyone in it. The server now deploys to
+  Railway as one service (`railway.json` + `server/src/staticServer.ts`, per ADR-0003):
+  `npm run build` builds the client into `client/dist`, `index.ts` serves it same-origin
+  alongside Socket.io, and Nixpacks runs the build automatically. Reconnect is still
+  unbuilt, so the mobile-backgrounding gap above is live in production — solo play against
+  bots is unaffected, but inviting other humans to a deployed room is not yet safe.
 - **Disambiguating a joker that extends a run.** The browser client sends the selection in
   tap order, so tap order decides where the joker sits (`docs/rules.md` §4) — which is
   invisible on the screen. An accepted wart, and a deliberate one: a step that asked the
@@ -659,9 +665,11 @@ npm run typecheck                         # tsc --build across the monorepo
 npm run serve --workspace=@yaniv/server   # start the socket server (PORT, default 3000)
 npm run demo --workspace=@yaniv/server    # watch bots play a full match, in process
 npm run dev                               # the browser client on :5173, socket proxied
+npm run build                             # builds the client into client/dist, for `serve` to host
 ```
 
-`demo` accepts `-- --seed <n> --players <n>`.
+`demo` accepts `-- --seed <n> --players <n>`. Deployed on Railway as one service — see
+"Deployment happened ahead of reconnect" above and `docs/adr/0003`.
 
 The browser client also takes two terminals, and for the same reason the CLI does — it
 talks to a separately running server. `npm run dev` proxies `/socket.io` to port 3000, so
