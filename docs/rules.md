@@ -102,9 +102,10 @@ joker cannot sit below the ace or above the king, so `Q♥ K♥ Joker` is always
 
 The pile has two parts:
 
-- **`lastDiscard`** — the set the most recent player discarded. It lies face up, and only
-  its **first and last cards** may be picked up. If it is a single card, that card is the
-  only option.
+- **`lastDiscard`** — the set the most recent player discarded. It lies face up, and which
+  of its cards may be picked up depends on its shape: a **run** exposes only its **first
+  and last cards**; a **same-rank set** (any length 2+) exposes **every card** in it. If
+  it is a single card, that card is the only option.
 - **Buried cards** — everything discarded before that. Face up but out of play; they can
   never be picked up.
 

@@ -150,9 +150,13 @@ export function canCallYaniv(hand: readonly Card[]): boolean {
   return handValue(hand) <= YANIV_THRESHOLD;
 }
 
-/** The cards of a discarded set that the next player may pick up: its two ends. */
+/**
+ * The cards of a discarded set that the next player may pick up. A same-rank set
+ * exposes every card; a run exposes only its two ends. docs/rules.md §5.
+ */
 export function pickupCandidates(lastDiscard: readonly Card[]): Card[] {
   if (lastDiscard.length === 0) return [];
   if (lastDiscard.length === 1) return [lastDiscard[0]!];
+  if (isSameRankSet(lastDiscard)) return lastDiscard.slice();
   return [lastDiscard[0]!, lastDiscard[lastDiscard.length - 1]!];
 }

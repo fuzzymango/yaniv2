@@ -391,8 +391,23 @@ describe("pickupCandidates", () => {
     assert.deepEqual(ids(pickupCandidates(cards("hearts-9"))), ["hearts-9"]);
   });
 
-  it("offers only the two ends of a longer set", () => {
+  it("offers only the two ends of a run", () => {
     const discard = cards("hearts-4", "hearts-5", "hearts-6", "hearts-7");
     assert.deepEqual(ids(pickupCandidates(discard)), ["hearts-4", "hearts-7"]);
+  });
+
+  it("offers every card of a same-rank set of two", () => {
+    const discard = cards("hearts-7", "diamonds-7");
+    assert.deepEqual(ids(pickupCandidates(discard)), ["hearts-7", "diamonds-7"]);
+  });
+
+  it("offers every card of a same-rank set of three or more", () => {
+    const discard = cards("hearts-7", "diamonds-7", "spades-7", "clubs-7");
+    assert.deepEqual(ids(pickupCandidates(discard)), [
+      "hearts-7",
+      "diamonds-7",
+      "spades-7",
+      "clubs-7",
+    ]);
   });
 });
