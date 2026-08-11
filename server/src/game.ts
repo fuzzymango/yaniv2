@@ -9,6 +9,7 @@ import {
   canonicalizeSet,
   handValue,
   isValidSet,
+  opensSlapdown,
   pickupCandidates,
 } from "@yaniv/shared";
 import { createDeck, deal, shuffle } from "./deck.ts";
@@ -52,6 +53,7 @@ function dealRound(
     buried: [],
     currentTurnPlayerId: startingPlayerId,
     turnOrder,
+    slapdown: null,
   };
 
   return {
@@ -292,6 +294,47 @@ export function takeTurn(
     buried: [...buried, ...pickupLeftovers],
     lastDiscard: canonicalizeSet(collected.cards),
     currentTurnPlayerId: nextPlayerId(round),
+    // Always assigned, never merged: whatever window the previous player was left with
+    // closes here whether or not this turn opens one of its own. docs/rules.md §9.
+    slapdown: opensSlapdown(collected.cards, action.draw.source, drawnCard)
+      ? { playerId, card: drawnCard }
+      : null,
+  };
+
+  return ok({ ...state, round: newRound });
+}
+
+/**
+ * Put the card just drawn straight back down on the set it matches, out of turn.
+ * docs/rules.md §9.
+ *
+ * Not a turn and not a variation on one: the turn moved to the next player the moment
+ * the `takeTurn` that opened this window resolved, and it stays there. All this does is
+ * shrink the slapper's hand by the card they never really got to keep.
+ *
+ * Whether the window is open is the whole of the rule — `takeTurn` already decided that
+ * (`opensSlapdown`), and the next player's turn closes it — so there is nothing here to
+ * ask about the cards. The card is guaranteed still in hand: its owner has not been able
+ * to act since it was dealt to them, and whatever would have let them act closes the
+ * window first.
+ */
+export function slapDown(state: GameState, playerId: string): ActionResult {
+  if (state.phase !== "playing") {
+    return err("WRONG_PHASE", "No round in progress");
+  }
+  const round = state.round;
+  const window = round.slapdown;
+  if (!window || window.playerId !== playerId) {
+    return err("SLAPDOWN_NOT_AVAILABLE", "You have nothing to slap down");
+  }
+
+  const hand = round.hands[playerId] ?? [];
+
+  const newRound: RoundState = {
+    ...round,
+    hands: { ...round.hands, [playerId]: hand.filter((c) => c.id !== window.card.id) },
+    lastDiscard: [...round.lastDiscard, window.card],
+    slapdown: null,
   };
 
   return ok({ ...state, round: newRound });
@@ -402,6 +445,9 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
   return ok({
     ...state,
     phase: busted ? "gameEnd" : "roundEnd",
+    // The call is the next player's turn, so it closes whatever window the previous one
+    // was left holding — and a scored round has no out-of-turn move left in it anyway.
+    round: { ...round, slapdown: null },
     players: newPlayers,
     lastRoundResult: roundResult,
     winnerIds: busted

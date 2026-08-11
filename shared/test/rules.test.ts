@@ -7,9 +7,10 @@ import {
   handValue,
   isValidSet,
   legalDiscards,
+  opensSlapdown,
   pickupCandidates,
 } from "../src/rules.ts";
-import { cards, ids } from "./helpers.ts";
+import { card, cards, ids } from "./helpers.ts";
 
 describe("handValue", () => {
   it("sums card values", () => {
@@ -409,5 +410,49 @@ describe("pickupCandidates", () => {
       "spades-7",
       "clubs-7",
     ]);
+  });
+});
+
+describe("opensSlapdown", () => {
+  it("opens on a same-rank set followed by a deck draw of that rank", () => {
+    assert.equal(
+      opensSlapdown(cards("hearts-7", "diamonds-7"), "deck", card("spades-7")),
+      true,
+    );
+  });
+
+  it("opens on a single card followed by a deck draw of that rank", () => {
+    assert.equal(opensSlapdown(cards("hearts-7"), "deck", card("spades-7")), true);
+  });
+
+  it("stays shut when the drawn card is a joker", () => {
+    assert.equal(
+      opensSlapdown(cards("joker-1"), "deck", card("joker-2")),
+      false,
+      "two jokers share a rank, but a joker is never slappable",
+    );
+  });
+
+  it("stays shut after a run, even when the draw matches one of its ranks", () => {
+    const run = cards("hearts-5", "hearts-6", "hearts-7");
+    assert.equal(opensSlapdown(run, "deck", card("spades-7")), false);
+  });
+
+  it("stays shut when the drawn card was picked up rather than dealt", () => {
+    assert.equal(
+      opensSlapdown(cards("hearts-7", "diamonds-7"), "discard", card("spades-7")),
+      false,
+    );
+  });
+
+  it("stays shut when the drawn card is of another rank", () => {
+    assert.equal(
+      opensSlapdown(cards("hearts-7", "diamonds-7"), "deck", card("spades-8")),
+      false,
+    );
+  });
+
+  it("stays shut on an empty discard", () => {
+    assert.equal(opensSlapdown([], "deck", card("spades-7")), false);
   });
 });

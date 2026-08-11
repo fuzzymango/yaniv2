@@ -25,6 +25,7 @@ export {
   handValue,
   isValidSet,
   legalDiscards,
+  opensSlapdown,
   pickupCandidates,
 } from "./rules.ts";
 

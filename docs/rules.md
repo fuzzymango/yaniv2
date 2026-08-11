@@ -4,7 +4,7 @@ This document is the source of truth for the game engine. Every rule here should
 at least one unit test. If gameplay and this document disagree, the document is right and
 the code is a bug.
 
-Variants deliberately **excluded** from this ruleset are listed at the bottom.
+Variants deliberately **excluded** from this ruleset are listed in §8.
 
 ---
 
@@ -164,6 +164,41 @@ would be added as an explicit rule flag, never as scattered special cases.
 - **100/50 halving** — landing exactly on 100 dropping you to 50.
 - **Jokers wild in same-rank sets** — jokers are wild in runs (§4) but do not complete
   three of a kind.
-- **Slapdown** — discarding a just-drawn matching card out of turn. This one also
-  conflicts with the engine's atomic-turn model and would require revisiting it.
 - **Multi-deck play.**
+
+---
+
+## 9. Slapdown
+
+If you discard a **same-rank set or a single card** and then draw from the **draw pile** a
+card of that **same rank**, you may put it straight back down on top of the set you just
+discarded, out of turn. Your hand shrinks by one, and you have shed a card for free.
+
+This does **not** consume a turn: the turn passed to the next player the moment your
+discard-and-draw resolved (§3), and it stays there. A slapdown only takes a card off your
+hand and adds it to `lastDiscard`, which — being a same-rank set — leaves every card in it
+pickup-eligible, the slapped one included (§5).
+
+Four conditions, all required:
+
+- The discard was a **same-rank set or a lone card**. Never a run: a run has no single
+  rank to match.
+- The draw came from the **draw pile**. A card picked up from the discard pile never
+  qualifies, however well it matches.
+- The drawn card's **rank matches** the discard's.
+- The drawn card is **not a joker**. Two jokers do form a same-rank set, so a joker drawn
+  after discarding one would otherwise qualify — but a joker is worth nothing, so there is
+  nothing to shed.
+
+**The window is brief.** It opens when your turn resolves and closes on the first of:
+
+- you slap the card down, or
+- the next player takes their turn or calls Yaniv (§6) — whichever the server processes
+  first wins, with no pause held open for you. See
+  [ADR-0005](adr/0005-slapdown-race-by-event-order.md).
+
+Only the player who drew the card can slap it, and only while their own window is open.
+
+If a slapdown leaves you holding **no cards at all**, your next turn has no legal discard
+— a turn must discard at least one card (§3) — so calling Yaniv is your only move. A hand
+worth 0 is always under the threshold, so the call always succeeds.

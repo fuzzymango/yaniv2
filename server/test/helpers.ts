@@ -27,6 +27,8 @@ export interface StateOptions {
   buried?: string[];
   currentTurnPlayerId?: string;
   roundNumber?: number;
+  /** An open slapdown window, named by whose it is and which card id it holds. */
+  slapdown?: { playerId: string; cardId: string };
 }
 
 /** Build an exact game state, bypassing the deal, so a scenario can be pinned down. */
@@ -65,6 +67,9 @@ export function makeState(options: StateOptions = {}): GameState {
     buried: cards(...(options.buried ?? [])),
     currentTurnPlayerId: options.currentTurnPlayerId ?? turnOrder[0]!,
     turnOrder,
+    slapdown: options.slapdown
+      ? { playerId: options.slapdown.playerId, card: card(options.slapdown.cardId) }
+      : null,
   };
 
   const active: GameStateActive = { ...base, phase, round };
