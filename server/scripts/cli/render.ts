@@ -129,6 +129,23 @@ function renderTable(view: PlayerGameView): string {
 }
 
 /**
+ * The one thing on a mid-round frame that is not on the table: a slapdown of the
+ * viewer's own, waiting to be taken (docs/rules.md §9).
+ *
+ * Worth its own line because nothing else on the screen implies it. The window opens
+ * once the turn has already moved on, so the frame it appears on is otherwise somebody
+ * else's move — and it closes the moment they make it, so a developer who does not see
+ * it here does not see it at all.
+ *
+ * `slapdownEligible` is on `SelfView` alone, so this is only ever the viewer's own
+ * window; there is no shape in which somebody else's could be printed here.
+ */
+function renderSlapdown(view: PlayerGameView): string[] {
+  if (!view.you.slapdownEligible) return [];
+  return [cyan("  slapdown! ") + dim("type slap to put the card you just drew back down")];
+}
+
+/**
  * A finished round: who called, whether it stood, and every hand face up.
  *
  * The hands come straight from the view — the server reveals them only at `roundEnd`
@@ -222,7 +239,12 @@ export function renderView(view: PlayerGameView): string {
   if (view.roundResult)
     return renderRoundResult(view.roundResult, view.you.id).join("\n");
 
-  return [...renderOpponents(view), renderTable(view), renderOwnHand(view)].join(
-    "\n",
-  );
+  // The slapdown line goes last, directly above the prompt: it is the shortest-lived
+  // thing on the frame, and the closest to the cursor is the hardest to scroll past.
+  return [
+    ...renderOpponents(view),
+    renderTable(view),
+    renderOwnHand(view),
+    ...renderSlapdown(view),
+  ].join("\n");
 }

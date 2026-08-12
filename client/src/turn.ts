@@ -17,7 +17,7 @@
  * `GameError`, exactly as it does for the CLI.
  */
 
-import type { Card, DrawAction, PlayerGameView, TurnAction } from "@yaniv/shared";
+import type { Card, DrawAction, PlayerGameView, SelfView, TurnAction } from "@yaniv/shared";
 import { canCallYaniv, isValidSet, pickupCandidates } from "@yaniv/shared";
 
 /**
@@ -107,6 +107,28 @@ export function isLegalCall(hand: readonly Card[]): boolean {
  */
 export function takeableIds(lastDiscard: readonly Card[]): ReadonlySet<string> {
   return new Set(pickupCandidates(lastDiscard).map((card) => card.id));
+}
+
+/**
+ * Whether the discard pile is a slapdown target — the just-drawn card may go straight
+ * back down on the set it matches (docs/rules.md §9).
+ *
+ * The one question on this screen the rulebook cannot answer. Every other rule here is
+ * about cards the client already holds; a window is about the card the *server* dealt
+ * off the top of a pile it never sends, so `slapdownEligible` is the answer and there is
+ * nothing to re-derive. What this earns is the single place both the screen and the
+ * session core ask it: a pile that flashes and a tap that sends cannot come apart.
+ *
+ * Deliberately no turn check. A window is open precisely when the turn has moved on to
+ * the next player — that is what makes it a window — so being off turn is the normal
+ * case and never a reason to withhold the target.
+ *
+ * Takes the `SelfView` rather than the whole position, like `isLegalCall` takes a hand:
+ * a window belongs to one player and is told to nobody else, and there is nowhere else
+ * in a `PlayerGameView` this could be read from.
+ */
+export function isSlapdownTarget(you: SelfView): boolean {
+  return you.slapdownEligible;
 }
 
 /** Where a tapped source draws from, or null when it is not a card on offer. */

@@ -90,17 +90,30 @@ export function testClock(): TestClock {
  * A mid-round view with the two things a turn is read against — the hand it comes from
  * and the discard it may be drawn from. Everything else is filled in plausibly, because
  * the turn module reads none of it and a test that set it would be claiming otherwise.
+ *
+ * The two exceptions are named: an open slapdown window, and whose turn it is — the pair
+ * that go together, since a window is only ever open while somebody else is on turn.
  */
-export function viewOf(hand: Card[], lastDiscard: Card[]): PlayerGameView {
+export function viewOf(
+  hand: Card[],
+  lastDiscard: Card[],
+  overrides: { slapdownEligible?: boolean; currentTurnPlayerId?: string } = {},
+): PlayerGameView {
   return {
     roomCode: "ABCD",
     phase: "playing",
     roundNumber: 1,
     hostId: "p1",
-    you: { id: "p1", name: "Ada", score: 0, hand, slapdownEligible: false },
+    you: {
+      id: "p1",
+      name: "Ada",
+      score: 0,
+      hand,
+      slapdownEligible: overrides.slapdownEligible ?? false,
+    },
     opponents: [{ id: "p2", name: "Grace", score: 0, handSize: 5 }],
     turnOrder: ["p1", "p2"],
-    currentTurnPlayerId: "p1",
+    currentTurnPlayerId: overrides.currentTurnPlayerId ?? "p1",
     drawPileCount: 30,
     lastDiscard,
     buriedCount: 2,

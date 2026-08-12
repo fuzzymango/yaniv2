@@ -27,7 +27,13 @@ import type { Socket } from "socket.io-client";
 import type { Clock } from "./pacing.ts";
 import { createPacer, systemClock } from "./pacing.ts";
 import type { DrawSource } from "./turn.ts";
-import { isLegalCall, retainSelection, toggleSelection, turnFrom } from "./turn.ts";
+import {
+  isLegalCall,
+  isSlapdownTarget,
+  retainSelection,
+  toggleSelection,
+  turnFrom,
+} from "./turn.ts";
 
 /**
  * Declared here rather than imported from the CLI harness, which has the identical
@@ -134,6 +140,17 @@ export interface Session {
    * nothing.
    */
   callYaniv: () => void;
+  /**
+   * Put the just-drawn card straight back down on the set it matches (docs/rules.md §9).
+   * No payload: a player draws one card a turn, so the server already knows which card
+   * is meant.
+   *
+   * The one intent sent while the turn belongs to somebody else, and the one racing them
+   * for it: losing comes back as `SLAPDOWN_NOT_AVAILABLE` and costs nothing, exactly as
+   * any other refusal does. A tap with no window open sends nothing and says nothing —
+   * the pile should not have been offering itself.
+   */
+  slapDown: () => void;
   /**
    * Deal the next round from a scored one. Host only — and, as with `startGame`, the
    * server is what says so, answering anyone else with `NOT_HOST`.
@@ -540,6 +557,33 @@ export function createSession(
       if (!isLegalCall(snapshot.view.you.hand)) return;
 
       play((ack) => socket.emit("callYaniv", ack));
+    },
+
+    /*
+     * Sent through `play` rather than `act` for the same reason a turn is: the server
+     * acks the slap before it broadcasts the shorter hand it produced, so the pile would
+     * come back live over a position that still shows the card in hand. The lock going
+     * on before the emit is also the whole of the double-tap guard — a thumb that lands
+     * twice sends once, and the server would refuse the second anyway.
+     *
+     * Off turn, `play`'s watermark lets go on whatever position arrives first, which may
+     * be the next player's move rather than the slap. Either is an answer: both are
+     * strictly newer than the one it was sent from, and by either of them the window is
+     * spent.
+     *
+     * A window drawn a beat behind the position that closed it is offered anyway, and
+     * refused. Pacing arms a beat on the window's own arrival (see `pacing.ts`), so the
+     * next player's move can be queued behind it for up to `PACE_MS` — the pile is still
+     * flashing over a window the server has already shut. That is the same shape as
+     * tapping a draw target out of turn: whether the window is still open is the
+     * server's to say, it says `SLAPDOWN_NOT_AVAILABLE`, and a refusal costs the player
+     * nothing. Only what the rulebook can answer is withheld ahead of it.
+     */
+    slapDown: () => {
+      if (snapshot.busy || snapshot.view === null) return;
+      if (!isSlapdownTarget(snapshot.view.you)) return;
+
+      play((ack) => socket.emit("slapDown", ack));
     },
 
     // Ack-settled, like `startGame` and for the same reason: dealing is answered by the

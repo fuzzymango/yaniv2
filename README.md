@@ -55,6 +55,12 @@ the rules refuse is never offered in the first place. Your own move lands immedi
 opponents' then play out one at a time, so you can see what each of them discarded rather
 than the table jumping straight back to your turn.
 
+Once in a while the discard pile starts flashing on somebody else's turn: you discarded a
+same-rank set (or a lone card) and drew that same rank off the deck, so the card can go
+straight back down (`docs/rules.md` §9). One tap on the pile sheds it, and the window shuts the moment the
+next player moves — which against bots is immediately, since their turns are played in the
+same tick (`docs/adr/0005`), so this is something you will see against other people.
+
 The **Yaniv** button above your hand is the exception — the one control that is not a card.
 It lights up the moment your hand is worth 7 or less and is dead until then, and pressing
 it ends the round. Every hand is then turned face up on a scoreboard showing who called,
@@ -105,6 +111,7 @@ are filled with bots. Everyone plays through to a winner. At the prompt:
 | `1` or `2 3 4` | discard those cards by hand position, drawing from the deck |
 | `1 3 t2` | the same, but take face-up card 2 off the table instead |
 | `yaniv` | call Yaniv |
+| `slap` | slap down the card you just drew, while the frame says a window is open |
 | enter | deal the next round, once one has ended |
 | `again` | (host only, at a finished match) deal a fresh match to the same table |
 | `q` or Ctrl-D | quit |
@@ -115,6 +122,12 @@ stop at a lobby — and is the host's alone; anyone else is told `NOT_HOST`, and
 told `NOT_ENOUGH_PLAYERS` if too few people are left to play. A seat given up stays given
 up: nobody is replaced by a bot, and departed players show as `(left)` in the standings so
 the final scores still add up.
+
+`slap` is the one input offered when the turn is not yours: discard a same-rank set or a
+lone card, draw its rank off the deck, and the frame says a slapdown is open until the next
+player moves (`docs/rules.md` §9). Against bots you will not get there — the seat after yours is played
+in the same tick, so the window is already shut by the time the frame lands. Another human
+sitting behind you is what makes it winnable; see `docs/adr/0005`.
 
 Leaving with `menu` is not quitting: the connection stays up and you land back at the main
 menu, free to create or join another room. It works the same way from the lobby and from a

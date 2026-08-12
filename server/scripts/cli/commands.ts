@@ -15,6 +15,12 @@ import { pickupCandidates } from "@yaniv/shared";
 export type Command =
   | { kind: "turn"; action: TurnAction }
   | { kind: "yaniv" }
+  /**
+   * Put the just-drawn card straight back down on the set it matches (docs/rules.md §9).
+   * Not a turn and not part of one — it is offered while the turn sits with the *next*
+   * player, for as long as their move has not landed.
+   */
+  | { kind: "slap" }
   | { kind: "quit" }
   /** Begin the match. Only meaningful in the lobby, and only the host may do it. */
   | { kind: "start" }
@@ -73,6 +79,14 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
   }
 
   if (line === "yaniv") return { kind: "yaniv" };
+
+  /**
+   * Whether a window is actually open is not checked here, for the same reason `start`
+   * does not check who the host is: the server owns it and answers
+   * `SLAPDOWN_NOT_AVAILABLE`, and a second opinion in the harness could only ever
+   * disagree with it. The frame says when there is one to take (see `render.ts`).
+   */
+  if (line === "slap") return { kind: "slap" };
 
   // A bare enter is the only input whose meaning depends on the phase: it deals the
   // next round when one has just ended, and is a stray keystroke otherwise.

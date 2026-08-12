@@ -79,13 +79,25 @@ function hostAsk(script: Ask): Ask {
   };
 }
 
-/** Poll until `ready`, so a wedged expectation fails the test instead of hanging it. */
-async function waitUntil(what: string, ready: () => boolean): Promise<void> {
+/**
+ * Poll until `ready`, answering whether it ever became so.
+ *
+ * Giving up quietly is what the scripted sessions below need: one that is still sitting
+ * at a prompt when the table is torn down has to end where it stands, not throw into
+ * nobody's `await`. A test that wants the failure asks for it through `waitUntil`.
+ */
+async function until(ready: () => boolean): Promise<boolean> {
   const deadline = Date.now() + 2000;
   while (!ready()) {
-    if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
+    if (Date.now() > deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+  return true;
+}
+
+/** Poll until `ready`, so a wedged expectation fails the test instead of hanging it. */
+async function waitUntil(what: string, ready: () => boolean): Promise<void> {
+  if (!(await until(ready))) assert.fail(`timed out waiting for ${what}`);
 }
 
 /**
@@ -950,6 +962,180 @@ describe("runSession", () => {
       const guest = plain(screens.guest.join("\n"));
       assert.match(guest, /host left/i, "the same reason the lobby gives, from this screen");
       assert.match(guest, /join <code>/, "and the same main menu to land on");
+    });
+  });
+
+  /**
+   * Slapdown from a terminal (docs/rules.md §9). The window opens once the turn has
+   * already moved on, so both of these are about a prompt appearing where the harness
+   * never used to offer one.
+   */
+  describe("slapping down", () => {
+    /**
+     * A hand position worth discarding to fish for a window: a card whose rank the
+     * player holds only once, since every copy still in hand is a copy that cannot come
+     * back off the deck. Jokers are skipped — a drawn joker never opens a window.
+     */
+    function fishingDiscard(view: PlayerGameView): string {
+      const hand = view.you.hand;
+      const at = hand.findIndex(
+        (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
+      );
+      return String((at === -1 ? 0 : at) + 1);
+    }
+
+    it("sends the slap and prints the refusal when there is no window", async () => {
+      const server = await startServer(7);
+      const printed: string[] = [];
+      let prompts = 0;
+
+      try {
+        const socket = await server.connect();
+        await runSession(
+          socket,
+          {
+            // On our own turn the window is necessarily shut: it closes on the next
+            // player's move, and the turn only comes back once everyone has had one.
+            ask: hostAsk(async () => {
+              prompts += 1;
+              return prompts === 1 ? "slap" : null;
+            }),
+            output: (text) => printed.push(text),
+          },
+          { playerName: "Ada", entry: { kind: "create" } },
+        );
+      } finally {
+        await server.close();
+      }
+
+      assert.match(plain(printed.join("\n")), /SLAPDOWN_NOT_AVAILABLE/);
+      assert.equal(prompts, 2, "a refused slap costs nothing, so we are asked again");
+    });
+
+    /**
+     * The real thing, played until a window actually opens.
+     *
+     * It takes two humans: `playBotTurns` runs the seat after ours in the same tick, so
+     * against bots the window is shut before the frame announcing it has been read
+     * (ADR-0005). Grace sits directly behind Ada — the roster is seated in join order —
+     * and is scripted to hold off while Ada's window is open, which is the position the
+     * rule exists for.
+     */
+    it("puts the drawn card back down from a prompt of its own", { timeout: 30_000 }, async () => {
+      const server = await startServer(7);
+      const adaScreen: string[] = [];
+      /** Every position Ada was sent, in order — what the wire actually said. */
+      const adaHeard: PlayerGameView[] = [];
+      let adaView: PlayerGameView | null = null;
+      let graceView: PlayerGameView | null = null;
+      let slapped = false;
+      let done = false;
+      /** A cap on the fishing, so a hand that never matches fails rather than hangs. */
+      let adaPrompts = 0;
+
+      try {
+        const adaSocket = await server.connect();
+        adaSocket.on("gameStateUpdate", (v) => {
+          adaView = v;
+          adaHeard.push(v);
+        });
+
+        const adaSession = runSession(
+          adaSocket,
+          {
+            ask: async () => {
+              adaPrompts += 1;
+              const view = adaView!;
+              if (view.phase === "lobby") {
+                await until(() => adaView!.opponents.some((o) => o.name === "Grace"));
+                return "start";
+              }
+              // One window is the whole of what this test is after; the fishing is only
+              // how it gets there.
+              if (slapped || adaPrompts > 400) return null;
+              if (view.you.slapdownEligible) {
+                slapped = true;
+                return "slap";
+              }
+              if (view.phase === "roundEnd") return "";
+              if (view.phase === "gameEnd") return "again";
+              return fishingDiscard(view);
+            },
+            output: (text) => adaScreen.push(text),
+          },
+          { playerName: "Ada", entry: { kind: "create" } },
+        );
+
+        const roomCode = await readRoomCode(adaScreen);
+        const graceSocket = await server.connect();
+        graceSocket.on("gameStateUpdate", (v) => {
+          graceView = v;
+        });
+
+        const graceSession = runSession(
+          graceSocket,
+          {
+            /**
+             * Grace plays only her own turns, and only once Ada's window has shut. The
+             * race is real — whichever event the server takes first wins it — so a test
+             * about the slap landing has to be the one that does not race.
+             */
+            ask: async () => {
+              await until(() => {
+                if (done) return true;
+                const view = graceView!;
+                return (
+                  view.phase === "playing" &&
+                  view.currentTurnPlayerId === view.you.id &&
+                  !adaView!.you.slapdownEligible
+                );
+              });
+              return done ? null : fishingDiscard(graceView!);
+            },
+            output: () => {},
+          },
+          { playerName: "Grace", entry: { kind: "join", roomCode } },
+        );
+
+        /**
+         * Only Ada's session is waited on, and Grace's is deliberately left where it
+         * stands: once Ada stops typing, the turn comes round to a seat nobody is at,
+         * so Grace's session sits at the position it is waiting for and never gets
+         * another. `done` is what releases her if she happens to be at a prompt
+         * instead; the server closing is what ends the connection either way.
+         */
+        void graceSession;
+        await adaSession;
+      } finally {
+        done = true;
+        await server.close();
+      }
+
+      assert.ok(slapped, "no window ever opened to slap from");
+
+      const opened = adaHeard.findIndex((v) => v.you.slapdownEligible);
+      const before = adaHeard[opened]!;
+      const after = adaHeard[opened + 1]!;
+      assert.equal(
+        after.you.hand.length,
+        before.you.hand.length - 1,
+        "the slapped card left the hand",
+      );
+      assert.equal(
+        after.lastDiscard.length,
+        before.lastDiscard.length + 1,
+        "and joined the set it matches",
+      );
+      assert.equal(
+        after.currentTurnPlayerId,
+        before.currentTurnPlayerId,
+        "a slapdown is not a turn",
+      );
+      assert.equal(after.you.slapdownEligible, false, "the window closed behind it");
+
+      const screen = plain(adaScreen.join("\n"));
+      assert.match(screen, /slapdown!/, "the frame is what told her the window was open");
+      assert.doesNotMatch(screen, /SLAPDOWN_NOT_AVAILABLE/, "and the slap was not refused");
     });
   });
 

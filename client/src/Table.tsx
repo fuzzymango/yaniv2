@@ -22,7 +22,7 @@ import { handValue } from "@yaniv/shared";
 import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
 import { bySeat } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
-import { isLegalCall, isLegalSelection, takeableIds } from "./turn.ts";
+import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
 
 interface TableProps {
   view: PlayerGameView;
@@ -34,6 +34,8 @@ interface TableProps {
   onCommitTurn: (source: DrawSource) => void;
   /** End the round. Offered only on a hand the rules allow it on — see below. */
   onCallYaniv: () => void;
+  /** The tap on the pile that sheds the just-drawn card, while a window is open. */
+  onSlapDown: () => void;
 }
 
 export function Table({
@@ -44,6 +46,7 @@ export function Table({
   onToggleCard,
   onCommitTurn,
   onCallYaniv,
+  onSlapDown,
 }: TableProps) {
   const yourTurn = view.currentTurnPlayerId === view.you.id;
 
@@ -62,6 +65,15 @@ export function Table({
    * cards and none of the rules about whose go it is.
    */
   const canCall = !busy && isLegalCall(view.you.hand);
+
+  /**
+   * Whether the pile is a slapdown target rather than a row of draw targets
+   * (docs/rules.md §9) — the two meanings a tap on it could have, and it may only have
+   * one. While a window is open the turn is somebody else's, so a draw off this pile is
+   * a move the server would refuse anyway, and the slap is the move actually there to
+   * make. The deck is left alone: it is not this pile, and nothing about it changes.
+   */
+  const slapdownTarget = isSlapdownTarget(view.you);
 
   const opponents = [...view.opponents].sort(bySeat(view));
 
@@ -100,41 +112,78 @@ export function Table({
           <span className="pick__count">{view.drawPileCount}</span>
         </button>
 
-        {/*
-          The last discard, laid out as it lies. Only its two ends may be taken — which
-          comes from the rulebook, not from counting to the ends here — so the cards
-          between them are rendered without a control at all and dimmed, rather than as
-          buttons that quietly do nothing.
-        */}
-        <ul className="discard">
-          {view.lastDiscard.map((card) =>
-            takeable.has(card.id) ? (
-              <li key={card.id}>
-                <button
-                  className="pick"
-                  type="button"
-                  aria-label={`Take the ${cardLabel(card)}`}
-                  disabled={!canDraw}
-                  onClick={() => onCommitTurn({ kind: "discard", cardId: card.id })}
-                >
+        {slapdownTarget ? (
+          /*
+            The whole pile as one target, flashing, for as long as the window lasts. It
+            is one control rather than a card each because there is only one card it
+            could be about — a player draws one card a turn, so the server already knows
+            which — and because a pile that offered both meanings at once would make a
+            tap a guess.
+
+            Locked on `busy` the moment it is tapped rather than on the ack, so a thumb
+            that lands twice sends once. Correctness does not rest on that: a second slap
+            is refused by the server for free.
+          */
+          <button
+            className="slapdown"
+            type="button"
+            aria-label="Slap down the card you just drew"
+            disabled={busy}
+            onClick={onSlapDown}
+          >
+            {view.lastDiscard.map((card) => (
+              <PlayingCard card={card} key={card.id} />
+            ))}
+          </button>
+        ) : (
+          /*
+            The last discard, laid out as it lies. Which of it may be taken comes from the
+            rulebook, not from counting to the ends here — so whatever is not on offer is
+            rendered without a control at all and dimmed, rather than as buttons that
+            quietly do nothing.
+          */
+          <ul className="discard">
+            {view.lastDiscard.map((card) =>
+              takeable.has(card.id) ? (
+                <li key={card.id}>
+                  <button
+                    className="pick"
+                    type="button"
+                    aria-label={`Take the ${cardLabel(card)}`}
+                    disabled={!canDraw}
+                    onClick={() => onCommitTurn({ kind: "discard", cardId: card.id })}
+                  >
+                    <PlayingCard card={card} />
+                  </button>
+                </li>
+              ) : (
+                // Deliberately not a `.pick`: there is no control here at all, so there is
+                // nothing to give it a pointer cursor or a focus stop either.
+                <li className="discard__out" key={card.id}>
                   <PlayingCard card={card} />
-                </button>
-              </li>
-            ) : (
-              // Deliberately not a `.pick`: there is no control here at all, so there is
-              // nothing to give it a pointer cursor or a focus stop either.
-              <li className="discard__out" key={card.id}>
-                <PlayingCard card={card} />
-              </li>
-            ),
-          )}
-        </ul>
+                </li>
+              ),
+            )}
+          </ul>
+        )}
       </section>
 
-      <p className={`turn ${yourTurn ? "turn--yours" : ""}`} role="status">
-        {yourTurn
-          ? "Your turn — tap cards, then the deck or a face-up card"
-          : `${onTurn?.name ?? "Somebody"} is playing`}
+      {/*
+        A window says what it is in words as well as in the flashing, because it is the
+        one thing on this screen that is not a rule about the cards in front of the
+        player: nothing they can see explains why the pile has started asking for a tap.
+        It goes above whose turn it is, which is true at the same time and matters less
+        for as long as the window lasts.
+      */}
+      <p
+        className={`turn ${yourTurn ? "turn--yours" : ""} ${slapdownTarget ? "turn--slap" : ""}`}
+        role="status"
+      >
+        {slapdownTarget
+          ? "Slapdown! Tap the pile to send the card you just drew straight back"
+          : yourTurn
+            ? "Your turn — tap cards, then the deck or a face-up card"
+            : `${onTurn?.name ?? "Somebody"} is playing`}
       </p>
 
       {/*

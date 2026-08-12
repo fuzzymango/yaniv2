@@ -150,6 +150,61 @@ describe("renderView", () => {
     assert.match(frame, /deck 2/);
   });
 
+  /**
+   * A window is open while the turn sits with somebody else, so nothing else on the
+   * frame says it is there — and a developer who cannot see it has lost it, because it
+   * closes on the next player's move (docs/rules.md §9).
+   */
+  it("says a slapdown is on offer, and names the word that takes it", () => {
+    const table = {
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace" },
+      ],
+      hands: { p1: ["clubs-5", "spades-7"], p2: ["hearts-2"] },
+      lastDiscard: ["hearts-7"],
+      // The turn has already passed on: a slapdown is not a turn.
+      currentTurnPlayerId: "p2",
+    };
+
+    const open = plain(
+      renderView(
+        serializeStateForPlayer(
+          makeState({ ...table, slapdown: { playerId: "p1", cardId: "spades-7" } }),
+          "p1",
+        ),
+      ),
+    );
+    assert.match(open, /slap/i, "the word that takes it is on the screen");
+
+    const shut = plain(
+      renderView(serializeStateForPlayer(makeState(table), "p1")),
+    );
+    assert.doesNotMatch(shut, /slap/i, "and is not offered when there is no window");
+  });
+
+  /**
+   * The other side of the same frame: eligibility is private (see the serializer), so
+   * the player it does not belong to must not be told a window is open at all.
+   */
+  it("says nothing about somebody else's open window", () => {
+    const view = serializeStateForPlayer(
+      makeState({
+        players: [
+          { id: "p1", name: "Ada" },
+          { id: "p2", name: "Grace" },
+        ],
+        hands: { p1: ["clubs-5", "spades-7"], p2: ["hearts-2"] },
+        lastDiscard: ["hearts-7"],
+        currentTurnPlayerId: "p2",
+        slapdown: { playerId: "p1", cardId: "spades-7" },
+      }),
+      "p2",
+    );
+
+    assert.doesNotMatch(plain(renderView(view)), /slap/i);
+  });
+
   it("reveals every hand and the scoring when a round ends", () => {
     const frame = plain(renderView(roundEndView("p1", ["hearts-K", "spades-Q"])));
 
