@@ -499,6 +499,54 @@ body {
 }
 
 /*
+ * The pile while a slapdown window is open: one control over all of it, in place of the
+ * row of draw targets, because there is only one card a tap could be about.
+ *
+ * It flashes rather than sitting still, and that is the point — the window belongs to a
+ * player whose turn has already passed, so nothing else on the screen is asking them for
+ * anything, and a static ring is exactly what a player watching somebody else's move
+ * does not look at. The accent it flashes is the same yellow that means "chosen and not
+ * yet sent" on the hand, which is near enough to what this is: a card on its way down.
+ */
+.slapdown {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.slapdown:enabled {
+  animation: slapdown-flash 900ms ease-in-out infinite;
+}
+
+.slapdown:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@keyframes slapdown-flash {
+  50% {
+    box-shadow: 0 0 0 3px var(--accent);
+  }
+}
+
+/*
+ * Still unmistakable without the motion: the ring stays, it just stops pulsing. Dropping
+ * the animation alone would leave nothing at all, since the ring only exists inside it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .slapdown:enabled {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--accent);
+  }
+}
+
+/*
  * The cards between the ends of the discard, which cannot be taken. Rendered without a
  * control at all rather than as buttons that do nothing, and dimmed and sunk so that is
  * visible before anybody tries.
@@ -539,7 +587,13 @@ body {
   text-align: center;
 }
 
-.turn--yours {
+/*
+ * Something is being asked of this player: their turn, or a slapdown window of theirs.
+ * The same yellow for both, and the same yellow the flashing pile uses — on this screen
+ * it means "yours, and not yet played".
+ */
+.turn--yours,
+.turn--slap {
   color: var(--accent);
   font-weight: 700;
 }

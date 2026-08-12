@@ -27,7 +27,13 @@ export type GameErrorCode =
   | "CARD_NOT_PICKUP_ELIGIBLE"
   | "DECK_EXHAUSTED"
   // yaniv
-  | "YANIV_THRESHOLD_NOT_MET";
+  | "YANIV_THRESHOLD_NOT_MET"
+  // slapdown
+  /**
+   * No window open for this caller: it never opened, they have already slapped, or the
+   * next player took their turn first.
+   */
+  | "SLAPDOWN_NOT_AVAILABLE";
 
 export interface GameError {
   code: GameErrorCode;

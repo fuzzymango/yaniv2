@@ -8,20 +8,22 @@ contract and the rulebook, so it stays dependency-free for the client's sake.
 # behavior rules
 This section bullet points specific behavior patterns that you should follow when working in this repository. Do not modify this section.
 
-- **keep `README.md` and `CLAUDE.md` updated** - after implementing code changes, review the contents of `CLAUDE.md` and README.md and ensure they're kept up to date and relevant with the current state of the codebase. For example, if you add or modify an `npm run ...` command, ensure that the `README.md` is amended to reflect this change. Developers will look at `README.md` often and we don't want to have false/stale information present. The catch to ths is, we don't want `README.md` to become bloated with information so only maintain the high-level information necessary for navigating this project.  
+- **keep `README.md` and `CLAUDE.md` updated** - after implementing code changes, review the contents of `CLAUDE.md` and README.md and ensure they're kept up to date and relevant with the current state of the codebase. For example, if you add or modify an `npm run ...` command, ensure that the `README.md` is amended to reflect this change. Developers will look at `README.md` often and we don't want to have false/stale information present. The catch to ths is, we don't want `README.md` to become bloated with information so only maintain the high-level information necessary for navigating this project. The `CLAUDE.md` file should be no more than 700 lines. If the document exeeds 700 lines, compact it by:
+
+- **Trim non-universal instructions:** Remove details Claude can easily discover by inspecting your file tree or code patterns.
+- **Delete redundant history:** Purge old to-do lists, outdated implementation notes, and completed session logs.
+- **Use sub-file references:** Move specific architectural breakdowns or deep-dive documentation into external files (ADRs or `README.md`) and reference them lightly instead of pasting text inline.
 
 ## Where the rules live
 
-**`docs/rules.md` is the single source of truth for gameplay.** Every rule maps to at
-least one test. If code and `rules.md` ever disagree, `rules.md` is right and the code has
-a bug.
+**`docs/rules.md` is the single source of truth for gameplay.** Every rule maps to at least
+one test; if code and `rules.md` disagree, `rules.md` is right and the code has a bug.
 
-`docs/backend-archetechture.md` is the original design sketch that kicked the project off.
-It is **stale** in several places — see "Deviations from the original sketch" below. Don't
-treat it as authoritative; it's kept for history.
+`docs/backend-archetechture.md` is the original design sketch — **stale** in several places
+(see "Deviations from the original sketch" below), kept for history, not authority.
 
-If you're adding or changing a rule: update `docs/rules.md` first, then the code, then
-tests. Don't let a rule exist only in code.
+If you're adding or changing a rule: update `docs/rules.md` first, then the code, then tests.
+Don't let a rule exist only in code.
 
 ## Code structure
 
@@ -50,7 +52,7 @@ client/
 | `views.ts` | `PlayerGameView` and friends — what a client actually receives |
 | `errors.ts` | `GameErrorCode` union |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
-| `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `handValue` — the rulebook, used by the engine, the bot and (later) the client |
+| `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and the client |
 | `config.ts` | Every rule constant (`HAND_SIZE`, `YANIV_THRESHOLD`, `ASSAF_PENALTY`, `MAX_SCORE`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS`, `MIN_PLAYERS`, `MAX_PLAYERS`), each pointing at a `docs/rules.md` section |
 | `standings.ts` | `standings` — a finished match's final table, lowest score first, including whoever has left since. Read by both clients |
 
@@ -72,7 +74,7 @@ already carries, so this costs `shared` none of its dependency-freedom. See
 | `rng.ts` | `Rng` type + `mulberry32` seeded PRNG |
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
 | `deck.ts` | `createDeck`, `shuffle`, `deal` — pure functions, no class |
-| `game.ts` | `startGame`, `takeTurn`, `callYaniv`, `startNextRound`, `playAgain`, `removePlayer` — the pure state transitions |
+| `game.ts` | `startGame`, `takeTurn`, `callYaniv`, `slapDown`, `startNextRound`, `playAgain`, `removePlayer` — the pure state transitions |
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
 | `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
@@ -92,16 +94,12 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
 
 - **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
   their own terminals, over a **real socket connection** to a separately running server
-  (`npm run serve` first). Requires `--name`; also accepts `--url`, `--join <code>`, and
-  `--create`. Bare `--name` (neither `--join` nor `--create`) opens an interactive main
-  menu — `create` / `join <code>` / `q`/`quit` — rather than silently creating a room.
+  (`npm run serve` first). Bare `--name` opens an interactive main menu rather than
+  silently creating a room; flags and inputs are tabulated in `README.md`.
   Composition only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
   - **`cli/render.ts`** — `PlayerGameView` → a printable frame, plus the one screen that
-    isn't a view: the main menu, rendered before any room exists. Pure. The final
-    standings are everyone the round result names, not just whoever is still seated:
-    a player who left after the match ended is listed from that record and marked
-    `(left)`. Dropping the row instead would take a departed winner's mark off the
-    board with them.
+    isn't a view: the main menu, rendered before any room exists. Pure. It draws the
+    `standings` shared computes, departed players and all (see CONTEXT.md).
   - **`cli/commands.ts`** — a typed line + the current view → a `Command`, and a
     separate `parseMainMenuCommand` for the view-less main menu. Both pure and total;
     bad input returns `invalid`, never throws.
@@ -110,11 +108,10 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
     types** — no `RoomManager`, no `GameState`. The moment it does, it stops being a
     test of the transport and becomes a second copy of the server.
 - **`play.ts`** — `npm run demo`. Bots only, in process, no transport: drives
-  `RoomManager` and the pure transitions directly. Accepts `--seed <n>` and
-  `--players <n>`, and a whole match is reproducible from the seed alone — which is what
-  makes it the tool for judging bot play. Keep it that way; there is deliberately no
-  socket equivalent, since the server owns the rng and seats its own bots, and no client
-  event asks for a seed.
+  `RoomManager` and the pure transitions directly. Accepts `--seed <n>` and `--players <n>`,
+  and a whole match is reproducible from the seed alone — which is what makes it the tool
+  for judging bot play. Keep it that way; there is deliberately no socket equivalent, since
+  the server owns the rng and seats its own bots, and no client event asks for a seed.
 
 The two are not redundant: `play.ts` answers "do the rules and the bot behave?", and
 `playSocket.ts` answers "does the wire work?".
@@ -128,7 +125,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 |---|---|
 | `main.tsx` | The entrypoint. Opens the socket and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
 | `session.ts` | The session core: owns the socket, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
-| `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
+| `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by |
 | `unload.ts` | `guardUnload` — the `beforeunload` warning, on while a round is live and off otherwise. Injected target, so it is driven under `node:test` with no browser |
@@ -136,7 +133,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `App.tsx` | Which screen: no connection comes first, then no view is the main menu, then everything else is a function of `view.phase` |
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, start (host only), leave |
-| `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, a turn as two taps, and the Yaniv call |
+| `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open |
 | `RoundEnd.tsx` | `phase: 'roundEnd'` — every hand face up, who called, whether they were Assafed, and what the round cost each player |
 | `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and leaving |
 | `Disconnected.tsx` | No socket — the second screen with no view behind it. One screen for a connection that went and one that never arrived, since neither leaves anything to tap |
@@ -161,6 +158,25 @@ into `playCards` + `drawFromPile`, which would have made "can they call Yaniv mi
 an open question. Calling Yaniv (`callYaniv`) is a separate action that replaces a turn
 entirely, not a mode of `takeTurn`.
 
+**Slapdown does not reopen this.** `slapDown` (docs/rules.md §9) is not a turn and not a
+mode of one: `takeTurn` records the window it opened (`round.slapdown`, per `opensSlapdown`
+in the shared rulebook) and hands the turn on as usual, and slapping the card down only
+shrinks a hand and extends `lastDiscard` — `currentTurnPlayerId` never moves. The window
+closes on the slap or on the next player's `takeTurn`/`callYaniv`, whichever the server
+processes first; both assign `round.slapdown` outright rather than merging it, so a stale
+window cannot survive a turn. No lock and no timer — ADR-0005.
+
+The wire keeps that shape: a payload-free `slapDown` — the server already knows which card
+is meant — through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for
+whoever loses the race, and eligibility on `SelfView` alone.
+
+Both clients offer it, and both had to grow a place to. The CLI prompts serially at
+positions worth acting on, so `isOurMove` gained the open window — the one entry there that
+is not our turn — and `slap` routes through the same `send` as every other command. The
+browser makes the discard pile one flashing control in place of its row of draw targets
+(`isSlapdownTarget` in `client/src/turn.ts`), since a tap has to mean one thing. Against
+bots neither can win the race, per ADR-0005; that is what it costs, not a defect in either.
+
 ### Round state is nested
 
 `GameState.round: RoundState | null` holds everything that resets between rounds (hands,
@@ -171,11 +187,14 @@ persists across rounds.
 
 ### The discard pile is two parts, not a flat array
 
-`RoundState.lastDiscard: Card[]` is the most recent discarded set, face up; its **first
-and last cards only** are pickup-eligible (`pickupCandidates` in `shared/src/rules.ts`).
-`RoundState.buried: Card[]` is everything discarded earlier — visible but permanently out
-of play until the draw pile empties and it gets reshuffled. A flat array can't express
-"only the two ends of the last discard are takeable," which is why this is two fields.
+`RoundState.lastDiscard: Card[]` is the most recent discarded set, face up, and which of its
+cards may be taken depends on its shape (`pickupCandidates` in `shared/src/rules.ts`): a run
+exposes **only its two ends**, a same-rank set of any length exposes **every card**, since a
+set has no sequence for a middle position to protect. A slapdown extends that same array, so
+a slapped card is takeable like the rest of the set it joined. `RoundState.buried: Card[]`
+is everything discarded earlier — visible but permanently out of play until the draw pile
+empties and it gets reshuffled. A flat array can't express "only part of the last discard is
+takeable," which is why this is two fields.
 
 ### Wildcard jokers in runs (docs/rules.md §4)
 
@@ -348,16 +367,14 @@ owned — which is also why the `exitToMenu` handler is not `act()`-shaped.
 Leaving **clears `socket.data.session` and calls `socket.leave(roomCode)`**. Clearing the
 session is what stops `ALREADY_IN_ROOM` meaning "for the life of this connection": a
 sessionless socket is indistinguishable from a fresh one, so the same connection can go
-straight into another room. It also keeps the departing socket out of the next broadcast,
-which `broadcastState` skips it from — the serializer would refuse to build a view for a
-player no longer seated. The `leave` keeps a socket from lingering in a Socket.io room
-whose code a later room could be issued.
+straight into another room. It also keeps the departing socket out of the next broadcast —
+the serializer would refuse to build a view for a player no longer seated — and out of a
+Socket.io room whose code a later room could be issued.
 
 **`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a
 table that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS` rather than
 quietly refilled. Reaching that over the wire takes a table that was six humans to begin
-with — `startGame` only fills seats nobody is in, and a bot never leaves — so five of them
-exiting is the one way a host is left with nobody to play against.
+with — `startGame` only fills seats nobody is in, and a bot never leaves.
 
 ### Socket layer: wiring is separate from listening
 
@@ -419,6 +436,13 @@ returns a `TurnAction` or `null`; alongside it, `isLegalSelection`, `isLegalCall
 reaches a socket, and nothing here knows whose turn it is, since turn order is the
 server's alone and comes back as a `GameError`, exactly as it does for the CLI.
 
+An open slapdown window is the one thing that suspends all of it. `isSlapdownTarget` is
+true only while the turn is *elsewhere*, and `Table.tsx` then draws the pile as one
+flashing control instead of a row of draw targets: a tap has to mean one thing, and a
+draw off that pile out of turn is a move the server would refuse anyway. It is also the
+only question in that module the rulebook cannot answer — a window is about the card the
+server dealt off a pile it never sends, so `slapdownEligible` *is* the answer.
+
 ### The client's session core
 
 The browser client's logic lives in `client/src/session.ts`, a plain module outside React
@@ -463,9 +487,11 @@ Five fields, and each answers a different question:
 settles on the **ack**: entry has been broadcast before it is acked, and a departing
 connection is published to no longer. So do dealing the next round and dealing another
 match, which produce a position rather than moving within one. A **move settles on a
-strictly newer position** — that is a turn, or the Yaniv call that replaces one, both sent
-through the same `play` helper, which keeps the CLI's `Position { view, version }` /
-`actedOn` watermark in the session core. The server acks an in-game action *before* it
+strictly newer position** — a turn, the Yaniv call that replaces one, or a slapdown, all
+sent through the same `play` helper, which keeps the CLI's `Position { view, version }` /
+`actedOn` watermark in the session core. A slapdown is the one of the three sent off turn,
+so what releases it may be the next player's move rather than its own answer; both are
+strictly newer, and by either the window is spent. The server acks an in-game action *before* it
 broadcasts the result, so controls released on the ack would come back to life over a
 position still showing the mover's own turn and their discarded cards in hand. A rejected move is the exception and
 releases at once: nothing was published, so no newer position is coming, and the turn is
@@ -477,22 +503,14 @@ entering a room is one the player still cannot act from. Tests wait on
 
 **Positions are drawn on a clock, not on arrival.** A run of bot turns lands as one
 broadcast per move within a few milliseconds of itself (see "Broadcasting" above), so a
-session that published each on arrival would show only the last — the table jumping from
-the player's own move to their next turn with everything in between invisible. `pacing.ts`
-queues them instead: **the first arrival goes straight through, and anything landing in the
-beat behind it is let go one per `PACE_MS` (700ms)**. A move of the player's own is a lone
-arrival and is therefore never delayed, which is the whole reason the rule is "first one
-free" rather than "one every beat". The queue is phase-blind: any burst is spaced, a lobby
-filling up as much as a chain of bot turns. A round that a bot's Yaniv ends is *why* —
-the scored position is the last link of the chain, and pacing only `playing` would skip
-straight past the move that ended it.
-
-The accepted cost is stated in `pacing.ts` and worth repeating: a beat is armed after
-every release, so a position landing inside the beat behind a drawn one waits out the rest
-of it — up to `PACE_MS`, and with `busy` still held if it is the player's own move.
-Nothing in a queue can tell a lone arrival from the first of a chain except by giving the
-chain a beat to appear in. What it buys is that no position is replaced before it has been
-readable for a beat, which is the whole point.
+session that published each on arrival would show only the last. `pacing.ts` queues them
+instead: **the first arrival goes straight through, and anything landing in the beat behind
+it is let go one per `PACE_MS` (700ms)** — a move of the player's own is a lone arrival and
+so is never delayed, which is why the rule is "first one free" rather than "one every
+beat". The queue is phase-blind, and a round a bot's Yaniv ends is *why*: the scored
+position is the last link of the chain, and pacing only `playing` would skip past the move
+that ended it. The accepted cost — a position landing behind a drawn one waits out the rest
+of its beat, `busy` and all — is set out in full in `pacing.ts`.
 
 Two things fall out of the queue and are worth keeping straight:
 
@@ -505,8 +523,7 @@ Two things fall out of the queue and are worth keeping straight:
   player has already left back over the main menu.
 
 The clock is injected (`systemClock` by default) so the queue is driven a beat at a time
-under `node:test`. Every other client suite passes a clock that runs each beat the instant
-it is asked for, which is the same behaviour those suites had before pacing existed.
+under `node:test`; every other client suite passes one that fires each beat immediately.
 
 **A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
 `null`, `commitTurn` returns, and no error is published — the screen should not have
@@ -580,15 +597,13 @@ run of failed retries is news.
 (`unload.ts`). A reload drops the socket and so destroys the room for everyone in it, which
 is worth an argument at `playing` and `roundEnd` — and not worth one at the main menu, the
 lobby or a finished match, where a control on the screen already does exactly that.
-`connected` is part of the same question rather than a separate one: a dropped connection's
-room was destroyed when it dropped, so the table still on the screen is a match that is
-already lost, and arguing over the tab is arguing over nothing. It is
-added and removed rather than left listening and deciding when it fires, because a page with
-a `beforeunload` listener is held out of the back/forward cache either way. The target is
-injected, so it is the one global the client touches and `main.tsx` is the only place that
-hands one over. Whether the warning actually appears is the browser's call, not the page's —
-a tab the player has never interacted with is closed without argument, and the wording is
-always the browser's own.
+`connected` is part of the same question: a dropped connection's room was destroyed when it
+dropped, so arguing over the tab is arguing over a match already lost. It is added and
+removed rather than left listening, because a page with a `beforeunload` listener is held
+out of the back/forward cache either way. The target is injected, so it is the one global
+the client touches and `main.tsx` is the only place that hands one over. Whether the warning
+appears at all is the browser's call — a tab never interacted with is closed without
+argument, and the wording is always the browser's own.
 
 ### Tooling
 
@@ -598,11 +613,11 @@ project references, `shared` → `server`). This constrains the codebase to *era
 TypeScript: no `enum`, no `namespace`, no parameter properties, `import type` for
 type-only imports. `tsconfig.base.json` enforces this via `erasableSyntaxOnly`.
 
-Both workspaces have a `test` script, and the root `npm test` runs them with
-`--workspaces --if-present`. Each uses an explicit glob (`node --test
-"test/**/*.test.ts"`) rather than bare `node --test` — the bare form also picks up
-`test/helpers.ts` and any stray `.d.ts` files `tsc --build` emits into `dist/test/`,
-which made test counts silently depend on whether a typecheck had run.
+All three workspaces have a `test` script, run by the root `npm test` via
+`--workspaces --if-present`. Each uses an explicit glob (`node --test "test/**/*.test.ts"`)
+rather than bare `node --test` — the bare form also picks up `test/helpers.ts` and any stray
+`.d.ts` files `tsc --build` emits into `dist/test/`, which made test counts silently depend
+on whether a typecheck had run.
 
 **`shared`'s tests are a separate tsconfig project** (`shared/tsconfig.test.json`),
 unlike the server's, which includes `test/` in the one project. The suites need
@@ -628,14 +643,14 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **Persistence.** Rooms are in-memory only, so a redeploy drops every match in progress —
   same as a restart, and the reason splitting client and server into two services (giving
   up same-origin, ADR-0003) would be the fix if that cost ever matters.
-- **Deployment happened ahead of reconnect.** ADR-0004 orders this client, then reconnect,
-  then deploy, specifically because a backgrounded mobile tab drops its socket and — with
-  no reconnect — currently ends the room for everyone in it. The server now deploys to
-  Railway as one service (`railway.json` + `server/src/staticServer.ts`, per ADR-0003):
-  `npm run build` builds the client into `client/dist`, `index.ts` serves it same-origin
-  alongside Socket.io, and Nixpacks runs the build automatically. Reconnect is still
-  unbuilt, so the mobile-backgrounding gap above is live in production — solo play against
-  bots is unaffected, but inviting other humans to a deployed room is not yet safe.
+- **Deployment happened ahead of reconnect.** ADR-0004 orders client, reconnect, deploy,
+  because a backgrounded mobile tab drops its socket and so ends the room for everyone in
+  it. Deploying first went ahead anyway (Railway, one service: `railway.json` +
+  `server/src/staticServer.ts`, per ADR-0003), so that gap is live in production: solo play
+  against bots is unaffected, inviting other humans to a deployed room is not yet safe.
+- **Slapdown against a bot.** Both clients offer it now, but bots neither slap down for
+  themselves nor can meaningfully be raced by a human, since `playBotTurns` runs in the
+  same tick. Both deliberate, per ADR-0005 — a human needs another human behind them.
 - **Disambiguating a joker that extends a run.** The browser client sends the selection in
   tap order, so tap order decides where the joker sits (`docs/rules.md` §4) — which is
   invisible on the screen. An accepted wart, and a deliberate one: a step that asked the
@@ -643,18 +658,14 @@ Not oversights — deferred on purpose, in this order of likely next work:
 
 ## Deviations from the original sketch (`docs/backend-archetechture.md`)
 
-If you go looking for something the architecture doc describes and don't find it, it's
-probably one of these:
+If the architecture doc describes something you cannot find, it is probably one of these:
 
-- `Deck` is not a class — pure functions over plain arrays instead. The sketch's version
-  built a `Deck`, immediately drained it into a plain array, and discarded the instance,
-  leaving two sources of truth for the pile.
+- `Deck` is not a class — pure functions over plain arrays instead, since the sketch's
+  `Deck` was drained into an array on creation, leaving two sources of truth for the pile.
 - `playCards`/`drawFromPile` don't exist as separate functions — see "Turn model" above.
 - The discard pile isn't a flat `Card[]` — see "discard pile is two parts" above.
-- Errors are a `Result` union, not `throw new Error(...)`.
-- `Player.id` is not `socket.id`.
-- `serializeStateForPlayer`'s output shape is `{ you, opponents }`, not a single
-  `players[]` array with an optional `hand`.
+- Errors are a `Result` union, not `throw new Error(...)`; `Player.id` is not `socket.id`.
+- `serializeStateForPlayer` returns `{ you, opponents }`, not one `players[]` with a `hand`.
 
 ## Running things
 
@@ -671,45 +682,12 @@ npm run build                             # builds the client into client/dist, 
 `demo` accepts `-- --seed <n> --players <n>`. Deployed on Railway as one service — see
 "Deployment happened ahead of reconnect" above and `docs/adr/0003`.
 
-The browser client also takes two terminals, and for the same reason the CLI does — it
-talks to a separately running server. `npm run dev` proxies `/socket.io` to port 3000, so
-the client is same-origin in development and needs no CORS (docs/adr/0003):
-
-```sh
-npm run serve --workspace=@yaniv/server   # terminal 1
-npm run dev                               # terminal 2 — open http://localhost:5173
-```
-
-Playing yourself in a terminal takes two terminals too, because the harness is a real
-client:
-
-```sh
-npm run serve --workspace=@yaniv/server              # terminal 1
-npm run play --workspace=@yaniv/server -- --name Ada # terminal 2 — connects to localhost:3000
-```
-
-`play` requires `-- --name <name>` and also accepts `--url <url>`, `--join <code>`, and
-`--create`. Three ways to enter:
-
-- `-- --name Ada` alone opens an interactive main menu — `create` a room, `join <CODE>`
-  one by code, or `q`/`quit` to exit. A bad or expired code typed here shows the error
-  and returns to the menu rather than ending the session.
-- `-- --name Ada --create` creates a room immediately and shows its 4-character code —
-  the same outcome the bare main menu's `create` gives you, without the extra prompt.
-- `-- --name Grace --join <code>` (case-insensitive) joins that room immediately.
-
-Everyone else joins by code, up to six players. The host types `start` to begin, and
-every seat still empty is filled with a bot.
-
-At the prompt: `start` begins the match (host only — anyone else is told `NOT_HOST`),
-`menu` leaves the room for the main menu without dropping the connection (a guest frees
-their seat; the host closes the room, and everyone else is told why and returned to their
-own menu), `1 3` discards those cards by hand position and draws from the deck, `t1`/`t2`
-on the end takes a face-up card instead (`1 3 t2`), `yaniv` calls, enter deals the next
-round, `q` or Ctrl-D quits. A finished match stops at the standings rather than ending the
-session: `again` deals a fresh one to the same table (host only) and `menu` leaves, the
-same way it does from the lobby. Note that any player disconnecting still ends the room
-for everyone — see "Room lifecycle".
+Both the browser client and the CLI harness take **two terminals**, because each is a real
+client of a separately running server: `npm run serve` in one, `npm run dev` (which proxies
+`/socket.io` to port 3000, keeping the client same-origin with no CORS) or
+`npm run play -- --name <name>` in the other. `play`'s flags, menu inputs and in-game
+prompt commands are tabulated in `README.md` — don't restate them here. Any player
+disconnecting still ends the room for everyone — see "Room lifecycle".
 
 ## Agent skills
 

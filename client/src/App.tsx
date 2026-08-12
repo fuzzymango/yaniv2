@@ -70,6 +70,7 @@ export function App({ session }: { session: Session }) {
         onToggleCard={session.toggleCard}
         onCommitTurn={session.commitTurn}
         onCallYaniv={session.callYaniv}
+        onSlapDown={session.slapDown}
       />
     );
   }

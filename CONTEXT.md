@@ -67,6 +67,29 @@ discard; otherwise it is inert, and a tap on it asks for nothing and is refused 
 carries as `DrawAction` — which pile, and which card if it came off the discard — named for
 the tap that produces it rather than the message it sends.
 
+## Slapdown and the slapdown window
+
+A **slapdown** is discarding the card you have just drawn straight back onto the set it
+matches, out of turn and without taking one (`docs/rules.md` §9). It is not a turn and not
+a mode of one: the turn passed to the next player the moment the discard-and-draw resolved,
+and a slapdown leaves it exactly where it is. All it does is take a card off a hand and add
+it to `lastDiscard`.
+
+The **slapdown window** is the state it is available in: the stretch between one player's
+turn resolving and the next player's beginning. It is the only state in this game in which
+a player has a move while the turn belongs to somebody else, which is why it is a field of
+its own (`RoundState.slapdown`) rather than something derivable from whose turn it is. It
+opens only on the conditions §9 lists, closes on the slap or on the next player's turn —
+whichever the server processes first, with nothing arbitrating them but that order
+([ADR-0005](docs/adr/0005-slapdown-race-by-event-order.md)) — and belongs to exactly one
+player.
+
+Whether a window is open is **private**: it says its holder drew a rank they had just
+discarded, which nothing else on the wire reveals, so it reaches the client as
+`slapdownEligible` on `SelfView` alone. The pile it is taken on is the **slapdown target**
+— the counterpart of a draw target, except that it is the whole pile rather than a card,
+since a player draws one card a turn and so at most one card is ever eligible.
+
 ## Standings
 
 The final table of a finished match: every player who played it, ordered lowest score

@@ -14,6 +14,7 @@ import {
   callYaniv,
   playAgain,
   removePlayer,
+  slapDown,
   startGame,
   startNextRound,
   takeTurn,
@@ -255,6 +256,22 @@ export function createSocketServer(
 
     socket.on("callYaniv", (ack) => {
       act(ack, (session, state) => callYaniv(state, session.playerId));
+    });
+
+    /**
+     * Ordinary `act` shape, despite not being a turn: the caller is identified the same
+     * way, the transition is applied the same way, and the position it produces is
+     * published the same way. Whoever asks second — the slapper who lost the race, or
+     * anyone the window was never open for — is refused by the transition itself, and a
+     * refusal costs them nothing.
+     *
+     * `runBotTurns` matters here even though a slapdown does not move the turn on: the
+     * turn was already handed over by the `takeTurn` that opened the window, and if that
+     * seat is a bot it has long since played. This is the no-op that says so. See
+     * ADR-0005 for why a human effectively cannot reach this ahead of a bot.
+     */
+    socket.on("slapDown", (ack) => {
+      act(ack, (session, state) => slapDown(state, session.playerId));
     });
 
     socket.on("startNextRound", (ack) => {

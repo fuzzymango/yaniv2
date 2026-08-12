@@ -4,12 +4,13 @@ import {
   callYaniv,
   playAgain,
   removePlayer,
+  slapDown,
   startGame,
   startNextRound,
   takeTurn,
 } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { allCardIds, expectErr, ids, makeState, unwrap } from "./helpers.ts";
+import { allCardIds, card, expectErr, ids, makeState, unwrap } from "./helpers.ts";
 
 const rng = () => mulberry32(1234);
 
@@ -630,6 +631,215 @@ function discardAndDrawFromDeck(
   );
 }
 
+describe("takeTurn — opening the slapdown window", () => {
+  const base = () =>
+    makeState({
+      hands: {
+        p1: ["hearts-7", "diamonds-7", "hearts-5", "hearts-6"],
+        p2: ["clubs-2"],
+      },
+      drawPile: ["spades-7", "hearts-10"],
+      lastDiscard: ["clubs-4"],
+    });
+
+  it("opens for whoever discarded a same-rank set and drew that rank", () => {
+    const after = unwrap(
+      discardAndDrawFromDeck(base(), "p1", ["hearts-7", "diamonds-7"]),
+    );
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round.slapdown, { playerId: "p1", card: card("spades-7") });
+  });
+
+  it("stays shut after a run", () => {
+    const after = unwrap(
+      discardAndDrawFromDeck(base(), "p1", ["hearts-5", "hearts-6", "hearts-7"]),
+    );
+
+    assert.equal(after.phase, "playing");
+    assert.equal(after.round.slapdown, null);
+  });
+
+  it("stays shut when the matching card was picked up rather than drawn", () => {
+    const state = makeState({
+      hands: { p1: ["hearts-7", "diamonds-7", "spades-9"], p2: ["clubs-2"] },
+      drawPile: ["hearts-10"],
+      lastDiscard: ["spades-7"],
+    });
+
+    const after = unwrap(
+      takeTurn(
+        state,
+        "p1",
+        {
+          discardCardIds: ["hearts-7", "diamonds-7"],
+          draw: { source: "discard", cardId: "spades-7" },
+        },
+        rng(),
+      ),
+    );
+
+    assert.equal(after.phase, "playing");
+    assert.equal(after.round.slapdown, null);
+  });
+
+  it("stays shut when the drawn card is a joker", () => {
+    const state = makeState({
+      hands: { p1: ["joker-1", "spades-9"], p2: ["clubs-2"] },
+      drawPile: ["joker-2"],
+      lastDiscard: ["clubs-4"],
+    });
+
+    const after = unwrap(discardAndDrawFromDeck(state, "p1", ["joker-1"]));
+
+    assert.equal(after.phase, "playing");
+    assert.equal(after.round.slapdown, null);
+  });
+
+  it("stays shut when the drawn card is of another rank", () => {
+    const after = unwrap(discardAndDrawFromDeck(base(), "p1", ["hearts-5"]));
+
+    assert.equal(after.phase, "playing");
+    assert.equal(after.round.slapdown, null);
+  });
+
+  it("closes a window the previous player left open", () => {
+    const state = makeState({
+      hands: { p1: ["hearts-7"], p2: ["clubs-2", "spades-9"] },
+      drawPile: ["hearts-10"],
+      lastDiscard: ["clubs-4"],
+      currentTurnPlayerId: "p2",
+      slapdown: { playerId: "p1", cardId: "hearts-7" },
+    });
+
+    const after = unwrap(discardAndDrawFromDeck(state, "p2", ["clubs-2"]));
+
+    assert.equal(after.phase, "playing");
+    assert.equal(after.round.slapdown, null);
+  });
+});
+
+describe("slapDown", () => {
+  const open = () =>
+    makeState({
+      hands: { p1: ["spades-7", "clubs-9"], p2: ["clubs-2", "diamonds-3"] },
+      drawPile: ["hearts-10"],
+      lastDiscard: ["hearts-7", "diamonds-7"],
+      currentTurnPlayerId: "p2",
+      slapdown: { playerId: "p1", cardId: "spades-7" },
+    });
+
+  it("lays the card on the end of the set it matches and out of the hand", () => {
+    const after = unwrap(slapDown(open(), "p1"));
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(ids(after.round.lastDiscard), [
+      "hearts-7",
+      "diamonds-7",
+      "spades-7",
+    ]);
+    assert.deepEqual(ids(after.round.hands["p1"]!), ["clubs-9"]);
+  });
+
+  it("closes the window behind it, so a second slap has nothing to play", () => {
+    const after = unwrap(slapDown(open(), "p1"));
+
+    assert.equal(after.phase, "playing");
+    assert.equal(after.round.slapdown, null);
+    expectErr(slapDown(after, "p1"), "SLAPDOWN_NOT_AVAILABLE");
+  });
+
+  it("leaves the turn where it already was", () => {
+    const after = unwrap(slapDown(open(), "p1"));
+
+    assert.equal(after.phase, "playing");
+    assert.equal(after.round.currentTurnPlayerId, "p2");
+  });
+
+  it("refuses a caller the window does not belong to", () => {
+    expectErr(slapDown(open(), "p2"), "SLAPDOWN_NOT_AVAILABLE");
+  });
+
+  it("refuses when no window is open at all", () => {
+    const state = makeState({
+      hands: { p1: ["spades-7"], p2: ["clubs-2"] },
+      lastDiscard: ["hearts-7"],
+    });
+    expectErr(slapDown(state, "p1"), "SLAPDOWN_NOT_AVAILABLE");
+  });
+
+  it("refuses once the round is over", () => {
+    const state = makeState({
+      phase: "roundEnd",
+      hands: { p1: ["spades-7"], p2: ["clubs-2"] },
+      lastDiscard: ["hearts-7"],
+      slapdown: { playerId: "p1", cardId: "spades-7" },
+    });
+    expectErr(slapDown(state, "p1"), "WRONG_PHASE");
+  });
+
+  it("conserves every card in the round", () => {
+    const before = open();
+    const after = unwrap(slapDown(before, "p1"));
+    assert.deepEqual(allCardIds(after), allCardIds(before));
+  });
+
+  it("leaves the input state untouched", () => {
+    const before = open();
+    const snapshot = JSON.stringify(before);
+    slapDown(before, "p1");
+    assert.equal(JSON.stringify(before), snapshot);
+  });
+
+  it("can empty a hand, leaving Yaniv as the only move left in it", () => {
+    const state = makeState({
+      hands: { p1: ["spades-7"], p2: ["clubs-2", "diamonds-3"] },
+      drawPile: ["hearts-10"],
+      lastDiscard: ["hearts-7", "diamonds-7"],
+      currentTurnPlayerId: "p2",
+      slapdown: { playerId: "p1", cardId: "spades-7" },
+    });
+
+    const slapped = unwrap(slapDown(state, "p1"));
+    assert.equal(slapped.phase, "playing");
+    assert.deepEqual(slapped.round.hands["p1"], []);
+
+    // Round back to p1 with nothing to discard: no turn is legal, and the rules already
+    // say so without a rule of slapdown's own. docs/rules.md §3.
+    const p1sTurn = unwrap(discardAndDrawFromDeck(slapped, "p2", ["clubs-2"]));
+    assert.equal(p1sTurn.phase, "playing");
+    assert.equal(p1sTurn.round.currentTurnPlayerId, "p1");
+    expectErr(
+      takeTurn(p1sTurn, "p1", { discardCardIds: [], draw: { source: "deck" } }, rng()),
+      "EMPTY_DISCARD_SET",
+    );
+    assert.equal(callYaniv(p1sTurn, "p1").ok, true);
+  });
+
+  it("buries the whole extended set once the next player has drawn from it", () => {
+    const slapped = unwrap(slapDown(open(), "p1"));
+    assert.equal(slapped.phase, "playing");
+
+    const after = unwrap(
+      takeTurn(
+        slapped,
+        "p2",
+        {
+          discardCardIds: ["clubs-2"],
+          draw: { source: "discard", cardId: "spades-7" },
+        },
+        rng(),
+      ),
+    );
+
+    assert.equal(after.phase, "playing");
+    // The slapped card was pickup-eligible like every other card of a same-rank set,
+    // and the two it was laid on are buried behind p2's own discard.
+    assert.deepEqual(ids(after.round.hands["p2"]!), ["diamonds-3", "spades-7"]);
+    assert.deepEqual(ids(after.round.buried), ["hearts-7", "diamonds-7"]);
+  });
+});
+
 describe("callYaniv — validation", () => {
   it("refuses a hand above the threshold", () => {
     const state = makeState({
@@ -654,6 +864,20 @@ describe("callYaniv — validation", () => {
 
   it("refuses outside a live round", () => {
     expectErr(callYaniv(makeState({ phase: "lobby" }), "p1"), "WRONG_PHASE");
+  });
+
+  it("closes a window the previous player left open", () => {
+    const state = makeState({
+      hands: { p1: ["hearts-7"], p2: ["clubs-2"] },
+      lastDiscard: ["diamonds-7"],
+      currentTurnPlayerId: "p2",
+      slapdown: { playerId: "p1", cardId: "hearts-7" },
+    });
+
+    const after = unwrap(callYaniv(state, "p2"));
+
+    assert.notEqual(after.phase, "lobby");
+    assert.equal(after.round?.slapdown, null);
   });
 });
 

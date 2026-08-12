@@ -97,6 +97,17 @@ describe("parseCommand", () => {
     assert.deepEqual(parseCommand("q", midRoundView()), { kind: "quit" });
   });
 
+  /**
+   * Read against the view like every other mid-round line, but *not* checked against
+   * `slapdownEligible`: whether a window is open is the server's to answer, exactly as
+   * whose turn it is already is. A slap with nothing to slap comes back
+   * `SLAPDOWN_NOT_AVAILABLE`, which is how a developer finds out.
+   */
+  it("recognises slap as a whole-line command, window open or not", () => {
+    assert.deepEqual(parseCommand("slap", midRoundView()), { kind: "slap" });
+    assert.deepEqual(parseCommand("SLAP", midRoundView()), { kind: "slap" });
+  });
+
   it("explains itself rather than throwing on a line it cannot read", () => {
     const command = parseCommand("banana", midRoundView());
 

@@ -58,6 +58,7 @@ export function serializeStateForPlayer(
       name: viewer.name,
       score: viewer.score,
       hand: [],
+      slapdownEligible: false,
     };
     const opponents: OpponentView[] = state.players
       .filter((p) => p.id !== viewerPlayerId)
@@ -89,6 +90,11 @@ export function serializeStateForPlayer(
     // Sorted here rather than in the engine: hand order is presentation, and this
     // is the one place every client is guaranteed to go through.
     hand: sortHand(round.hands[viewer.id] ?? []),
+    // Told only to whoever holds the window: an open window is a fact about the holder's
+    // hand, so it goes no further. Gated on the phase the same way `currentTurnPlayerId`
+    // below is — both are answers about a round still being played.
+    slapdownEligible:
+      state.phase === "playing" && round.slapdown?.playerId === viewer.id,
   };
 
   const opponents: OpponentView[] = state.players

@@ -829,6 +829,227 @@ describe("taking a turn", () => {
   });
 });
 
+/**
+ * Slapping down (docs/rules.md §9): the one action taken while the turn belongs to
+ * somebody else.
+ *
+ * Every test here needs two humans. `startGame` seats bots behind the two of them and
+ * `playBotTurns` runs the seat after ours in the same tick, so a window opened in front
+ * of a bot is shut before the broadcast announcing it has been drawn (ADR-0005) — the
+ * guest sitting directly behind the host is what holds one open long enough to tap.
+ */
+describe("slapping down", () => {
+  /**
+   * One fishing turn: shed a card whose rank the hand holds only once, and draw from the
+   * deck. Every copy still in hand is a copy that cannot come back off the top, and a
+   * joker never opens a window at all, so this is the discard most likely to.
+   */
+  function fishForAWindow(session: Session, view: PlayerGameView): void {
+    const hand = view.you.hand;
+    const lonely = hand.find(
+      (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
+    );
+    session.toggleCard((lonely ?? hand[0]!).id);
+    session.commitTurn({ kind: "deck" });
+  }
+
+  /**
+   * Sit two humans down and play until the host draws a card they may slap down,
+   * stopping exactly there: the window open, the turn with the guest, nothing else moved.
+   *
+   * Only the host's windows count. The roster is seated in join order, so the guest is
+   * behind the host and a bot is behind the guest — a window of the guest's own is shut
+   * again in the same tick it opened.
+   */
+  async function playToAnOpenWindow(server: Harness): Promise<[Session, Session]> {
+    const [host, guest] = await hostAndGuest(server);
+    const hostId = host.getSnapshot().view!.you.id;
+    const guestId = guest.getSnapshot().view!.you.id;
+    host.startGame();
+
+    /**
+     * The position the driver last acted from, by identity. Snapshots are replaced
+     * wholesale, so "a view we have not played yet" is what keeps the loop moving: the
+     * two sessions learn of each move separately, and waiting only on the *shape* of a
+     * position would read the one just played as the next one to play.
+     */
+    let played: PlayerGameView | null = null;
+    const nextToPlay = (s: SessionSnapshot) =>
+      s.view !== null &&
+      !s.busy &&
+      s.view !== played &&
+      s.view.phase !== "lobby" &&
+      (s.view.phase !== "playing" ||
+        s.view.currentTurnPlayerId === hostId ||
+        s.view.currentTurnPlayerId === guestId);
+
+    for (let step = 0; step < 400; step++) {
+      const at = await waitForSnapshot(host, "a human to be needed", nextToPlay);
+      const view = at.view!;
+      played = view;
+
+      // The fishing is what takes the turns, so a round or a match running out along
+      // the way is dealt with and carried on from rather than being the end of it.
+      if (view.phase !== "playing") {
+        if (view.phase === "gameEnd") host.playAgain();
+        else host.startNextRound();
+        continue;
+      }
+
+      if (view.currentTurnPlayerId === guestId) {
+        const theirs = await waitForSnapshot(
+          guest,
+          "the guest's own view of their turn",
+          (s) =>
+            s.view !== null &&
+            !s.busy &&
+            s.view.phase === "playing" &&
+            s.view.currentTurnPlayerId === guestId,
+        );
+        fishForAWindow(guest, theirs.view!);
+        await waitForSnapshot(guest, "the guest's turn to land", (s) => !s.busy);
+        continue;
+      }
+
+      fishForAWindow(host, view);
+      const landed = await waitForSnapshot(host, "the host's turn to land", (s) => !s.busy);
+      if (landed.view!.you.slapdownEligible) return [host, guest];
+    }
+    throw new Error("no slapdown window ever opened");
+  }
+
+  it("tells the player whose window it is, and nobody else", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await playToAnOpenWindow(server);
+
+      assert.equal(
+        host.getSnapshot().view!.you.slapdownEligible,
+        true,
+        "the window is on the position the screen reads",
+      );
+      const seenByGuest = guest.getSnapshot().view!;
+      assert.equal(seenByGuest.you.slapdownEligible, false);
+      assert.ok(
+        !JSON.stringify(seenByGuest).includes('"slapdownEligible":true'),
+        "an open window leaked into the other player's position",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("puts the drawn card back down without taking a turn", async () => {
+    const server = await startServer(7);
+    try {
+      const [host] = await playToAnOpenWindow(server);
+      const before = host.getSnapshot().view!;
+
+      host.slapDown();
+      assert.equal(
+        host.getSnapshot().busy,
+        true,
+        "the target went dead the instant it was tapped, not on the ack",
+      );
+
+      const landed = await waitForSnapshot(host, "the slap to land", (s) => !s.busy);
+      const after = landed.view!;
+      assert.equal(landed.error, null);
+      assert.equal(after.you.hand.length, before.you.hand.length - 1, "a card lighter");
+      assert.equal(
+        after.lastDiscard.length,
+        before.lastDiscard.length + 1,
+        "and it joined the set it matches",
+      );
+      assert.equal(
+        after.currentTurnPlayerId,
+        before.currentTurnPlayerId,
+        "a slapdown is not a turn",
+      );
+      assert.equal(after.you.slapdownEligible, false, "the window closed behind it");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("sends one slap however many times the pile is tapped", async () => {
+    const server = await startServer(7);
+    try {
+      const [host] = await playToAnOpenWindow(server);
+      const before = host.getSnapshot().view!;
+
+      host.slapDown();
+      host.slapDown();
+      host.slapDown();
+
+      const landed = await waitForSnapshot(host, "the slap to land", (s) => !s.busy);
+      assert.equal(landed.error, null, "a second slap would have been refused");
+      assert.equal(landed.view!.you.hand.length, before.you.hand.length - 1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /**
+   * Both events in flight with nothing arbitrating them but the order the server takes
+   * them in (ADR-0005). Whichever way it falls, the player is left with one whole
+   * outcome — a card lighter, or told why not — and never half of each.
+   */
+  it("resolves a race with the next player one way or the other", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await playToAnOpenWindow(server);
+      const before = host.getSnapshot().view!;
+
+      // Sent from the position the host is still holding: the broadcast that closes the
+      // window has not reached them, which is exactly when a real thumb loses this race.
+      fishForAWindow(guest, guest.getSnapshot().view!);
+      host.slapDown();
+
+      /*
+       * Waited on by outcome rather than by the lock, because off turn the lock lets go
+       * on whatever position arrives first — which in the losing case is the guest's
+       * turn, a beat before the refusal that answers the slap.
+       */
+      const landed = await waitForSnapshot(
+        host,
+        "the race to settle",
+        (s) =>
+          !s.busy &&
+          (s.error !== null || s.view!.you.hand.length === before.you.hand.length - 1),
+      );
+      if (landed.error === null) {
+        assert.equal(landed.view!.you.hand.length, before.you.hand.length - 1);
+      } else {
+        assert.equal(landed.error.code, "SLAPDOWN_NOT_AVAILABLE");
+        assert.equal(
+          landed.view!.you.hand.length,
+          before.you.hand.length,
+          "a refused slap left them holding what they had",
+        );
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("never sends a slap when there is no window", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+
+      host.slapDown();
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const settled = host.getSnapshot();
+      assert.equal(settled.busy, false, "nothing was sent, so nothing is locked");
+      assert.equal(settled.error, null, "and nothing was refused, so there is nothing to say");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 describe("watching the bots play", () => {
   /**
    * Every position the session has published, in order and without repeats — a screen's

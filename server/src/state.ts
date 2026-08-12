@@ -24,6 +24,18 @@ export interface Player {
 }
 
 /**
+ * An open slapdown window: the card `playerId` has just drawn and may put straight back
+ * down, out of turn, until the next player acts. docs/rules.md §9.
+ *
+ * One object rather than two nullable fields, so "a card is slappable but by nobody" is
+ * not a state anything has to consider.
+ */
+export interface SlapdownWindow {
+  playerId: string;
+  card: Card;
+}
+
+/**
  * Everything that resets between rounds. Replacing this whole object is the only way a
  * round begins, which is what makes "forgot to clear a field" unrepresentable.
  */
@@ -41,6 +53,12 @@ export interface RoundState {
   currentTurnPlayerId: string;
   /** Seating order, fixed for the whole match. */
   turnOrder: string[];
+  /**
+   * The slapdown left open by the turn that just resolved, or null. Belongs to the
+   * player *before* the current one — a slapdown does not consume a turn, so the turn
+   * has already moved on by the time this is readable.
+   */
+  slapdown: SlapdownWindow | null;
 }
 
 export interface PlayerRoundResult {

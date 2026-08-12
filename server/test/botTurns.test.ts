@@ -12,7 +12,7 @@ import { playBotTurns, type DecideTurn } from "../src/botTurns.ts";
 import { ok } from "../src/result.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { makeState, unwrap, type StateOptions } from "./helpers.ts";
+import { ids, makeState, unwrap, type StateOptions } from "./helpers.ts";
 
 /** A live room holding exactly the state described, under its real room code. */
 function room(options: StateOptions): { rooms: RoomManager; roomCode: string } {
@@ -108,6 +108,43 @@ describe("playBotTurns", () => {
 
     assert.deepEqual(played, []);
     assert.equal(rooms.getState(roomCode), before, "the state was left untouched");
+  });
+
+  /**
+   * Bots do not slap down, and that is a deferral rather than an oversight (ADR-0005):
+   * shedding a card for free has no downside, so a bot that reasoned about it would
+   * always take it. Pinned here so the day one starts, this test is what says so.
+   *
+   * The scenario is engineered so the real bot's own judgement opens the window: the
+   * queen is its best discard by value, the exposed king is too expensive to take, and
+   * the card waiting on the deck matches the rank it just put down.
+   */
+  it("leaves a bot's own slapdown window open rather than playing it", () => {
+    const { rooms, roomCode } = room({
+      players: [{ id: "human" }, { id: "bot", isBot: true }],
+      hands: { human: ["hearts-K", "spades-K"], bot: ["spades-Q", "clubs-3"] },
+      drawPile: ["hearts-Q", "diamonds-2"],
+      lastDiscard: ["hearts-K"],
+      currentTurnPlayerId: "bot",
+    });
+
+    playBotTurns(rooms, roomCode, () => {});
+
+    const state = rooms.getState(roomCode)!;
+    assert.equal(state.phase, "playing");
+    const round = state.round;
+    assert.equal(
+      round.slapdown?.playerId,
+      "bot",
+      "the fixture should have opened a window for the bot",
+    );
+    assert.equal(round.slapdown?.card.id, "hearts-Q");
+    assert.deepEqual(
+      ids(round.hands["bot"]!),
+      ["clubs-3", "hearts-Q"],
+      "the drawn queen is still in the bot's hand",
+    );
+    assert.deepEqual(ids(round.lastDiscard), ["spades-Q"], "and not on the pile");
   });
 
   /**

@@ -262,18 +262,27 @@ export async function runSession(
     roomClosed = notice();
 
     /**
-     * A position worth prompting at: the lobby we are waiting in, our turn, or a round
-     * or match that has ended. Anything else is somebody else moving, which the
-     * broadcast handler has already shown.
+     * A position worth prompting at: the lobby we are waiting in, our turn, a slapdown
+     * of ours waiting to be taken, or a round or match that has ended. Anything else is
+     * somebody else moving, which the broadcast handler has already shown.
      *
      * The lobby counts for every player, not just the host. Only the host's `start`
      * will be accepted, but everyone still needs a prompt to leave or quit from — and
      * being told `NOT_HOST` is how a guest finds out the rule, rather than the harness
      * guessing at it.
+     *
+     * The open window is the one entry here that is *not* our turn — it belongs to the
+     * player before the current one (docs/rules.md §9) — and without it `slap` would be
+     * a word with nowhere to type it: the harness prompts serially, and every other
+     * prompt has already gone by the time a window opens. Against bots the window will
+     * be shut by the time the line is read, since `playBotTurns` runs the next seat in
+     * the same tick; that is ADR-0005's accepted limitation, not something the prompt
+     * can make up for.
      */
     const isOurMove = (view: PlayerGameView) =>
       view.phase === "lobby" ||
       view.currentTurnPlayerId === playerId ||
+      view.you.slapdownEligible ||
       view.phase === "roundEnd" ||
       view.phase === "gameEnd";
 
@@ -320,9 +329,10 @@ export async function runSession(
       /**
        * Read the line against the newest position, not the one that prompted for it.
        * With another human at the table the board can move while a player is typing —
-       * the host starting the match, or dealing the next round — and a typed line
-       * should mean what the screen in front of them says it means. Mid-round the two
-       * are the same position anyway: nobody else can act while the turn is ours.
+       * the host starting the match, dealing the next round, or taking the turn that
+       * shuts a slapdown window of ours — and a typed line should mean what the screen
+       * in front of them says it means. On our own turn the two are the same position
+       * anyway: nobody else can act while the turn is ours.
        */
       const { view, version } = current ?? prompted;
 
@@ -337,6 +347,9 @@ export async function runSession(
       const result = await send((ack) => {
         if (command.kind === "turn") socket.emit("takeTurn", command.action, ack);
         else if (command.kind === "yaniv") socket.emit("callYaniv", ack);
+        // No payload: a player draws one card a turn, so the server already knows which
+        // card is meant. Losing the race to the next player reads as any other refusal.
+        else if (command.kind === "slap") socket.emit("slapDown", ack);
         else if (command.kind === "start") socket.emit("startGame", ack);
         else if (command.kind === "again") socket.emit("playAgain", ack);
         else if (command.kind === "menu") socket.emit("exitToMenu", ack);

@@ -13,6 +13,7 @@ import { YANIV_THRESHOLD, canCallYaniv, handValue, pickupCandidates } from "@yan
 import {
   isLegalCall,
   isLegalSelection,
+  isSlapdownTarget,
   retainSelection,
   takeableIds,
   toggleSelection,
@@ -136,6 +137,39 @@ describe("takeableIds", () => {
   it("offers exactly what the rulebook does, never a pickup the server would refuse", () => {
     const discard = cards("clubs-4", "clubs-5", "clubs-6");
     assert.deepEqual([...takeableIds(discard)], ids(pickupCandidates(discard)));
+  });
+});
+
+/**
+ * The one target on this screen that is not a card: the pile as a whole, tapped to put
+ * the just-drawn card straight back on it (docs/rules.md §9).
+ *
+ * Unlike every other question in this module it is not asked of the rulebook — the
+ * cards a window is open over are the server's alone, and `slapdownEligible` is its
+ * answer. What is left here is that the screen and the session ask it in one place, so
+ * a pile that flashes and a tap that sends cannot come apart.
+ */
+describe("isSlapdownTarget", () => {
+  it("offers the pile while a window of the viewer's own is open", () => {
+    const view = viewOf(HAND, cards("clubs-4"), { slapdownEligible: true });
+    assert.equal(isSlapdownTarget(view.you), true);
+  });
+
+  it("offers nothing when there is no window", () => {
+    assert.equal(isSlapdownTarget(viewOf(HAND, cards("clubs-4")).you), false);
+  });
+
+  /**
+   * A window belongs to the player *before* the current one, so the turn having moved on
+   * is the normal case and never a reason to withhold the target. This is the one place
+   * that could plausibly have grown a turn check, and must not.
+   */
+  it("offers it off turn, which is the only time it is ever open", () => {
+    const view = viewOf(HAND, cards("clubs-4"), {
+      slapdownEligible: true,
+      currentTurnPlayerId: "p2",
+    });
+    assert.equal(isSlapdownTarget(view.you), true);
   });
 });
 

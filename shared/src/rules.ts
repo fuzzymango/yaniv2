@@ -150,9 +150,41 @@ export function canCallYaniv(hand: readonly Card[]): boolean {
   return handValue(hand) <= YANIV_THRESHOLD;
 }
 
-/** The cards of a discarded set that the next player may pick up: its two ends. */
+/**
+ * The cards of a discarded set that the next player may pick up. A same-rank set
+ * exposes every card; a run exposes only its two ends. docs/rules.md §5.
+ */
 export function pickupCandidates(lastDiscard: readonly Card[]): Card[] {
   if (lastDiscard.length === 0) return [];
   if (lastDiscard.length === 1) return [lastDiscard[0]!];
+  if (isSameRankSet(lastDiscard)) return lastDiscard.slice();
   return [lastDiscard[0]!, lastDiscard[lastDiscard.length - 1]!];
+}
+
+/**
+ * Whether a just-resolved turn opens a slapdown window for the player who took it —
+ * the brief chance to put the card they just drew straight back down. docs/rules.md §9.
+ *
+ * Four things have to hold at once: the discard was a same-rank set or a lone card
+ * (never a run, which has no single rank to match), the draw came off the deck (never a
+ * pickup, since the mechanic exists to reward the blind draw), the drawn card shares the
+ * discard's rank, and it is not a joker. Jokers are excluded outright rather than by the
+ * rank test: two jokers *are* a same-rank set, so a joker drawn after one would otherwise
+ * qualify, and shedding a card already worth nothing is a move with no point to it.
+ *
+ * A rules query in the same family as `pickupCandidates`, and here for the same reason —
+ * a client has to know the window is open to offer it, without a round trip to find out.
+ * It takes the draw's source rather than the `DrawAction` carrying it, so the rulebook
+ * stays a function of cards alone and owes the wire contract nothing (ADR-0002).
+ */
+export function opensSlapdown(
+  discarded: readonly Card[],
+  drawSource: "deck" | "discard",
+  drawnCard: Card,
+): boolean {
+  const oneRank = discarded.length === 1 || isSameRankSet(discarded);
+  if (!oneRank) return false;
+  if (drawSource !== "deck") return false;
+  if (drawnCard.suit === null) return false;
+  return drawnCard.rank === discarded[0]!.rank;
 }

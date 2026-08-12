@@ -27,6 +27,16 @@ export interface ClientToServerEvents {
   startGame: (ack: Ack<null>) => void;
   takeTurn: (action: TurnAction, ack: Ack<null>) => void;
   callYaniv: (ack: Ack<null>) => void;
+  /**
+   * Put the card just drawn straight back down, out of turn, while the window the last
+   * turn opened is still open. docs/rules.md §9.
+   *
+   * No payload: a player draws exactly one card per turn, so the server already knows
+   * which card this is about — and taking one on trust would let a caller name any card
+   * they liked. Losing the race to the next player's turn is answered with
+   * `SLAPDOWN_NOT_AVAILABLE`, the same as never having had a window at all.
+   */
+  slapDown: (ack: Ack<null>) => void;
   startNextRound: (ack: Ack<null>) => void;
   /** Host only, from a finished match: another match for the same table, dealt at once. */
   playAgain: (ack: Ack<null>) => void;
