@@ -1063,6 +1063,288 @@ describe("play again and exit to menu", () => {
   });
 });
 
+/**
+ * Slapping down, and the race for the window it opens.
+ *
+ * Two humans seated next to each other is the only arrangement in which that race is
+ * real: `startGame` fills the rest of the table with bots, and a bot seated after the
+ * slapper takes its turn synchronously, closing the window before any human could reach
+ * it (ADR-0005). So Ada acts, Grace is next, and the window stays open until she moves.
+ *
+ * The window itself cannot be arranged — it is opened by drawing blind off the deck —
+ * so the table is played on a seeded server until one appears, and every test here
+ * starts from the position that produced it.
+ */
+describe("slapping down", () => {
+  let table: Harness;
+
+  before(async () => {
+    table = await startServer(20250811);
+  });
+  after(async () => {
+    await table.close();
+  });
+
+  interface Seat {
+    client: ClientSocket;
+    watcher: Watcher;
+    id: string;
+    name: string;
+    /** Every view this seat was ever sent, never reset — what the wire actually said. */
+    heard: PlayerGameView[];
+  }
+
+  function seat(client: ClientSocket, id: string, name: string): Seat {
+    const heard: PlayerGameView[] = [];
+    client.on("gameStateUpdate", (view: PlayerGameView) => heard.push(view));
+    return { client, watcher: watch(client), id, name, heard };
+  }
+
+  /**
+   * A card worth discarding to fish for a window: one whose rank the player holds only
+   * once, since every copy still in hand is a copy that cannot come back off the deck.
+   * Jokers are skipped outright — a drawn joker never opens a window.
+   */
+  function fishingDiscard(view: PlayerGameView): string {
+    const hand = view.you.hand;
+    const lonely = hand.find(
+      (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
+    );
+    return (lonely ?? hand[0]!).id;
+  }
+
+  interface OpenWindow {
+    ada: Seat;
+    grace: Seat;
+    /** Ada's view of her own open window, with the turn already on Grace. */
+    adaView: PlayerGameView;
+    /** Grace's view of the same position — the one she takes her turn from. */
+    graceView: PlayerGameView;
+  }
+
+  /**
+   * Sit Ada and Grace down and play until Ada draws a card she may slap down, leaving
+   * the table exactly there: her window open, the turn on Grace, nothing else moved.
+   */
+  async function playToAnOpenWindow(): Promise<OpenWindow> {
+    const adaClient = await table.connect();
+    const created = expectOk(
+      await ask<{ roomCode: string; playerId: string }>(adaClient, "createRoom", "Ada"),
+    );
+    const ada = seat(adaClient, created.playerId, "Ada");
+
+    const graceClient = await table.connect();
+    const joined = expectOk(
+      await ask<{ playerId: string }>(graceClient, "joinRoom", created.roomCode, "Grace"),
+    );
+    const grace = seat(graceClient, joined.playerId, "Grace");
+
+    expectOk(await ask(ada.client, "startGame"));
+
+    /** Wait for the position this seat is being asked to act on. */
+    const waitFor = (of: Seat, what: string) =>
+      of.watcher.until(
+        (v) => v.phase !== "playing" || v.currentTurnPlayerId === of.id,
+        what,
+      );
+
+    for (let step = 0; step < 400; step++) {
+      const position = await ada.watcher.until(
+        (v) =>
+          v.phase !== "playing" ||
+          v.currentTurnPlayerId === ada.id ||
+          v.currentTurnPlayerId === grace.id,
+        "a human to be needed",
+      );
+
+      if (position.phase === "gameEnd") {
+        // The match ran out before a window turned up. Deal another and carry on:
+        // the fishing is what takes the time, not any one match.
+        ada.watcher.reset();
+        grace.watcher.reset();
+        expectOk(await ask(ada.client, "playAgain"));
+        continue;
+      }
+      if (position.phase === "roundEnd") {
+        ada.watcher.reset();
+        grace.watcher.reset();
+        expectOk(await ask(ada.client, "startNextRound"));
+        continue;
+      }
+
+      const actor = position.currentTurnPlayerId === ada.id ? ada : grace;
+      const mine = await waitFor(actor, `${actor.name}'s own view of her turn`);
+      ada.watcher.reset();
+      grace.watcher.reset();
+      expectOk(
+        await ask(actor.client, "takeTurn", {
+          discardCardIds: [fishingDiscard(mine)],
+          draw: { source: "deck" },
+        }),
+      );
+
+      if (actor !== ada) continue;
+
+      // Ada has just drawn. Grace is next and is a person, so if that draw opened a
+      // window it is still open, and will stay open until she acts.
+      const adaView = await ada.watcher.until(
+        (v) => v.phase !== "playing" || v.currentTurnPlayerId === grace.id,
+        "the turn to pass to Grace",
+      );
+      if (!adaView.you.slapdownEligible) continue;
+
+      const graceView = await waitFor(grace, "Grace's view of the same position");
+      return { ada, grace, adaView, graceView };
+    }
+    assert.fail("no slapdown window ever opened");
+  }
+
+  /** Take Grace's turn, from the view she is holding. */
+  const graceTakesHerTurn = (grace: Seat, graceView: PlayerGameView) =>
+    ask(grace.client, "takeTurn", {
+      discardCardIds: [graceView.you.hand[0]!.id],
+      draw: { source: "deck" },
+    });
+
+  it("puts the drawn card back down without moving the turn on", async () => {
+    const { ada, grace, adaView } = await playToAnOpenWindow();
+    ada.watcher.reset();
+
+    expectOk(await ask(ada.client, "slapDown"));
+
+    const after = await ada.watcher.until(
+      (v) => v.you.hand.length === adaView.you.hand.length - 1,
+      "Ada's hand to shrink",
+    );
+    const slapped = after.lastDiscard.at(-1)!;
+    assert.equal(after.lastDiscard.length, adaView.lastDiscard.length + 1);
+    assert.equal(
+      slapped.rank,
+      adaView.lastDiscard[0]!.rank,
+      "the slapped card joined the set it matches",
+    );
+    assert.ok(
+      adaView.you.hand.some((c) => c.id === slapped.id),
+      "the card it went down from was the one she had just drawn",
+    );
+    assert.ok(
+      !after.you.hand.some((c) => c.id === slapped.id),
+      "and it left the hand it came from",
+    );
+    assert.equal(after.currentTurnPlayerId, grace.id, "a slapdown is not a turn");
+    assert.equal(after.you.slapdownEligible, false, "the window closed behind it");
+  });
+
+  it("refuses a second slap once the window is used up", async () => {
+    const { ada } = await playToAnOpenWindow();
+    expectOk(await ask(ada.client, "slapDown"));
+
+    const result = await ask(ada.client, "slapDown");
+
+    assert.equal(expectError(result).code, "SLAPDOWN_NOT_AVAILABLE");
+  });
+
+  it("refuses a slap from anyone the window does not belong to", async () => {
+    const { grace } = await playToAnOpenWindow();
+
+    const result = await ask(grace.client, "slapDown");
+
+    assert.equal(expectError(result).code, "SLAPDOWN_NOT_AVAILABLE");
+  });
+
+  /**
+   * The race, resolved by nothing more than the order the two events arrive in
+   * (ADR-0005). Losing it looks exactly like never having had a window.
+   */
+  it("turns away a slap the next player's turn got in ahead of", async () => {
+    const { ada, grace, adaView, graceView } = await playToAnOpenWindow();
+    ada.watcher.reset();
+    expectOk(await graceTakesHerTurn(grace, graceView));
+
+    const result = await ask(ada.client, "slapDown");
+
+    assert.equal(expectError(result).code, "SLAPDOWN_NOT_AVAILABLE");
+    const after = await ada.watcher.until(
+      (v) => v.phase !== "playing" || v.currentTurnPlayerId !== grace.id,
+      "Grace's turn to be played out",
+    );
+    assert.equal(
+      after.you.hand.length,
+      adaView.you.hand.length,
+      "the refused slap left Ada holding what she had",
+    );
+    assert.equal(after.you.slapdownEligible, false, "and no window to try again with");
+  });
+
+  /**
+   * Both events in flight at once, with nothing arbitrating them but the event loop.
+   * Whichever order the server happens to take them in, the outcome has to be one of
+   * the two whole ones: the slap landed and Ada is a card lighter, or it was refused
+   * and she is not. Grace's turn stands either way — it was hers to take.
+   */
+  it("resolves a genuine race one way or the other, never half of each", async () => {
+    const { ada, grace, adaView, graceView } = await playToAnOpenWindow();
+    ada.watcher.reset();
+
+    const slapping = ask(ada.client, "slapDown");
+    const turning = graceTakesHerTurn(grace, graceView);
+    const [slap, turn] = await Promise.all([slapping, turning]);
+
+    expectOk(turn);
+    const expectedHand = slap.ok
+      ? adaView.you.hand.length - 1
+      : adaView.you.hand.length;
+    if (!slap.ok) assert.equal(slap.error.code, "SLAPDOWN_NOT_AVAILABLE");
+    const after = await ada.watcher.until(
+      (v) => v.phase !== "playing" || v.currentTurnPlayerId !== grace.id,
+      "the position both actions left behind",
+    );
+    assert.equal(
+      after.you.hand.length,
+      expectedHand,
+      "Ada's hand agrees with the ack she was given",
+    );
+    // Whoever went first, the window is spent: no order of arrival leaves it open behind
+    // both of them.
+    assert.equal(after.you.slapdownEligible, false);
+  });
+
+  /**
+   * The serializer is unit tested for this; here it is the wire that is under test.
+   * An open window says its holder drew a rank they had just discarded, so it must
+   * never appear in anyone else's payload, in any shape.
+   */
+  it("never tells the rest of the table that a window is open", async () => {
+    const { ada, grace } = await playToAnOpenWindow();
+
+    assert.ok(
+      ada.heard.some((v) => v.you.slapdownEligible),
+      "Ada really was told about her own window",
+    );
+    for (const view of grace.heard) {
+      assert.equal(view.you.slapdownEligible, false, "Grace was told about a window");
+      for (const opponent of view.opponents) {
+        assert.ok(
+          !("slapdownEligible" in opponent),
+          "an opponent arrived carrying an eligibility flag",
+        );
+      }
+      assert.ok(
+        !JSON.stringify(view).includes('"slapdownEligible":true'),
+        "an open window leaked into Grace's payload",
+      );
+    }
+  });
+
+  it("rejects a slap from a connection that is not in a room", async () => {
+    const stranger = await table.connect();
+
+    const result = await ask(stranger, "slapDown");
+
+    assert.equal(expectError(result).code, "PLAYER_NOT_FOUND");
+  });
+});
+
 describe("disconnect", () => {
   /**
    * Poll a room code with real join attempts until one is rejected.

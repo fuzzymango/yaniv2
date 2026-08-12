@@ -9,6 +9,15 @@ export interface SelfView {
   score: number;
   /** Empty during `lobby`, when no round is dealt. */
   hand: Card[];
+  /**
+   * Whether this player has an open slapdown window right now — the card they just drew
+   * may go straight back down on the set it matches. docs/rules.md §9.
+   *
+   * Lives here rather than anywhere else in `PlayerGameView` because it is private: it
+   * says the holder drew a rank they had just discarded, which nothing else on the wire
+   * reveals. `OpponentView` has no such field to populate, by construction.
+   */
+  slapdownEligible: boolean;
 }
 
 /**

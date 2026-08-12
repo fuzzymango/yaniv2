@@ -133,12 +133,56 @@ describe("serializeStateForPlayer", () => {
   });
 });
 
+/**
+ * Slapdown eligibility is private information — it says the holder just drew a card of a
+ * rank they had already discarded, which nothing else on the wire reveals. So it is a
+ * field of `SelfView` alone, and the serializer is where that boundary is kept.
+ */
+describe("serializeStateForPlayer — slapdown eligibility", () => {
+  const windowOpen = () =>
+    makeState({
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace" },
+      ],
+      hands: { p1: ["hearts-7", "hearts-3"], p2: ["spades-K"] },
+      lastDiscard: ["clubs-7"],
+      currentTurnPlayerId: "p2",
+      slapdown: { playerId: "p1", cardId: "hearts-7" },
+    });
+
+  it("tells the player holding the window that they may slap down", () => {
+    assert.equal(serializeStateForPlayer(windowOpen(), "p1").you.slapdownEligible, true);
+  });
+
+  it("tells nobody else, in any shape", () => {
+    const view = serializeStateForPlayer(windowOpen(), "p2");
+
+    assert.equal(view.you.slapdownEligible, false);
+    for (const opponent of view.opponents) {
+      assert.ok(
+        !("slapdownEligible" in opponent),
+        "an opponent must not carry an eligibility flag at all",
+      );
+    }
+    assert.ok(
+      !JSON.stringify(view).includes('"slapdownEligible":true'),
+      "an open window leaked into someone else's view",
+    );
+  });
+
+  it("reports no eligibility with no window open", () => {
+    assert.equal(serializeStateForPlayer(scenario(), "p1").you.slapdownEligible, false);
+  });
+});
+
 describe("serializeStateForPlayer — lobby", () => {
   it("reports an empty table before the first deal", () => {
     const view = serializeStateForPlayer(makeState({ phase: "lobby" }), "p1");
 
     assert.equal(view.phase, "lobby");
     assert.deepEqual(view.you.hand, []);
+    assert.equal(view.you.slapdownEligible, false, "no round, nothing to slap down");
     assert.equal(view.opponents[0]!.handSize, 0);
     assert.equal(view.currentTurnPlayerId, null);
     assert.equal(view.drawPileCount, 0);

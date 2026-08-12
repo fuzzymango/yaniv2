@@ -97,7 +97,7 @@ export function viewOf(hand: Card[], lastDiscard: Card[]): PlayerGameView {
     phase: "playing",
     roundNumber: 1,
     hostId: "p1",
-    you: { id: "p1", name: "Ada", score: 0, hand },
+    you: { id: "p1", name: "Ada", score: 0, hand, slapdownEligible: false },
     opponents: [{ id: "p2", name: "Grace", score: 0, handSize: 5 }],
     turnOrder: ["p1", "p2"],
     currentTurnPlayerId: "p1",

@@ -19,9 +19,8 @@ This section bullet points specific behavior patterns that you should follow whe
 **`docs/rules.md` is the single source of truth for gameplay.** Every rule maps to at least
 one test; if code and `rules.md` disagree, `rules.md` is right and the code has a bug.
 
-`docs/backend-archetechture.md` is the original design sketch that kicked the project off.
-It is **stale** in several places — see "Deviations from the original sketch" below. Don't
-treat it as authoritative; it's kept for history.
+`docs/backend-archetechture.md` is the original design sketch — **stale** in several places
+(see "Deviations from the original sketch" below), kept for history, not authority.
 
 If you're adding or changing a rule: update `docs/rules.md` first, then the code, then tests.
 Don't let a rule exist only in code.
@@ -53,7 +52,7 @@ client/
 | `views.ts` | `PlayerGameView` and friends — what a client actually receives |
 | `errors.ts` | `GameErrorCode` union |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
-| `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and (later) the client |
+| `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and the client |
 | `config.ts` | Every rule constant (`HAND_SIZE`, `YANIV_THRESHOLD`, `ASSAF_PENALTY`, `MAX_SCORE`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS`, `MIN_PLAYERS`, `MAX_PLAYERS`), each pointing at a `docs/rules.md` section |
 | `standings.ts` | `standings` — a finished match's final table, lowest score first, including whoever has left since. Read by both clients |
 
@@ -165,7 +164,11 @@ in the shared rulebook) and hands the turn on as usual, and slapping the card do
 shrinks a hand and extends `lastDiscard` — `currentTurnPlayerId` never moves. The window
 closes on the slap or on the next player's `takeTurn`/`callYaniv`, whichever the server
 processes first; both assign `round.slapdown` outright rather than merging it, so a stale
-window cannot survive a turn. No lock and no timer — ADR-0005. Nothing can call it yet.
+window cannot survive a turn. No lock and no timer — ADR-0005.
+
+The wire keeps that shape: a payload-free `slapDown` — the server already knows which card
+is meant — through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for
+whoever loses the race, and eligibility on `SelfView` alone. No client offers it yet.
 
 ### Round state is nested
 
@@ -643,8 +646,8 @@ Not oversights — deferred on purpose, in this order of likely next work:
   (Railway, one service: `railway.json` + `server/src/staticServer.ts`, per ADR-0003), so
   that gap is live in production: solo play against bots is unaffected, but inviting other
   humans to a deployed room is not yet safe.
-- **Slapdown is engine-only so far.** `slapDown` and `round.slapdown` are built and tested,
-  but nothing can reach them — no event, no `slapdownEligible` on the view, no control. Bots
+- **Slapdown has no client yet.** It is callable over a real socket, but neither the CLI
+  harness nor the browser offers it, and CONTEXT.md still owes the term an entry. Bots
   neither slap down for themselves nor can meaningfully be raced by a human, since
   `playBotTurns` runs in the same tick. Both deliberate, per ADR-0005.
 - **Disambiguating a joker that extends a run.** The browser client sends the selection in
@@ -654,17 +657,14 @@ Not oversights — deferred on purpose, in this order of likely next work:
 
 ## Deviations from the original sketch (`docs/backend-archetechture.md`)
 
-If you go looking for something the architecture doc describes and don't find it, it's
-probably one of these:
+If the architecture doc describes something you cannot find, it is probably one of these:
 
-- `Deck` is not a class — pure functions over plain arrays instead. The sketch's version
-  built a `Deck`, immediately drained it into a plain array, and discarded the instance,
-  leaving two sources of truth for the pile.
+- `Deck` is not a class — pure functions over plain arrays instead, since the sketch's
+  `Deck` was drained into an array on creation, leaving two sources of truth for the pile.
 - `playCards`/`drawFromPile` don't exist as separate functions — see "Turn model" above.
 - The discard pile isn't a flat `Card[]` — see "discard pile is two parts" above.
 - Errors are a `Result` union, not `throw new Error(...)`; `Player.id` is not `socket.id`.
-- `serializeStateForPlayer`'s output shape is `{ you, opponents }`, not a single
-  `players[]` array with an optional `hand`.
+- `serializeStateForPlayer` returns `{ you, opponents }`, not one `players[]` with a `hand`.
 
 ## Running things
 

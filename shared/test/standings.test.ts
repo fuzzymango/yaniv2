@@ -35,7 +35,7 @@ function finishedMatch(options: {
     phase: "gameEnd",
     roundNumber: 4,
     hostId: you.id,
-    you: { ...you, hand: [] },
+    you: { ...you, hand: [], slapdownEligible: false },
     opponents: opponents.map((p) => ({ ...p, handSize: 0 })),
     turnOrder: options.turnOrder ?? options.seated.map((p) => p.id),
     currentTurnPlayerId: null,
