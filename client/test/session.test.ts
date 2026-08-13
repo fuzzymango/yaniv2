@@ -30,6 +30,7 @@ import {
   pickupCandidates,
   type GameError,
   type PlayerGameView,
+  type RoomSettings,
 } from "@yaniv/shared";
 import { RoomManager } from "@yaniv/server/src/roomManager.ts";
 import { mulberry32 } from "@yaniv/server/src/rng.ts";
@@ -709,6 +710,132 @@ describe("the session core", () => {
       assert.equal(own.view!.phase, "lobby");
       assert.equal(own.notice, null, "the last room's news is not this room's");
       assert.equal(own.error, null);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The room's settings, edited from the lobby by whoever owns it.
+ *
+ * The intent is the session core's whole part in docs/adr/0006 — there is no control that
+ * sends it yet, and these drive it exactly as a lobby editor will. What the settings are
+ * *for* is asserted elsewhere: `turn.test.ts` covers the threshold reaching the call
+ * check, and the server's own suites cover a room actually playing by them.
+ */
+describe("the room's settings", () => {
+  /** Every field moved off its default, so nothing here can pass by coincidence. */
+  const RAISED: RoomSettings = {
+    handSize: 7,
+    yanivThreshold: 11,
+    maxScore: 50,
+    botCount: 1,
+  };
+
+  it("carries the host's edit to every screen in the lobby", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+
+      host.updateSettings(RAISED);
+      assert.equal(host.getSnapshot().busy, true, "locked while the edit is in flight");
+
+      // The ack is what releases the controls, and it comes back ahead of the position it
+      // produced — so the settled snapshot is still showing the settings that were edited.
+      const settled = await waitForSnapshot(host, "the controls", (s) => !s.busy);
+      assert.equal(settled.error, null);
+
+      const edited = await waitForSnapshot(
+        host,
+        "the host's own screen",
+        (s) => s.view!.settings.handSize === RAISED.handSize,
+      );
+      assert.deepEqual(edited.view!.settings, RAISED, "all four fields, at once");
+
+      // The other connection was sitting still and is told anyway, which is what makes
+      // this the room's configuration rather than the host's own screen.
+      const seen = await waitForSnapshot(
+        guest,
+        "the guest to be told",
+        (s) => s.view!.settings.handSize === RAISED.handSize,
+      );
+      assert.deepEqual(seen.view!.settings, RAISED);
+      assert.equal(seen.error, null, "nothing the guest did, and nothing to refuse");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("deals the hand size the host asked for", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+
+      host.updateSettings(RAISED);
+      await waitForSnapshot(host, "the host's edit", (s) => !s.busy);
+      host.startGame();
+
+      // The proof the edit was the room's and not a number on a screen: the deal is the
+      // first thing that plays by it, and both seats get it.
+      for (const [session, who] of [[host, "the host"], [guest, "the guest"]] as const) {
+        const dealt = await waitForSnapshot(
+          session,
+          `${who}'s hand`,
+          (s) => s.view!.phase !== "lobby",
+        );
+        assert.equal(dealt.view!.you.hand.length, RAISED.handSize);
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refuses a guest's edit and releases the controls on the refusal alone", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+
+      guest.updateSettings(RAISED);
+
+      // Nothing is broadcast behind a refused edit, so this waits on the ack and nothing
+      // else — which is the whole of why the intent settles on one.
+      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
+      assert.equal(refused.error!.code, "NOT_HOST");
+      assert.equal(refused.busy, false, "and the lobby is a screen to act from again");
+      assert.equal(
+        refused.view!.settings.handSize,
+        HAND_SIZE,
+        "the room still plays by what its host chose",
+      );
+      assert.equal(host.getSnapshot().view!.settings.handSize, HAND_SIZE, "on both screens");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refuses the host's own edit once the match has started", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+      host.startGame();
+      await waitForSnapshot(
+        host,
+        "the match to start",
+        (s) => s.view!.phase !== "lobby" && !s.busy,
+      );
+
+      host.updateSettings(RAISED);
+
+      const refused = await waitForSnapshot(host, "the refusal", (s) => s.error !== null);
+      assert.equal(refused.error!.code, "WRONG_PHASE");
+      assert.equal(refused.busy, false);
+      assert.equal(
+        refused.view!.settings.handSize,
+        HAND_SIZE,
+        "a match plays out under the settings it was dealt under",
+      );
+      assert.equal(guest.getSnapshot().view!.settings.handSize, HAND_SIZE);
     } finally {
       await server.close();
     }

@@ -494,19 +494,21 @@ Five fields, and each answers a different question:
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room
 settles on the **ack**: entry has been broadcast before it is acked, and a departing
-connection is published to no longer. So do dealing the next round and dealing another
-match, which produce a position rather than moving within one. A **move settles on a
-strictly newer position** — a turn, the Yaniv call that replaces one, or a slapdown, all
-sent through the same `play` helper, which keeps the CLI's `Position { view, version }` /
-`actedOn` watermark in the session core. A slapdown is the one of the three sent off turn,
-so what releases it may be the next player's move rather than its own answer; both are
-strictly newer, and by either the window is spent. The server acks an in-game action
-*before* it broadcasts the result, so controls released on the ack would come back to life
-over a position still showing the mover's own turn and their discarded cards in hand. A
-rejected move is the exception and releases at once: nothing was published, so no newer
-position is coming, and the turn is still theirs. The ordering trap is worth stating
-plainly: the first snapshot carrying a view after entering a room is one the player still
-cannot act from — tests wait on `view !== null && !busy` rather than on the view alone.
+connection is published to no longer. So do dealing the next round, dealing another match,
+and editing the room's settings, which produce a position rather than moving within one —
+and, in the settings case, none at all when refused, since a rejected edit is broadcast to
+nobody. A **move settles on a strictly newer position** — a turn, the Yaniv call that
+replaces one, or a slapdown, all sent through the same `play` helper, which keeps the
+CLI's `Position { view, version }` / `actedOn` watermark in the session core. A slapdown is
+the one of the three sent off turn, so what releases it may be the next player's move
+rather than its own answer; both are strictly newer, and by either the window is spent. The
+server acks an in-game action *before* it broadcasts the result, so controls released on
+the ack would come back to life over a position still showing the mover's own turn and
+their discarded cards in hand. A rejected move is the exception and releases at once:
+nothing was published, so no newer position is coming, and the turn is still theirs. The
+ordering trap is worth stating plainly: the first snapshot carrying a view after entering a
+room is one the player still cannot act from — tests wait on `view !== null && !busy`
+rather than on the view alone.
 
 **Positions are drawn on a clock, not on arrival.** A run of bot turns lands as one
 broadcast per move within a few milliseconds of itself (see "Broadcasting" above), so a
@@ -640,10 +642,10 @@ Not oversights — deferred on purpose, in this order of likely next work:
   room now — each joins by code from their own terminal (`play --join`) and the host
   starts when everyone is in — but `startGame` still seats bots on the spot, so anyone
   who has not joined by then is playing the next match, not this one.
-- **Any client that can send `updateSettings`.** The event and its transition are in
-  (docs/adr/0006), but nothing offers a control that emits it, so every room still plays
-  with the defaults it was created with. The session intent and the lobby editor are
-  issues #53 and #54; the CLI harness is out of scope for both.
+- **Any screen that can edit the settings.** The event, its transition and the browser
+  session's `updateSettings` intent are all in (docs/adr/0006), but no control on any
+  screen emits it, so every room still plays with the defaults it was created with. The
+  lobby editor is issue #54; the CLI harness is out of scope for it.
 - **Persistence.** Rooms are in-memory only, so a redeploy drops every match in progress —
   same as a restart, and the reason splitting client and server into two services (giving
   up same-origin, ADR-0003) would be the fix if that cost ever matters.

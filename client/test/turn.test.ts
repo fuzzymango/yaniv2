@@ -118,6 +118,20 @@ describe("isLegalCall", () => {
       assert.equal(isLegalCall(hand, YANIV_THRESHOLD), canCallYaniv(hand, YANIV_THRESHOLD));
     }
   });
+
+  /*
+   * The threshold is the room's, not the rulebook's default: a host may raise or lower it
+   * from the lobby (docs/adr/0006), and it reaches the screen on every position as
+   * `view.settings.yanivThreshold`. A control answered from a constant instead would offer
+   * the call in a room that had lowered it, and withhold it in one that had raised it —
+   * silently wrong on both counts, and only found out by being refused.
+   */
+  it("answers the room's threshold rather than the default", () => {
+    const hand = cards("hearts-4", "spades-3");
+    assert.equal(handValue(hand), 7, "the hand that makes the two answers differ");
+    assert.equal(isLegalCall(hand, 11), true, "in a room that raised it");
+    assert.equal(isLegalCall(hand, 5), false, "and in one that lowered it");
+  });
 });
 
 describe("takeableIds", () => {
