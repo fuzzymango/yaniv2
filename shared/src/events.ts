@@ -1,4 +1,5 @@
 import type { GameError } from "./errors.ts";
+import type { RoomSettings } from "./settings.ts";
 import type { PlayerGameView } from "./views.ts";
 
 /** Where the single drawn card comes from. See docs/rules.md §3. */
@@ -24,6 +25,16 @@ export interface ClientToServerEvents {
     playerName: string,
     ack: Ack<{ playerId: string }>,
   ) => void;
+  /**
+   * Host only, lobby only: replace the room's settings wholesale. docs/adr/0006.
+   *
+   * The whole object, never a patch — a partial merge would open a window where a room
+   * is playing under half of one host's choices and half of another's, the same reason
+   * a turn is one `TurnAction` rather than a discard followed by a draw. All four fields
+   * land or none do: anything out of range is refused with `INVALID_SETTINGS`, and
+   * `startGame` locks the lot for the life of the room.
+   */
+  updateSettings: (settings: RoomSettings, ack: Ack<null>) => void;
   startGame: (ack: Ack<null>) => void;
   takeTurn: (action: TurnAction, ack: Ack<null>) => void;
   callYaniv: (ack: Ack<null>) => void;

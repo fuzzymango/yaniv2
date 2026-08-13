@@ -176,6 +176,47 @@ describe("serializeStateForPlayer — slapdown eligibility", () => {
   });
 });
 
+describe("serializeStateForPlayer — settings", () => {
+  it("is present and carries the room's own values, in the lobby", () => {
+    const view = serializeStateForPlayer(
+      makeState({ phase: "lobby", settings: { handSize: 6, botCount: 2 } }),
+      "p1",
+    );
+    assert.deepEqual(view.settings, {
+      handSize: 6,
+      yanivThreshold: 7,
+      maxScore: 100,
+      botCount: 2,
+    });
+  });
+
+  it("is present mid-round", () => {
+    const view = serializeStateForPlayer(
+      scenario(),
+      "p1",
+    );
+    assert.deepEqual(view.settings, {
+      handSize: 5,
+      yanivThreshold: 7,
+      maxScore: 100,
+      botCount: 0,
+    });
+  });
+
+  it("is present at roundEnd and gameEnd", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace" },
+      ],
+      hands: { p1: ["hearts-A"], p2: ["spades-K"] },
+      settings: { yanivThreshold: 3 },
+    });
+    const view = serializeStateForPlayer(unwrap(callYaniv(state, "p1")), "p1");
+    assert.equal(view.settings.yanivThreshold, 3);
+  });
+});
+
 describe("serializeStateForPlayer — lobby", () => {
   it("reports an empty table before the first deal", () => {
     const view = serializeStateForPlayer(makeState({ phase: "lobby" }), "p1");

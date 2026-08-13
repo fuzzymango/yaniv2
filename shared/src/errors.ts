@@ -14,6 +14,13 @@ export type GameErrorCode =
   | "PLAYER_NOT_FOUND"
   | "NOT_HOST"
   | "NOT_ENOUGH_PLAYERS"
+  // room settings
+  /**
+   * A settings object with a field outside its range or enum, or not a settings object at
+   * all. One code for all four fields: the lobby offers only valid values, so this is
+   * defense against an off-contract client rather than a validation message anyone reads.
+   */
+  | "INVALID_SETTINGS"
   // phase / turn
   | "WRONG_PHASE"
   | "NOT_YOUR_TURN"

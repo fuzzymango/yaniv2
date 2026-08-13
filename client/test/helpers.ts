@@ -104,6 +104,7 @@ export function viewOf(
     phase: "playing",
     roundNumber: 1,
     hostId: "p1",
+    settings: { handSize: 5, yanivThreshold: 7, maxScore: 100, botCount: 0 },
     you: {
       id: "p1",
       name: "Ada",

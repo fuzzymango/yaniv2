@@ -368,18 +368,23 @@ describe("legalDiscards", () => {
 
 describe("canCallYaniv", () => {
   it("permits a hand at or below the threshold", () => {
-    assert.equal(canCallYaniv(cards("hearts-5", "spades-2")), true);
-    assert.equal(canCallYaniv(cards("hearts-A")), true);
-    assert.equal(canCallYaniv([]), true);
+    assert.equal(canCallYaniv(cards("hearts-5", "spades-2"), 7), true);
+    assert.equal(canCallYaniv(cards("hearts-A"), 7), true);
+    assert.equal(canCallYaniv([], 7), true);
   });
 
   it("refuses a hand above the threshold", () => {
-    assert.equal(canCallYaniv(cards("hearts-5", "spades-3")), false);
-    assert.equal(canCallYaniv(cards("hearts-K")), false);
+    assert.equal(canCallYaniv(cards("hearts-5", "spades-3"), 7), false);
+    assert.equal(canCallYaniv(cards("hearts-K"), 7), false);
   });
 
   it("counts jokers as free", () => {
-    assert.equal(canCallYaniv(cards("joker-1", "joker-2", "hearts-7")), true);
+    assert.equal(canCallYaniv(cards("joker-1", "joker-2", "hearts-7"), 7), true);
+  });
+
+  it("reads the threshold it is given, not a fixed default", () => {
+    assert.equal(canCallYaniv(cards("hearts-5", "spades-3"), 3), false);
+    assert.equal(canCallYaniv(cards("hearts-5", "spades-3"), 11), true);
   });
 });
 

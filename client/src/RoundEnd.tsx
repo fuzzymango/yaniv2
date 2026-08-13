@@ -17,6 +17,7 @@
 
 import type { GameError, PlayerGameView, RoundResultView } from "@yaniv/shared";
 import { PlayingCard } from "./PlayingCard.tsx";
+import { SettingsDialog } from "./SettingsDialog.tsx";
 
 interface RoundEndProps {
   view: PlayerGameView;
@@ -44,6 +45,9 @@ export function RoundEnd({ view, result, error, busy, onNextRound }: RoundEndPro
 
   return (
     <main className="screen round">
+      {/* The same corner on every in-match screen, so it is always in the same place. */}
+      <SettingsDialog settings={view.settings} />
+
       <header className="round__header">
         <p className="code__label">Round {result.roundNumber}</p>
         <h1 className="round__call">{subject(result.callerId)} called Yaniv</h1>

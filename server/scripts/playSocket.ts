@@ -11,8 +11,10 @@
  * Bare `--name` lands on a main menu (`create` / `join <code>` / `q`), rather than
  * silently creating a room. `--join`/`--create` skip straight past it, same as always.
  * Whoever creates a room is shown its code; read it out and everyone else joins it,
- * either with `--join` or by typing `join <code>` at their own menu. Every empty seat is
- * filled with a bot when the host starts, so playing alone needs no extra ceremony.
+ * either with `--join` or by typing `join <code>` at their own menu. A fresh room's
+ * `botCount` defaults to zero (docs/adr/0006) and there is no menu command to raise it
+ * yet, so a table needs somebody else on it for now — `start` at an empty one gets
+ * NOT_ENOUGH_PLAYERS.
  *
  * This is a debugging tool and a worked reference for the connection flow a real
  * client will need — deliberately disposable, not a preview of any final UI.

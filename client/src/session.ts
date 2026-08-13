@@ -21,6 +21,7 @@ import type {
   ClientToServerEvents,
   GameError,
   PlayerGameView,
+  RoomSettings,
   ServerToClientEvents,
 } from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
@@ -53,6 +54,12 @@ export interface SessionSnapshot {
    * The current position, or null when there is no room to be in. Null *is* the main
    * menu: it is the one screen that is not a function of `view.phase`, because before a
    * room exists there is nothing for the server to have sent. See docs/adr/0004.
+   *
+   * The room's settings ride here too, as `view.settings`, in every phase — deliberately
+   * not lifted out into a field of their own. They arrive with the position and they are
+   * only meaningful with one, so a second copy beside it could only ever be the same fact
+   * written twice, with a moment between the two writes where a screen could read the old
+   * one. `callYaniv` reads the threshold straight off the view for that reason.
    */
   readonly view: PlayerGameView | null;
   /**
@@ -106,9 +113,26 @@ export interface Session {
   /** The code as typed. Case is not the player's problem — see below. */
   joinRoom: (roomCode: string, playerName: string) => void;
   /**
-   * Deal the first round, filling every empty seat with a bot. Host only — and the
-   * server is what says so, answering anyone else with `NOT_HOST`. A screen that shows
-   * the control to the host alone is a courtesy, not the rule.
+   * Replace the room's settings — how many cards are dealt, what a Yaniv may be called
+   * on, what score ends the match, how many bots fill the table (docs/adr/0006).
+   *
+   * All four at once, never a patch, because that is the shape of the event: a room is
+   * never half-way between one host's choices and another's. Host only and lobby only,
+   * and the server is what says so — `NOT_HOST` and `WRONG_PHASE` come back as refusals
+   * like any other. A screen that offers the controls to the host alone, and only before
+   * the deal, is the same courtesy the start control is.
+   *
+   * Nothing is checked here ahead of the server. `INVALID_SETTINGS` guards against a
+   * client that is off the contract, and a typed one cannot construct a `RoomSettings`
+   * that would earn it — unlike a discard, where the rulebook can answer before the wire
+   * does.
+   */
+  updateSettings: (settings: RoomSettings) => void;
+  /**
+   * Deal the first round, filling as many empty seats with bots as the room's settings
+   * ask for. Host only — and the server is what says so, answering anyone else with
+   * `NOT_HOST`. A screen that shows the control to the host alone is a courtesy, not the
+   * rule.
    */
   startGame: () => void;
   /**
@@ -520,6 +544,15 @@ export function createSession(
       );
     },
 
+    /*
+     * Ack-settled, like `startNextRound` below. An edit has one thing none of the others
+     * do, and it points the same way: a refused edit is broadcast to nobody, so controls
+     * waiting on a newer position would stay locked on a lobby the host is still sitting
+     * in front of.
+     */
+    updateSettings: (settings) =>
+      act((ack) => socket.emit("updateSettings", settings, ack)),
+
     startGame: () => act((ack) => socket.emit("startGame", ack)),
 
     // The view goes with the seat: there is no room to render any more, and a null view
@@ -554,7 +587,7 @@ export function createSession(
       // The same rulebook the server will judge the call by, and the same silence when it
       // says no: an inert control that was tapped anyway has asked for nothing. Whether it
       // is this player's turn is left to the server, exactly as it is for a discard.
-      if (!isLegalCall(snapshot.view.you.hand)) return;
+      if (!isLegalCall(snapshot.view.you.hand, snapshot.view.settings.yanivThreshold)) return;
 
       play((ack) => socket.emit("callYaniv", ack));
     },

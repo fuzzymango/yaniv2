@@ -45,8 +45,18 @@ npm run dev                               # terminal 2 — opens on http://local
 Open http://localhost:5173 in your browser. The frontend proxies `/socket.io` requests to
 port 3000, so the client and server talk to each other automatically.
 
-Enter a name, create a room or join one by its code, and the host starts the match — every
-empty seat is filled with a bot. A turn is two taps and no button: tap cards in your hand
+Enter a name, create a room or join one by its code, and the host starts the match.
+
+The lobby is where the room is set up, and the host is the only one who can (`docs/adr/0006`):
+how many cards are dealt (5, 6 or 7), what a hand has to be worth to call Yaniv (3, 5, 7 or
+11), the score that ends the match, and how many bots fill the empty seats. Everyone else
+sees the same four values, plainly read-only. A fresh room asks for **no bots at all**, so a
+host alone at the table is turned away with `NOT_ENOUGH_PLAYERS` until they either raise the
+bot count or somebody joins. The moment the match starts the settings lock for the life of
+the room — `Play again` deals another match with the same ones — and move behind the small
+icon in the top corner of every in-match screen, which opens them read-only for everybody.
+
+A turn is two taps and no button: tap cards in your hand
 to choose them (chosen cards are outlined in yellow, tapped again to unchoose), then tap
 either the deck or one of the two end cards of the face-up discard. That second tap is the
 move — the chosen cards are discarded and the tapped card drawn, in one action. The deck
@@ -58,11 +68,12 @@ than the table jumping straight back to your turn.
 Once in a while the discard pile starts flashing on somebody else's turn: you discarded a
 same-rank set (or a lone card) and drew that same rank off the deck, so the card can go
 straight back down (`docs/rules.md` §9). One tap on the pile sheds it, and the window shuts the moment the
-next player moves — which against bots is immediately, since their turns are played in the
-same tick (`docs/adr/0005`), so this is something you will see against other people.
+next player moves — against a bot-controlled seat that is immediate, since bot turns play
+in the same tick (`docs/adr/0005`), so this is something you will see against other people.
 
 The **Yaniv** button above your hand is the exception — the one control that is not a card.
-It lights up the moment your hand is worth 7 or less and is dead until then, and pressing
+It lights up the moment your hand is worth the room's threshold (7 unless the host changed
+it) or less, and is dead until then, and pressing
 it ends the round. Every hand is then turned face up on a scoreboard showing who called,
 whether they were Assafed, and what the round cost each player against their new total. The
 host deals the next round from there.
@@ -101,8 +112,10 @@ straight into a room; without either, the menu offers the same two choices inter
 A bad or expired code typed at the menu shows the error and returns you to the menu to
 try again, rather than ending the session.
 
-The host (first player) types `start` once everyone has joined. Any remaining empty seats
-are filled with bots. Everyone plays through to a winner. At the prompt:
+The host (first player) types `start` once everyone has joined. A fresh room's bot count
+defaults to zero (`docs/adr/0006`) and this harness has no control that changes it — only
+the browser lobby does — so a host alone here is turned away with `NOT_ENOUGH_PLAYERS`.
+Everyone plays through to a winner. At the prompt:
 
 | Input | Meaning |
 |---|---|
@@ -189,8 +202,9 @@ automatically as part of the build phase.
 
 Disconnect/reconnect handling (dropping a connection currently ends the room for everyone)
 and persistence (rooms are in-memory, so a restart or redeploy drops games in progress). A
-match plays end to end in the browser now: create or join, deal, take turns, watch a paced
-run of bot turns, call Yaniv, and finish on the standings with another match one tap away; a
+match plays end to end in the browser now: create or join, set the room up, deal, take turns,
+watch a paced run of bot turns, call Yaniv, and finish on the standings with another match
+one tap away; a
 dropped connection says so on screen rather than leaving you tapping at a dead table. Because
 reconnect isn't built yet, a backgrounded mobile tab still drops the socket and ends the
 match for everyone at the table — fine solo against bots, not yet safe to invite others to

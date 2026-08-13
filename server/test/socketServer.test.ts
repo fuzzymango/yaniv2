@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import type { GameError, PlayerGameView } from "@yaniv/shared";
+import type { GameError, PlayerGameView, RoomSettings } from "@yaniv/shared";
 import {
   HAND_SIZE,
   MAX_PLAYERS,
@@ -44,15 +44,25 @@ interface Harness {
  * Pass a `seed` when a test's subject is the play itself rather than the wiring: the
  * deal then repeats exactly, so a test can be written against the cards that actually
  * come out rather than whatever the system rng felt like dealing.
+ *
+ * `botCount` seeds every room this server creates. It defaults to filling the table,
+ * which is what `startGame` did unconditionally until `botCount` became a room setting
+ * defaulting to zero (docs/adr/0006) — seeding it keeps the tables below the size their
+ * tests were written against without an `updateSettings` call in front of every one of
+ * them. Suites about the seating rule itself, or about that event, pass their own.
  */
-async function startServer(seed?: number): Promise<Harness> {
+async function startServer(
+  seed?: number,
+  botCount = MAX_PLAYERS - 1,
+): Promise<Harness> {
   const httpServer = createServer();
   const rooms =
     seed === undefined
-      ? new RoomManager()
+      ? new RoomManager({ defaultSettings: { botCount } })
       : new RoomManager({
           rng: mulberry32(seed),
           newRoomRng: () => mulberry32(seed + 1),
+          defaultSettings: { botCount },
         });
   const io = createSocketServer(httpServer, rooms);
 
@@ -212,6 +222,20 @@ describe("createRoom", () => {
     assert.equal(result.value.roomCode.length, 4);
     assert.ok(result.value.playerId.length > 0, "a player id was issued");
   });
+
+  it("publishes the room's settings with the lobby, before any round is dealt", async () => {
+    const client = await server.connect();
+    const lobby = nextEvent<PlayerGameView>(client, "gameStateUpdate");
+
+    expectOk(await ask(client, "createRoom", "Ada"));
+
+    assert.deepEqual((await lobby).settings, {
+      handSize: HAND_SIZE,
+      yanivThreshold: YANIV_THRESHOLD,
+      maxScore: MAX_SCORE,
+      botCount: MAX_PLAYERS - 1,
+    });
+  });
 });
 
 describe("joinRoom", () => {
@@ -326,6 +350,121 @@ describe("playerJoined", () => {
   });
 });
 
+describe("updateSettings", () => {
+  /** Every field away from its default, so a partial replace would be visible. */
+  const CHOSEN: RoomSettings = {
+    handSize: 7,
+    yanivThreshold: 3,
+    maxScore: 200,
+    botCount: 4,
+  };
+
+  /** A host and a guest sharing a fresh lobby, each watching their own broadcasts. */
+  async function lobbyOfTwo(): Promise<{
+    roomCode: string;
+    host: ClientSocket;
+    hostViews: Watcher;
+    guest: ClientSocket;
+    guestViews: Watcher;
+  }> {
+    const host = await server.connect();
+    const hostViews = watch(host);
+    const { roomCode } = expectOk(
+      await ask<{ roomCode: string; playerId: string }>(host, "createRoom", "Ada"),
+    );
+    const guest = await server.connect();
+    const guestViews = watch(guest);
+    expectOk(await ask(guest, "joinRoom", roomCode, "Grace"));
+
+    return { roomCode, host, hostViews, guest, guestViews };
+  }
+
+  it("publishes the host's new settings to everyone in the room", async () => {
+    const { host, hostViews, guestViews } = await lobbyOfTwo();
+
+    hostViews.reset();
+    guestViews.reset();
+    expectOk(await ask(host, "updateSettings", CHOSEN));
+
+    for (const [who, views] of [
+      ["the host", hostViews],
+      ["the guest", guestViews],
+    ] as const) {
+      const updated = await views.until(
+        (v) => v.settings.handSize === CHOSEN.handSize,
+        `${who}'s view of the new settings`,
+      );
+      assert.deepEqual(updated.settings, CHOSEN, `${who} sees all four fields`);
+      assert.equal(updated.phase, "lobby", `${who} is still in the lobby`);
+    }
+  });
+
+  it("rejects an edit by anyone but the host, and publishes nothing", async () => {
+    const { roomCode, guest, hostViews } = await lobbyOfTwo();
+
+    hostViews.reset();
+    assert.equal(
+      expectError(await ask(guest, "updateSettings", CHOSEN)).code,
+      "NOT_HOST",
+    );
+
+    // A later arrival's roster is a broadcast the room certainly does make, so it is the
+    // barrier: anything the refused edit had published would have landed ahead of it.
+    const latecomer = await server.connect();
+    expectOk(await ask(latecomer, "joinRoom", roomCode, "Alan"));
+    const roster = await hostViews.until(
+      (v) => v.opponents.length === 2,
+      "the third seat filling",
+    );
+    assert.equal(roster.settings.handSize, HAND_SIZE, "the room's settings are untouched");
+    assert.equal(hostViews.seen.length, 1, "and nothing was published before it");
+  });
+
+  it("rejects an edit once the match has been dealt", async () => {
+    const host = await server.connect();
+    expectOk(await ask(host, "createRoom", "Ada"));
+    expectOk(await ask(host, "startGame"));
+
+    assert.equal(
+      expectError(await ask(host, "updateSettings", CHOSEN)).code,
+      "WRONG_PHASE",
+    );
+  });
+
+  /**
+   * The typed client cannot construct this — which is the point. The room is a real
+   * client's word for what it should play like, and one field it could not have sent is
+   * enough to refuse the whole object.
+   */
+  it("rejects settings no room could be played on, applying none of them", async () => {
+    const host = await server.connect();
+    const views = watch(host);
+    expectOk(await ask(host, "createRoom", "Ada"));
+
+    assert.equal(
+      expectError(await ask(host, "updateSettings", { ...CHOSEN, maxScore: 0 })).code,
+      "INVALID_SETTINGS",
+    );
+
+    // The hand that is dealt is the proof: the valid `handSize` travelling alongside the
+    // bad `maxScore` reached the room nowhere.
+    views.reset();
+    expectOk(await ask(host, "startGame"));
+    const dealt = await views.until((v) => v.phase === "playing", "the deal");
+    assert.equal(dealt.you.hand.length, HAND_SIZE);
+    assert.equal(dealt.settings.maxScore, MAX_SCORE);
+  });
+
+  it("rejects an edit from a connection that is not in a room", async () => {
+    const stranger = await server.connect();
+
+    assert.equal(
+      expectError(await ask(stranger, "updateSettings", CHOSEN)).code,
+      "PLAYER_NOT_FOUND",
+    );
+  });
+});
+
 describe("startGame", () => {
   it("deals the host a hand and fills the table with bot opponents", async () => {
     const host = await server.connect();
@@ -345,6 +484,40 @@ describe("startGame", () => {
       "the empty seats were filled with bots",
     );
     assert.equal(roomCode, view.roomCode);
+  });
+
+  it("seats only as many bots as botCount asks for", async () => {
+    const small = await startServer(undefined, 2);
+    try {
+      const host = await small.connect();
+      expectOk(
+        await ask<{ roomCode: string; playerId: string }>(host, "createRoom", "Ada"),
+      );
+
+      const dealt = nextEvent<PlayerGameView>(host, "gameStateUpdate");
+      expectOk(await ask(host, "startGame"));
+      const view = await dealt;
+
+      assert.equal(view.opponents.length, 2, "botCount seats, not a full table");
+      assert.equal(view.settings.botCount, 2, "and the setting is on the wire");
+    } finally {
+      await small.close();
+    }
+  });
+
+  it("turns a lone host away once no bots are asked for", async () => {
+    const empty = await startServer(undefined, 0);
+    try {
+      const host = await empty.connect();
+      expectOk(
+        await ask<{ roomCode: string; playerId: string }>(host, "createRoom", "Ada"),
+      );
+
+      // The check this closes was vacuous while `startGame` always filled to six.
+      assert.equal(expectError(await ask(host, "startGame")).code, "NOT_ENOUGH_PLAYERS");
+    } finally {
+      await empty.close();
+    }
   });
 
   /**
@@ -645,6 +818,14 @@ describe("playing a match", () => {
       result.players.some((p) => p.playerId === result.callerId),
       "the caller is among the revealed hands",
     );
+    // `settings` is carried in every phase, `roundEnd` and `gameEnd` included — the
+    // client reads `yanivThreshold` off it to decide what to offer. docs/adr/0006.
+    assert.deepEqual(view.settings, {
+      handSize: HAND_SIZE,
+      yanivThreshold: YANIV_THRESHOLD,
+      maxScore: MAX_SCORE,
+      botCount: MAX_PLAYERS - 1,
+    });
   }
 
   /**

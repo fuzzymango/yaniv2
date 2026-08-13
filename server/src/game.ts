@@ -1,14 +1,12 @@
 import type { Card, TurnAction } from "@yaniv/shared";
 import {
   ASSAF_PENALTY,
-  HAND_SIZE,
-  MAX_SCORE,
   MIN_PLAYERS,
-  YANIV_THRESHOLD,
   canCallYaniv,
   canonicalizeSet,
   handValue,
   isValidSet,
+  isValidSettings,
   opensSlapdown,
   pickupCandidates,
 } from "@yaniv/shared";
@@ -39,7 +37,11 @@ function dealRound(
   rng: Rng,
 ): GameStateActive {
   const turnOrder = state.players.map((p) => p.id);
-  const dealt = deal(shuffle(createDeck(), rng), turnOrder.length, HAND_SIZE);
+  const dealt = deal(
+    shuffle(createDeck(), rng),
+    turnOrder.length,
+    state.settings.handSize,
+  );
 
   const hands: Record<string, Card[]> = {};
   turnOrder.forEach((playerId, index) => {
@@ -91,6 +93,10 @@ export function startGame(
   if (requesterId !== state.hostId) {
     return err("NOT_HOST", "Only the host can start the game");
   }
+  // Meaningful again now `botCount` defaults to zero (docs/adr/0006): this used to run
+  // against a table `seatBots` had already filled to six, so it could never fire. A
+  // lone host who has asked for no bots is now correctly turned away, while one who has
+  // asked for some is counted with them and plays.
   if (state.players.length < MIN_PLAYERS) {
     return err(
       "NOT_ENOUGH_PLAYERS",
@@ -98,6 +104,45 @@ export function startGame(
     );
   }
   return ok(dealRound(state, randomOpener(state, rng), rng));
+}
+
+/**
+ * Replace the room's settings, all four fields at once. docs/adr/0006.
+ *
+ * Only from the lobby, and only by the host: `startGame` deals against these values and
+ * every client's own legality check reads them, so a change once a round exists would be
+ * a rule changed out from under a match already being played. There is no way back to the
+ * lobby afterwards — `playAgain` deals directly from `gameEnd` — which is what makes the
+ * first deal a lock for the life of the room rather than for one match.
+ *
+ * `settings` is `unknown` on purpose. It arrives off the wire, where the type is a claim
+ * by whoever sent it rather than a fact, and `isValidSettings` is the only thing that
+ * turns it into a `RoomSettings` — so an out-of-range field cannot reach the room by
+ * being asserted into the right shape. All four land or none do: this rejects before it
+ * builds a state, so there is no partial update to undo.
+ *
+ * The four fields are copied out rather than the object stored as it arrived. A payload
+ * can be a valid `RoomSettings` and still carry more, and `settings` is published whole
+ * to every player (`serializeStateForPlayer`) — so anything riding along would be kept by
+ * the room and handed back out to the table.
+ */
+export function updateSettings(
+  state: GameState,
+  requesterId: string,
+  settings: unknown,
+): ActionResult {
+  if (state.phase !== "lobby") {
+    return err("WRONG_PHASE", "Settings are locked once the match has started");
+  }
+  if (requesterId !== state.hostId) {
+    return err("NOT_HOST", "Only the host can change the room's settings");
+  }
+  if (!isValidSettings(settings)) {
+    return err("INVALID_SETTINGS", "Those settings are not ones a room can be played on");
+  }
+
+  const { handSize, yanivThreshold, maxScore, botCount } = settings;
+  return ok({ ...state, settings: { handSize, yanivThreshold, maxScore, botCount } });
 }
 
 /**
@@ -376,10 +421,10 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
 
   const callerHand = round.hands[playerId] ?? [];
   const callerValue = handValue(callerHand);
-  if (!canCallYaniv(callerHand)) {
+  if (!canCallYaniv(callerHand, state.settings.yanivThreshold)) {
     return err(
       "YANIV_THRESHOLD_NOT_MET",
-      `Hand must be worth ${YANIV_THRESHOLD} or less to call Yaniv (yours is ${callerValue})`,
+      `Hand must be worth ${state.settings.yanivThreshold} or less to call Yaniv (yours is ${callerValue})`,
     );
   }
 
@@ -439,7 +484,7 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
     score: scores.get(p.id)!,
   }));
 
-  const busted = newPlayers.some((p) => p.score > MAX_SCORE);
+  const busted = newPlayers.some((p) => p.score > state.settings.maxScore);
   const lowest = Math.min(...newPlayers.map((p) => p.score));
 
   return ok({

@@ -20,6 +20,7 @@
 import type { GameError, PlayerGameView } from "@yaniv/shared";
 import { handValue } from "@yaniv/shared";
 import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
+import { SettingsDialog } from "./SettingsDialog.tsx";
 import { bySeat } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
@@ -64,7 +65,7 @@ export function Table({
    * `NOT_YOUR_TURN`, the same way a draw target is: this screen enforces the rules of the
    * cards and none of the rules about whose go it is.
    */
-  const canCall = !busy && isLegalCall(view.you.hand);
+  const canCall = !busy && isLegalCall(view.you.hand, view.settings.yanivThreshold);
 
   /**
    * Whether the pile is a slapdown target rather than a row of draw targets
@@ -83,6 +84,13 @@ export function Table({
 
   return (
     <main className="screen table">
+      {/*
+        The room's locked settings, one tap away and nowhere on the table itself: what a
+        Yaniv may be called on is worth being able to check, and worth nothing at all in
+        front of a player who is looking at their hand.
+      */}
+      <SettingsDialog settings={view.settings} />
+
       <ul className="players">
         {opponents.map((opponent) => (
           <li

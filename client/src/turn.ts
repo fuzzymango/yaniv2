@@ -95,8 +95,8 @@ export function isLegalSelection(
  * accepts cannot come apart. It is the hand and nothing else: whose turn it is belongs to
  * the server, exactly as it does for a discard.
  */
-export function isLegalCall(hand: readonly Card[]): boolean {
-  return canCallYaniv(hand);
+export function isLegalCall(hand: readonly Card[], yanivThreshold: number): boolean {
+  return canCallYaniv(hand, yanivThreshold);
 }
 
 /**
