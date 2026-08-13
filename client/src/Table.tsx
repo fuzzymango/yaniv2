@@ -24,6 +24,11 @@ import { SettingsDialog } from "./SettingsDialog.tsx";
 import { bySeat } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
+// [PROTOTYPE — issue #56] throwaway seating-layout variants; delete with the switcher.
+import { SeatsA, SeatsB, SeatsC } from "./prototype/OpponentSeats.tsx";
+import { PrototypeSwitcher } from "./prototype/PrototypeSwitcher.tsx";
+import { useVariant } from "./prototype/useVariant.ts";
+import type { SeatEntry } from "./prototype/seatEntry.ts";
 
 interface TableProps {
   view: PlayerGameView;
@@ -82,6 +87,17 @@ export function Table({
     (p) => p.id === view.currentTurnPlayerId,
   );
 
+  // [PROTOTYPE — issue #56]
+  const variant = useVariant();
+  const seatEntries: SeatEntry[] = opponents.map((opponent) => ({
+    id: opponent.id,
+    name: opponent.name,
+    score: opponent.score,
+    isTurn: opponent.id === view.currentTurnPlayerId,
+    cardCount: opponent.handSize,
+  }));
+  const SeatsComponent = variant === "a" ? SeatsA : variant === "b" ? SeatsB : variant === "c" ? SeatsC : null;
+
   return (
     <main className="screen table">
       {/*
@@ -91,90 +107,47 @@ export function Table({
       */}
       <SettingsDialog settings={view.settings} />
 
-      <ul className="players">
-        {opponents.map((opponent) => (
-          <li
-            className={`player ${opponent.id === view.currentTurnPlayerId ? "player--turn" : ""}`}
-            key={opponent.id}
-          >
-            <span className="player__name">{opponent.name}</span>
-            <span className="player__cards">{opponent.handSize} cards</span>
-            <span className="player__score">{opponent.score} pts</span>
-          </li>
-        ))}
-      </ul>
+      {/* [PROTOTYPE — issue #56] control variant keeps today's text list */}
+      {!SeatsComponent && (
+        <ul className="players">
+          {opponents.map((opponent) => (
+            <li
+              className={`player ${opponent.id === view.currentTurnPlayerId ? "player--turn" : ""}`}
+              key={opponent.id}
+            >
+              <span className="player__name">{opponent.name}</span>
+              <span className="player__cards">{opponent.handSize} cards</span>
+              <span className="player__score">{opponent.score} pts</span>
+            </li>
+          ))}
+        </ul>
+      )}
 
-      <section className="felt">
-        {/*
-          The deck. Its count is the honest one the server sends — a count and nothing
-          more, because the draw pile's contents never leave the server.
-        */}
-        <button
-          className="pick pick--deck"
-          type="button"
-          aria-label={`Draw from the deck, ${view.drawPileCount} cards left`}
-          disabled={!canDraw}
-          onClick={() => onCommitTurn({ kind: "deck" })}
-        >
-          <span className="card card--back" />
-          <span className="pick__count">{view.drawPileCount}</span>
-        </button>
-
-        {slapdownTarget ? (
-          /*
-            The whole pile as one target, flashing, for as long as the window lasts. It
-            is one control rather than a card each because there is only one card it
-            could be about — a player draws one card a turn, so the server already knows
-            which — and because a pile that offered both meanings at once would make a
-            tap a guess.
-
-            Locked on `busy` the moment it is tapped rather than on the ack, so a thumb
-            that lands twice sends once. Correctness does not rest on that: a second slap
-            is refused by the server for free.
-          */
-          <button
-            className="slapdown"
-            type="button"
-            aria-label="Slap down the card you just drew"
-            disabled={busy}
-            onClick={onSlapDown}
-          >
-            {view.lastDiscard.map((card) => (
-              <PlayingCard card={card} key={card.id} />
-            ))}
-          </button>
-        ) : (
-          /*
-            The last discard, laid out as it lies. Which of it may be taken comes from the
-            rulebook, not from counting to the ends here — so whatever is not on offer is
-            rendered without a control at all and dimmed, rather than as buttons that
-            quietly do nothing.
-          */
-          <ul className="discard">
-            {view.lastDiscard.map((card) =>
-              takeable.has(card.id) ? (
-                <li key={card.id}>
-                  <button
-                    className="pick"
-                    type="button"
-                    aria-label={`Take the ${cardLabel(card)}`}
-                    disabled={!canDraw}
-                    onClick={() => onCommitTurn({ kind: "discard", cardId: card.id })}
-                  >
-                    <PlayingCard card={card} />
-                  </button>
-                </li>
-              ) : (
-                // Deliberately not a `.pick`: there is no control here at all, so there is
-                // nothing to give it a pointer cursor or a focus stop either.
-                <li className="discard__out" key={card.id}>
-                  <PlayingCard card={card} />
-                </li>
-              ),
-            )}
-          </ul>
-        )}
-      </section>
+      {SeatsComponent ? (
+        <SeatsComponent opponents={seatEntries}>
+          <FeltContent
+            view={view}
+            canDraw={canDraw}
+            slapdownTarget={slapdownTarget}
+            takeable={takeable}
+            onCommitTurn={onCommitTurn}
+            onSlapDown={onSlapDown}
+            busy={busy}
+          />
+        </SeatsComponent>
+      ) : (
+        <section className="felt">
+          <FeltContent
+            view={view}
+            canDraw={canDraw}
+            slapdownTarget={slapdownTarget}
+            takeable={takeable}
+            onCommitTurn={onCommitTurn}
+            onSlapDown={onSlapDown}
+            busy={busy}
+          />
+        </section>
+      )}
 
       {/*
         A window says what it is in words as well as in the flashing, because it is the
@@ -252,6 +225,79 @@ export function Table({
           {error.message}
         </p>
       )}
+
+      {/* [PROTOTYPE — issue #56] */}
+      <PrototypeSwitcher />
     </main>
+  );
+}
+
+/** [PROTOTYPE — issue #56] The deck + discard, factored out so seat variants can wrap it. */
+function FeltContent({
+  view,
+  canDraw,
+  slapdownTarget,
+  takeable,
+  onCommitTurn,
+  onSlapDown,
+  busy,
+}: {
+  view: PlayerGameView;
+  canDraw: boolean;
+  slapdownTarget: boolean;
+  takeable: ReadonlySet<string>;
+  onCommitTurn: (source: DrawSource) => void;
+  onSlapDown: () => void;
+  busy: boolean;
+}) {
+  return (
+    <>
+      <button
+        className="pick pick--deck"
+        type="button"
+        aria-label={`Draw from the deck, ${view.drawPileCount} cards left`}
+        disabled={!canDraw}
+        onClick={() => onCommitTurn({ kind: "deck" })}
+      >
+        <span className="card card--back" />
+        <span className="pick__count">{view.drawPileCount}</span>
+      </button>
+
+      {slapdownTarget ? (
+        <button
+          className="slapdown"
+          type="button"
+          aria-label="Slap down the card you just drew"
+          disabled={busy}
+          onClick={onSlapDown}
+        >
+          {view.lastDiscard.map((card) => (
+            <PlayingCard card={card} key={card.id} />
+          ))}
+        </button>
+      ) : (
+        <ul className="discard">
+          {view.lastDiscard.map((card) =>
+            takeable.has(card.id) ? (
+              <li key={card.id}>
+                <button
+                  className="pick"
+                  type="button"
+                  aria-label={`Take the ${cardLabel(card)}`}
+                  disabled={!canDraw}
+                  onClick={() => onCommitTurn({ kind: "discard", cardId: card.id })}
+                >
+                  <PlayingCard card={card} />
+                </button>
+              </li>
+            ) : (
+              <li className="discard__out" key={card.id}>
+                <PlayingCard card={card} />
+              </li>
+            ),
+          )}
+        </ul>
+      )}
+    </>
   );
 }

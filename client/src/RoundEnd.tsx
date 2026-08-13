@@ -18,6 +18,11 @@
 import type { GameError, PlayerGameView, RoundResultView } from "@yaniv/shared";
 import { PlayingCard } from "./PlayingCard.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
+// [PROTOTYPE — issue #56] throwaway seating-layout variants; delete with the switcher.
+import { SeatsA, SeatsB, SeatsC } from "./prototype/OpponentSeats.tsx";
+import { PrototypeSwitcher } from "./prototype/PrototypeSwitcher.tsx";
+import { useVariant } from "./prototype/useVariant.ts";
+import type { SeatEntry } from "./prototype/seatEntry.ts";
 
 interface RoundEndProps {
   view: PlayerGameView;
@@ -42,6 +47,29 @@ export function RoundEnd({ view, result, error, busy, onNextRound }: RoundEndPro
    */
   const subject = (id: string) => (id === view.you.id ? "You" : named(id));
   const object = (id: string) => (id === view.you.id ? "you" : named(id));
+
+  // [PROTOTYPE — issue #56]
+  const variant = useVariant();
+  const SeatsComponent = variant === "a" ? SeatsA : variant === "b" ? SeatsB : variant === "c" ? SeatsC : null;
+  const you = result.players.find((p) => p.playerId === view.you.id);
+  const seatEntries: SeatEntry[] = result.players
+    .filter((p) => p.playerId !== view.you.id)
+    .map((p) => {
+      const marks: string[] = [];
+      if (p.playerId === result.callerId) marks.push("yaniv");
+      if (p.playerId === result.assaferId) marks.push("assaf");
+      return {
+        id: p.playerId,
+        name: p.name,
+        score: p.scoreAfter,
+        isTurn: false,
+        cardCount: p.hand.length,
+        cards: p.hand,
+        marks,
+        delta: p.delta,
+        handValue: p.handValue,
+      };
+    });
 
   return (
     <main className="screen round">
@@ -72,47 +100,77 @@ export function RoundEnd({ view, result, error, busy, onNextRound }: RoundEndPro
         come from the round's own record, which may name a player who has since given up
         their seat and so is in no `turnOrder` to be sorted against.
       */}
-      <ul className="results">
-        {result.players.map((player) => (
-          <li className="result" key={player.playerId}>
-            <div className="result__line">
-              <span className="player__name">{player.name}</span>
-              {player.playerId === view.you.id && <span className="seat__mark">you</span>}
-              {/*
-                The sentence above says who did what; these say it again where the numbers
-                are, so a row that gained 30 or nothing can be read without going back up.
-              */}
-              {player.playerId === result.callerId && (
-                <span className="seat__mark">yaniv</span>
-              )}
-              {player.playerId === result.assaferId && (
-                <span className="seat__mark">assaf</span>
-              )}
-              {/*
-                The points this round next to what they made of the score, because a
-                number on its own says nothing: +30 is a disaster and +3 is nothing much,
-                and only the total says how close anybody is to going out (docs/rules.md §7).
-              */}
-              <span className="result__delta">
-                {player.delta > 0 ? `+${player.delta}` : player.delta}
-              </span>
-              <span className="player__score">{player.scoreAfter} pts</span>
-            </div>
+      {/* [PROTOTYPE — issue #56] control variant keeps today's flat results list */}
+      {!SeatsComponent && (
+        <ul className="results">
+          {result.players.map((player) => (
+            <li className="result" key={player.playerId}>
+              <div className="result__line">
+                <span className="player__name">{player.name}</span>
+                {player.playerId === view.you.id && <span className="seat__mark">you</span>}
+                {/*
+                  The sentence above says who did what; these say it again where the numbers
+                  are, so a row that gained 30 or nothing can be read without going back up.
+                */}
+                {player.playerId === result.callerId && (
+                  <span className="seat__mark">yaniv</span>
+                )}
+                {player.playerId === result.assaferId && (
+                  <span className="seat__mark">assaf</span>
+                )}
+                {/*
+                  The points this round next to what they made of the score, because a
+                  number on its own says nothing: +30 is a disaster and +3 is nothing much,
+                  and only the total says how close anybody is to going out (docs/rules.md §7).
+                */}
+                <span className="result__delta">
+                  {player.delta > 0 ? `+${player.delta}` : player.delta}
+                </span>
+                <span className="player__score">{player.scoreAfter} pts</span>
+              </div>
 
-            <div className="result__hand">
-              <ul className="result__cards">
-                {player.hand.map((card) => (
-                  <li key={card.id}>
-                    <PlayingCard card={card} />
-                  </li>
-                ))}
-              </ul>
-              {/* What the hand was worth — the number the whole call turned on. */}
-              <span className="result__value">{player.handValue} in hand</span>
-            </div>
-          </li>
-        ))}
-      </ul>
+              <div className="result__hand">
+                <ul className="result__cards">
+                  {player.hand.map((card) => (
+                    <li key={card.id}>
+                      <PlayingCard card={card} />
+                    </li>
+                  ))}
+                </ul>
+                {/* What the hand was worth — the number the whole call turned on. */}
+                <span className="result__value">{player.handValue} in hand</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {SeatsComponent && (
+        <SeatsComponent opponents={seatEntries}>
+          <div className="round__center-spacer" />
+        </SeatsComponent>
+      )}
+
+      {/* [PROTOTYPE — issue #56] the local player's own revealed hand, unfanned, at the bottom */}
+      {SeatsComponent && you && (
+        <footer className="you">
+          <span className="player__name">
+            {you.name} <span className="seat__mark">you</span>
+            {you.playerId === result.callerId && <span className="seat__mark">yaniv</span>}
+            {you.playerId === result.assaferId && <span className="seat__mark">assaf</span>}
+          </span>
+          <ul className="hand">
+            {you.hand.map((card) => (
+              <li key={card.id}>
+                <PlayingCard card={card} />
+              </li>
+            ))}
+          </ul>
+          <span className="you__value">{you.handValue} in hand</span>
+          <span className="result__delta">{you.delta > 0 ? `+${you.delta}` : you.delta}</span>
+          <span className="player__score">{you.scoreAfter} pts</span>
+        </footer>
+      )}
 
       <div className="round__actions">
         {isHost ? (
@@ -136,6 +194,9 @@ export function RoundEnd({ view, result, error, busy, onNextRound }: RoundEndPro
           {error.message}
         </p>
       )}
+
+      {/* [PROTOTYPE — issue #56] */}
+      <PrototypeSwitcher />
     </main>
   );
 }

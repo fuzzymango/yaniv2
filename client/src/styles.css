@@ -1078,3 +1078,180 @@ body {
   font-size: 1.5rem;
   font-weight: 700;
 }
+
+/* ============================================================
+ * [PROTOTYPE — issue #56] Seated-table layout variants.
+ * Throwaway: this whole block goes with client/src/prototype/ once
+ * a variant is picked and folded into the real Table/RoundEnd CSS.
+ * ============================================================ */
+
+.proto-table {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 15rem;
+  overflow: hidden;
+}
+
+.proto-zone {
+  position: absolute;
+  display: flex;
+  gap: 0.6rem;
+}
+
+.proto-zone--left {
+  left: -0.5rem;
+  top: 50%;
+  flex-direction: column;
+  transform: translateY(-50%);
+}
+
+.proto-zone--top {
+  top: 0.5rem;
+  left: 50%;
+  flex-direction: row;
+  transform: translateX(-50%);
+}
+
+.proto-zone--right {
+  right: -0.5rem;
+  top: 50%;
+  flex-direction: column;
+  transform: translateY(-50%);
+}
+
+.proto-seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Whose turn it is, moved from the text row onto the seat as a whole. */
+.proto-label--turn {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.proto-fan {
+  position: relative;
+  height: 4.5rem;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.proto-fan--arc {
+  --card-w: calc(min(3.5rem, 15vw) * var(--proto-scale, 0.6));
+}
+
+.proto-fan--arc .proto-fan__card {
+  position: absolute;
+  bottom: 0;
+  transform-origin: 50% 100%;
+}
+
+.proto-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  max-width: 8rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.proto-label__name {
+  font-weight: 600;
+}
+
+.proto-label__score,
+.proto-label__count,
+.proto-label__value {
+  color: var(--ink-dim);
+}
+
+.proto-label__delta {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+/* --- Variant A: felt oval, tight arced fans --- */
+
+.proto-table--a {
+  border-radius: 50% / 35%;
+  background: radial-gradient(ellipse at center, rgb(30 64 175 / 8%), transparent 70%);
+}
+
+/* --- Variant B: minimal corners, straight riffled stack --- */
+
+.proto-zone--b .proto-seat--b {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.proto-zone--left .proto-seat--b,
+.proto-zone--right .proto-seat--b {
+  flex-direction: column;
+}
+
+.proto-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  background: var(--ink-dim);
+  color: #fdfdfb;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.proto-fan--riffle {
+  height: 3.5rem;
+  --card-w: min(2.5rem, 11vw);
+}
+
+.proto-fan--riffle .proto-fan__card {
+  position: relative;
+}
+
+/* --- Variant C: compact stacked, dense doubled seats --- */
+
+.proto-seat--c {
+  transform: scale(0.88);
+}
+
+.proto-seat--stacked {
+  margin-top: -0.6rem;
+}
+
+.proto-label--dense {
+  padding: 0.1rem 0.3rem;
+  font-size: 0.62rem;
+}
+
+/* [PROTOTYPE — issue #56] the revealed local-player footer carries more fields than the live one. */
+.round .you {
+  flex-wrap: wrap;
+  height: auto;
+  padding: 0.5rem 0.625rem;
+}
+
+.round__center-spacer {
+  width: 1px;
+  height: 1px;
+}
+
+@media (min-width: 48rem) {
+  .proto-table {
+    min-height: 20rem;
+  }
+}
