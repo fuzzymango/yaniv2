@@ -55,6 +55,7 @@ export function App({ session }: { session: Session }) {
         error={error}
         busy={busy}
         onStart={session.startGame}
+        onUpdateSettings={session.updateSettings}
         onExit={session.exitToMenu}
       />
     );

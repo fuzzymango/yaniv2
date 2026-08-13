@@ -48,6 +48,7 @@ export {
   HAND_SIZES,
   MAX_SCORE_LIMITS,
   YANIV_THRESHOLDS,
+  botSeatLimit,
   effectiveBotCount,
   isValidSettings,
 } from "./settings.ts";

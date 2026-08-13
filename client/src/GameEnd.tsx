@@ -16,6 +16,7 @@
 
 import type { GameError, PlayerGameView } from "@yaniv/shared";
 import { standings } from "@yaniv/shared";
+import { SettingsDialog } from "./SettingsDialog.tsx";
 
 interface GameEndProps {
   view: PlayerGameView;
@@ -65,6 +66,12 @@ export function GameEnd({ view, error, busy, onPlayAgain, onExit }: GameEndProps
 
   return (
     <main className="screen final">
+      {/*
+        Still the settings of the match just played, and still worth a look — a run of
+        rounds that ended sooner than anybody expected is answered by the score it ended at.
+      */}
+      <SettingsDialog settings={view.settings} />
+
       <header className="final__header">
         <p className="code__label">Final standings</p>
         <h1 className="final__headline">{headline}</h1>

@@ -225,28 +225,39 @@ body {
 /* --- the lobby --- */
 
 /*
- * The seats take whatever height is left between the code and the controls, so the
- * controls sit at the bottom of the phone where a thumb is rather than floating under a
- * short list. Pinned to exactly the viewport rather than the `min-height` every other
- * screen gets: a table that fills up to six has to push the *list* to scroll, and a
- * container that can grow would push the page instead — taking the controls off the
- * bottom of the screen with it.
+ * The seats and the settings take whatever height is left between the code and the
+ * controls, so the controls sit at the bottom of the phone where a thumb is rather than
+ * floating under a short list. Pinned to exactly the viewport rather than the `min-height`
+ * every other screen gets: a table that fills up to six has to push the *middle* to
+ * scroll, and a container that can grow would push the page instead — taking the controls
+ * off the bottom of the screen with it.
  */
 .lobby {
   justify-content: flex-start;
   height: 100dvh;
 }
 
-.seats {
+/*
+ * The roster and the room's settings, scrolling together. One scroller rather than two, so
+ * a full table does not leave the settings a sliver and a tall settings block does not
+ * leave the seats one.
+ */
+.lobby__body {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 1rem;
   /*
    * Without this a flex item refuses to shrink below its content (`min-height: auto`),
    * and `overflow-y` on it would never have anything to do.
    */
   min-height: 0;
+  overflow-y: auto;
+}
+
+.seats {
   margin: 0;
   padding: 0;
-  overflow-y: auto;
   list-style: none;
   display: flex;
   flex-direction: column;
@@ -305,16 +316,223 @@ body {
 
 /*
  * A desktop has room to spare, so the table is centred in it rather than stretched down
- * it — the seats stop claiming the leftover height and the column sits in the middle.
+ * it — the middle stops claiming the leftover height and the column sits in the middle.
  */
 @media (min-width: 48rem) {
   .lobby {
     justify-content: center;
   }
 
-  .seats {
+  .lobby__body {
     flex: 0 1 auto;
   }
+}
+
+/* --- the room's settings --- */
+
+/*
+ * The host's four choices in the lobby, and the same four as text for everybody else —
+ * one block either way, so a guest is looking at the same thing in the same place as the
+ * host who is changing it.
+ */
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+
+/* The same treatment as the room code's label: a quiet heading over what it names. */
+.settings__title {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+}
+
+/*
+ * One setting: its name, and the control under it rather than beside it. Stacked because
+ * six chips and a label do not fit across a 320px phone side by side, and a control that
+ * shrank to fit would take the tap targets with it.
+ */
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.setting__label {
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+}
+
+/* A row of options, wrapping rather than shrinking when a narrow screen runs out. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+/*
+ * One option. Sized to a thumb in both directions — the height is the tap target every
+ * other control uses, and the width is only slightly under it so that all six bot counts
+ * still sit on one line of the narrowest phone.
+ */
+.chip {
+  flex: 1 0 auto;
+  min-width: 2.5rem;
+  min-height: var(--tap);
+  padding: 0 0.5rem;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: 0.5rem;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/*
+ * The one that is on. The same yellow the rest of the client uses for "chosen", which is
+ * what this is — a choice the host has made and the room is playing by.
+ */
+.chip--on {
+  border-color: transparent;
+  background: var(--accent);
+  color: #1c1917;
+}
+
+/* Typed rather than chosen, so it is a field like the name and the code are. */
+.field__input--score {
+  max-width: 8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The lobby's hint sits in a line of its own here, not in place of a missing control. */
+.hint--inline {
+  justify-content: flex-start;
+  min-height: 0;
+  font-size: 0.85rem;
+}
+
+/*
+ * The four values with nothing to tap: read-only in the lobby for everyone but the host,
+ * and read-only for everyone once the match has locked them.
+ */
+.values {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin: 0;
+}
+
+.value {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.value__label {
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+}
+
+/* `dd` carries an indent by default, which a two-column row has no use for. */
+.value__number {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Where the settings live once they are locked: a single icon in the corner of every
+ * in-match screen, and nothing else about them anywhere on it.
+ */
+.topbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.topbar__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: none;
+  /* Dim, because it is not part of the game — it is there to be found, not noticed. */
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.topbar__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.topbar__icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/*
+ * The panel behind the icon, over whatever screen opened it. Fixed to the viewport rather
+ * than placed in the column, so it is the same panel in the same place on a table, a
+ * scored round and a finished match.
+ */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgb(0 0 0 / 60%);
+}
+
+.modal__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 22rem;
+  padding: 1.25rem;
+  border-radius: 0.75rem;
+  /* Opaque, unlike the translucent surfaces on the screens: there is a table behind it. */
+  background: var(--felt-dark);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
+}
+
+.modal__title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.modal__hint {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
 }
 
 /* --- cards, drawn rather than loaded --- */

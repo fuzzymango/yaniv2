@@ -33,12 +33,6 @@ export interface RoomSettings {
   botCount: number;
 }
 
-/** How many bot seats `botCount` actually fills right now, given how many humans are
- * seated. Never negative, never past the room's remaining seats. */
-export function effectiveBotCount(settings: RoomSettings, humanCount: number): number {
-  return Math.max(0, Math.min(settings.botCount, MAX_PLAYERS - humanCount));
-}
-
 /** What a lobby's max-score control accepts, and the validator with it. */
 export const MAX_SCORE_LIMITS = { min: 1, max: 100_000 } as const;
 
@@ -49,6 +43,25 @@ export const MAX_SCORE_LIMITS = { min: 1, max: 100_000 } as const;
  * where it is used (`effectiveBotCount`) rather than refused here. docs/adr/0006.
  */
 export const BOT_COUNT_LIMITS = { min: 0, max: MAX_PLAYERS - 1 } as const;
+
+/**
+ * How many bot seats there are left to fill, given how many humans are seated — the most a
+ * room could seat right now, whatever its settings ask for. Never negative, and never more
+ * than a settings object is allowed to name.
+ *
+ * Here rather than in a lobby because it is the seating rule and not a display choice:
+ * `effectiveBotCount` is this same number read against what the host asked for, and a
+ * control offering the host their options is offering exactly these seats.
+ */
+export function botSeatLimit(humanCount: number): number {
+  return Math.max(0, Math.min(BOT_COUNT_LIMITS.max, MAX_PLAYERS - humanCount));
+}
+
+/** How many bot seats `botCount` actually fills right now, given how many humans are
+ * seated. A host who asked for more than there is room for gets what there is room for. */
+export function effectiveBotCount(settings: RoomSettings, humanCount: number): number {
+  return Math.max(0, Math.min(settings.botCount, botSeatLimit(humanCount)));
+}
 
 function isIntegerWithin(
   value: unknown,
