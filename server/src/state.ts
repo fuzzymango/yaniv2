@@ -1,4 +1,4 @@
-import type { Card } from "@yaniv/shared";
+import type { Card, RoomSettings } from "@yaniv/shared";
 import type { Result } from "./result.ts";
 
 /**
@@ -95,6 +95,13 @@ export interface GameStateBase {
   roomCode: string;
   hostId: string;
   players: Player[];
+  /**
+   * Host-chosen, seeded with `shared`'s rule constants as defaults at `createRoom`
+   * (except `botCount`, which defaults to zero — see docs/adr/0006). Editable only from
+   * the lobby, by the host, via `updateSettings`; the first deal locks it for the life of
+   * the room.
+   */
+  settings: RoomSettings;
   roundNumber: number;
   /** Null until a round has finished. */
   lastRoundResult: RoundResult | null;

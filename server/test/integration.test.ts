@@ -85,7 +85,7 @@ function playMatch(seed: number): { final: GameState; turns: number } {
     const playerId = round.currentTurnPlayerId;
     const hand = round.hands[playerId]!;
 
-    if (canCallYaniv(hand)) {
+    if (canCallYaniv(hand, state.settings.yanivThreshold)) {
       unwrap(rooms.apply(roomCode, (s) => callYaniv(s, playerId)));
       continue;
     }
@@ -178,7 +178,7 @@ describe("full match simulation", () => {
       const round = state.round;
       const playerId = round.currentTurnPlayerId;
       const hand = round.hands[playerId]!;
-      if (canCallYaniv(hand)) break;
+      if (canCallYaniv(hand, state.settings.yanivThreshold)) break;
 
       const discard = chooseDiscard(hand);
       unwrap(

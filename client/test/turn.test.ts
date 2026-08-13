@@ -96,26 +96,26 @@ describe("isLegalCall", () => {
   it("offers the call on a hand worth exactly the threshold", () => {
     const hand = cards("hearts-4", "spades-3");
     assert.equal(handValue(hand), YANIV_THRESHOLD, "the boundary, not near it");
-    assert.equal(isLegalCall(hand), true);
+    assert.equal(isLegalCall(hand, YANIV_THRESHOLD), true);
   });
 
   it("offers the call on a hand under the threshold", () => {
-    assert.equal(isLegalCall(cards("joker-1", "clubs-A")), true);
+    assert.equal(isLegalCall(cards("joker-1", "clubs-A"), YANIV_THRESHOLD), true);
   });
 
   it("withholds it on a hand one point over", () => {
     const hand = cards("hearts-4", "spades-4");
     assert.equal(handValue(hand), YANIV_THRESHOLD + 1);
-    assert.equal(isLegalCall(hand), false);
+    assert.equal(isLegalCall(hand, YANIV_THRESHOLD), false);
   });
 
   it("withholds it on a freshly dealt hand", () => {
-    assert.equal(isLegalCall(HAND), false);
+    assert.equal(isLegalCall(HAND, YANIV_THRESHOLD), false);
   });
 
   it("answers exactly what the rulebook does, so the control is never one the server refuses", () => {
     for (const hand of [HAND, cards("hearts-4", "spades-3"), cards("joker-1")]) {
-      assert.equal(isLegalCall(hand), canCallYaniv(hand));
+      assert.equal(isLegalCall(hand, YANIV_THRESHOLD), canCallYaniv(hand, YANIV_THRESHOLD));
     }
   });
 });

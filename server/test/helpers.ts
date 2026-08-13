@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
-import type { Card, GameErrorCode, Phase } from "@yaniv/shared";
+import type {
+  Card,
+  GameErrorCode,
+  Phase,
+  RoomSettings,
+} from "@yaniv/shared";
+import { HAND_SIZE, MAX_SCORE, YANIV_THRESHOLD } from "@yaniv/shared";
 import { createDeck } from "../src/deck.ts";
 import type { Result } from "../src/result.ts";
 import type { GameState, GameStateActive, Player, RoundState } from "../src/state.ts";
+
+const DEFAULT_SETTINGS: RoomSettings = {
+  handSize: HAND_SIZE,
+  yanivThreshold: YANIV_THRESHOLD,
+  maxScore: MAX_SCORE,
+  botCount: 0,
+};
 
 const BY_ID = new Map(createDeck().map((c) => [c.id, c]));
 
@@ -29,6 +42,7 @@ export interface StateOptions {
   roundNumber?: number;
   /** An open slapdown window, named by whose it is and which card id it holds. */
   slapdown?: { playerId: string; cardId: string };
+  settings?: Partial<RoomSettings>;
 }
 
 /** Build an exact game state, bypassing the deal, so a scenario can be pinned down. */
@@ -47,6 +61,7 @@ export function makeState(options: StateOptions = {}): GameState {
     roomCode: "TEST",
     hostId: turnOrder[0]!,
     players,
+    settings: { ...DEFAULT_SETTINGS, ...options.settings },
     roundNumber: options.roundNumber ?? 1,
     lastRoundResult: null,
     winnerIds: null,

@@ -107,6 +107,25 @@ both clients, the same way the rulebook is (see
 [ADR-0002](docs/adr/0002-shared-owns-the-rulebook.md)). How a row is *drawn* is each
 client's own business.
 
+## Room settings
+
+The host's four choices for how a room's matches are played: **hand size**, **Yaniv
+threshold**, **max score**, and **bot count**. Distinct from the *rules* (`docs/rules.md`),
+which are fixed — settings are the finite set of knobs the rules deliberately leave open
+to a host, each constrained to a range or enum chosen so no combination can produce an
+unplayable or crashing table (see [ADR-0006](docs/adr/0006-room-settings.md)).
+
+Settings are editable only in the **lobby**, by the host alone; every other player sees
+the same values **read-only**. Once `startGame` deals the first round they **lock** — not
+just for that match but for the life of the room, since **play again** never passes back
+through the lobby to offer another chance to edit them.
+
+**Bot count** is the one setting that isn't a fixed value so much as a request: a host
+asking for more bots than there is room for (`6 - <human count>`) isn't refused — it's
+read back down to what fits, recomputed wherever it's read rather than stored clamped.
+This is why a room can never reject a join over a stale setting: the number simply means
+less than the host asked for, the same way an empty seat has always just gone to a bot.
+
 ## Play again
 
 Starts a fresh match in the same room, for the same host and the same seated players

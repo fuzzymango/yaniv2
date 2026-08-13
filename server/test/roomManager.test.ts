@@ -6,7 +6,7 @@ import { startGame } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { err, ok } from "../src/result.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { expectErr, unwrap } from "./helpers.ts";
+import { expectErr, makeState, unwrap } from "./helpers.ts";
 
 function manager(): RoomManager {
   let n = 0;
@@ -107,36 +107,65 @@ describe("joinRoom", () => {
 });
 
 describe("seatBots", () => {
-  it("fills a lone host's table to the limit with bots", () => {
+  it("seats nobody when botCount is zero — a freshly created room's default", () => {
     const rooms = manager();
-    const { roomCode, playerId: hostId } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada"));
 
     const state = rooms.seatBots(rooms.getState(roomCode)!);
 
+    assert.equal(state.players.length, 1);
+  });
+
+  it("fills up to botCount bots, not always to the table limit", () => {
+    const rooms = manager();
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1", name: "Ada" }],
+      settings: { botCount: 3 },
+    });
+
+    const state = rooms.seatBots(lobby);
+
+    assert.equal(state.players.length, 4, "the host plus three bots");
+    assert.equal(state.players.filter((p) => p.isBot).length, 3);
+  });
+
+  it("never seats past MAX_PLAYERS even when botCount asks for more", () => {
+    const rooms = manager();
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1", name: "Ada" }],
+      settings: { botCount: MAX_PLAYERS + 5 },
+    });
+
+    const state = rooms.seatBots(lobby);
+
     assert.equal(state.players.length, MAX_PLAYERS);
-    assert.equal(state.players[0]!.id, hostId, "the host keeps their seat");
-    assert.equal(
-      state.players.filter((p) => p.isBot).length,
-      MAX_PLAYERS - 1,
-      "every seat but the host's is bot-controlled",
-    );
   });
 
   it("issues each bot its own player id", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1", name: "Ada" }],
+      settings: { botCount: MAX_PLAYERS - 1 },
+    });
 
-    const ids = rooms.seatBots(rooms.getState(roomCode)!).players.map((p) => p.id);
+    const ids = rooms.seatBots(lobby).players.map((p) => p.id);
 
     assert.equal(new Set(ids).size, ids.length, `not all distinct: ${ids}`);
   });
 
   it("gives every bot a distinct name a human could not be mistaken for", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1", name: "Ada" }],
+      settings: { botCount: MAX_PLAYERS - 1 },
+    });
 
     const names = rooms
-      .seatBots(rooms.getState(roomCode)!)
+      .seatBots(lobby)
       .players.filter((p) => p.isBot)
       .map((p) => p.name);
 
@@ -148,10 +177,13 @@ describe("seatBots", () => {
 
   it("leaves the humans already seated alone", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
-    unwrap(rooms.joinRoom(roomCode, "Grace"));
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1", name: "Ada" }, { id: "p2", name: "Grace" }],
+      settings: { botCount: MAX_PLAYERS },
+    });
 
-    const state = rooms.seatBots(rooms.getState(roomCode)!);
+    const state = rooms.seatBots(lobby);
 
     assert.equal(state.players.length, MAX_PLAYERS);
     assert.deepEqual(
@@ -162,8 +194,12 @@ describe("seatBots", () => {
 
   it("is a no-op on a table that is already full", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
-    const filled = rooms.seatBots(rooms.getState(roomCode)!);
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1", name: "Ada" }],
+      settings: { botCount: MAX_PLAYERS },
+    });
+    const filled = rooms.seatBots(lobby);
 
     assert.equal(rooms.seatBots(filled), filled);
   });
@@ -183,7 +219,11 @@ describe("isBot", () => {
   it("marks only the bot seats as bot-controlled", () => {
     const rooms = manager();
     const { roomCode, playerId: hostId } = unwrap(rooms.createRoom("Ada"));
-    unwrap(rooms.apply(roomCode, (state) => ok(rooms.seatBots(state))));
+    unwrap(
+      rooms.apply(roomCode, (state) =>
+        ok(rooms.seatBots({ ...state, settings: { ...state.settings, botCount: 1 } })),
+      ),
+    );
     const botId = rooms.getState(roomCode)!.players[1]!.id;
 
     assert.equal(rooms.isBot(roomCode, botId), true);

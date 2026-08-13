@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { RoomSettings } from "@yaniv/shared";
 import {
   callYaniv,
   playAgain,
@@ -8,6 +9,7 @@ import {
   startGame,
   startNextRound,
   takeTurn,
+  updateSettings,
 } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { allCardIds, card, expectErr, ids, makeState, unwrap } from "./helpers.ts";
@@ -72,6 +74,112 @@ describe("startGame", () => {
 
   it("rejects starting a game already in progress", () => {
     expectErr(startGame(makeState({ phase: "playing" }), "p1", rng()), "WRONG_PHASE");
+  });
+
+  it("deals the room's own handSize, not the shared default", () => {
+    const state = unwrap(
+      startGame(
+        makeState({ phase: "lobby", roundNumber: 0, settings: { handSize: 7 } }),
+        "p1",
+        rng(),
+      ),
+    );
+    assert.ok(state.round);
+    assert.equal(state.round.hands["p1"]!.length, 7);
+    assert.equal(state.round.hands["p2"]!.length, 7);
+  });
+
+  /**
+   * The seats bots fill count toward the minimum, so a lone host who asked for bots is
+   * playing a real table. The check only bites once nobody — human or bot — is there to
+   * play against, which `botCount`'s zero default now makes reachable. docs/adr/0006.
+   */
+  it("counts bot seats toward the minimum", () => {
+    const withBots = makeState({
+      phase: "lobby",
+      players: [{ id: "p1" }, { id: "bot1", isBot: true }],
+    });
+    const state = unwrap(startGame(withBots, "p1", rng()));
+    assert.equal(state.phase, "playing");
+  });
+});
+
+describe("updateSettings", () => {
+  /** Every field different from the defaults, so a partial replace would show up. */
+  const CHOSEN: RoomSettings = {
+    handSize: 7,
+    yanivThreshold: 3,
+    maxScore: 200,
+    botCount: 4,
+  };
+
+  const lobby = () => makeState({ phase: "lobby", roundNumber: 0 });
+
+  it("replaces all four fields at once", () => {
+    const state = unwrap(updateSettings(lobby(), "p1", CHOSEN));
+
+    assert.deepEqual(state.settings, CHOSEN);
+  });
+
+  it("rejects an edit by anyone but the host", () => {
+    expectErr(updateSettings(lobby(), "p2", CHOSEN), "NOT_HOST");
+  });
+
+  it("rejects an edit once the match has been dealt", () => {
+    for (const phase of ["playing", "roundEnd", "gameEnd"] as const) {
+      expectErr(updateSettings(makeState({ phase }), "p1", CHOSEN), "WRONG_PHASE");
+    }
+  });
+
+  /*
+   * Nothing the real client can send — the lobby offers the valid options and nothing
+   * else. These exist so an off-contract client cannot put a room into a state the rest
+   * of the engine assumes away: a hand size that cannot be dealt from 54 cards, a max
+   * score no one can ever bust past.
+   */
+  const malformed: Array<[string, unknown]> = [
+    ["a hand size outside the offered set", { ...CHOSEN, handSize: 4 }],
+    ["a hand size past what the deck can seat", { ...CHOSEN, handSize: 8 }],
+    ["a threshold outside the offered set", { ...CHOSEN, yanivThreshold: 6 }],
+    ["a max score of zero", { ...CHOSEN, maxScore: 0 }],
+    ["a max score past the cap", { ...CHOSEN, maxScore: 100_001 }],
+    ["a fractional max score", { ...CHOSEN, maxScore: 12.5 }],
+    ["a negative bot count", { ...CHOSEN, botCount: -1 }],
+    ["more bots than a room has seats for", { ...CHOSEN, botCount: 6 }],
+    ["a bot count that is not a number", { ...CHOSEN, botCount: "3" }],
+    ["a missing field", { handSize: 5, yanivThreshold: 7, maxScore: 100 }],
+    ["nothing at all", null],
+  ];
+
+  for (const [what, settings] of malformed) {
+    it(`rejects ${what}`, () => {
+      expectErr(updateSettings(lobby(), "p1", settings), "INVALID_SETTINGS");
+    });
+  }
+
+  /**
+   * The room stores its own four fields, not the object it was handed. Anything else
+   * riding along would be kept and then served back to every player by the serializer,
+   * which publishes `settings` whole.
+   */
+  it("keeps only the four fields a room has", () => {
+    const state = unwrap(
+      updateSettings(lobby(), "p1", { ...CHOSEN, dealMeAces: true }),
+    );
+
+    assert.deepEqual(state.settings, CHOSEN);
+  });
+
+  it("applies none of a settings object with one bad field", () => {
+    const state = lobby();
+    const before = JSON.stringify(state);
+
+    expectErr(
+      updateSettings(state, "p1", { ...CHOSEN, maxScore: 0 }),
+      "INVALID_SETTINGS",
+    );
+
+    assert.equal(JSON.stringify(state), before, "the three valid fields landed nowhere");
   });
 });
 
@@ -1014,6 +1122,19 @@ describe("callYaniv — ending the match", () => {
     assert.equal(after.players.find((p) => p.id === "p2")!.score, 100);
     assert.equal(after.phase, "roundEnd");
     assert.equal(after.winnerIds, null);
+  });
+
+  it("busts against the room's own maxScore, not the shared default", () => {
+    const state = makeState({
+      players: [{ id: "p1", score: 10 }, { id: "p2", score: 15 }],
+      hands: { p1: ["hearts-A"], p2: ["spades-K"] },
+      settings: { maxScore: 20 },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+
+    assert.equal(after.players.find((p) => p.id === "p2")!.score, 25);
+    assert.equal(after.phase, "gameEnd");
+    assert.deepEqual(after.winnerIds, ["p1"]);
   });
 
   it("reports every player tied for the lowest score as a winner", () => {

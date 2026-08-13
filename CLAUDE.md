@@ -53,7 +53,8 @@ client/
 | `errors.ts` | `GameErrorCode` union |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and the client |
-| `config.ts` | Every rule constant (`HAND_SIZE`, `YANIV_THRESHOLD`, `ASSAF_PENALTY`, `MAX_SCORE`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS`, `MIN_PLAYERS`, `MAX_PLAYERS`), each pointing at a `docs/rules.md` section |
+| `config.ts` | Every rule constant (`HAND_SIZE`, `YANIV_THRESHOLD`, `ASSAF_PENALTY`, `MAX_SCORE`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS`, `MIN_PLAYERS`, `MAX_PLAYERS`), each pointing at a `docs/rules.md` section. `HAND_SIZE`/`YANIV_THRESHOLD`/`MAX_SCORE` now survive only as `RoomSettings`' default seed values (`docs/adr/0006`) |
+| `settings.ts` | `RoomSettings` (`handSize`, `yanivThreshold`, `maxScore`, `botCount`) — a room's own per-match configuration; `effectiveBotCount` to reevaluate `botCount` against the current human count; `isValidSettings` and the option sets/limits it validates against (`HAND_SIZES`, `YANIV_THRESHOLDS`, `MAX_SCORE_LIMITS`, `BOT_COUNT_LIMITS`), which a lobby control renders from. `docs/adr/0006` |
 | `standings.ts` | `standings` — a finished match's final table, lowest score first, including whoever has left since. Read by both clients |
 
 Imported by the server and the client, so the wire contract can't drift between them. The
@@ -74,7 +75,7 @@ already carries, so this costs `shared` none of its dependency-freedom. See
 | `rng.ts` | `Rng` type + `mulberry32` seeded PRNG |
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
 | `deck.ts` | `createDeck`, `shuffle`, `deal` — pure functions, no class |
-| `game.ts` | `startGame`, `takeTurn`, `callYaniv`, `slapDown`, `startNextRound`, `playAgain`, `removePlayer` — the pure state transitions |
+| `game.ts` | `updateSettings`, `startGame`, `takeTurn`, `callYaniv`, `slapDown`, `startNextRound`, `playAgain`, `removePlayer` — the pure state transitions |
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
 | `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
@@ -90,19 +91,21 @@ unable to see hidden hands or the draw pile.
 
 ### `server/scripts/`
 
-Not part of the shipped engine — two smoke-test harnesses, split by what they exercise.
+Not part of the shipped engine — two smoke-test harnesses, split by what they exercise, and
+not redundant: `play.ts` answers "do the rules and the bot behave?", and `playSocket.ts`
+answers "does the wire work?".
 
 - **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
   their own terminals, over a **real socket connection** to a separately running server
   (`npm run serve` first). Bare `--name` opens an interactive main menu rather than
-  silently creating a room; flags and inputs are tabulated in `README.md`.
-  Composition only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
+  silently creating a room; flags and inputs are tabulated in `README.md`. Composition
+  only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
   - **`cli/render.ts`** — `PlayerGameView` → a printable frame, plus the one screen that
     isn't a view: the main menu, rendered before any room exists. Pure. It draws the
     `standings` shared computes, departed players and all (see CONTEXT.md).
-  - **`cli/commands.ts`** — a typed line + the current view → a `Command`, and a
-    separate `parseMainMenuCommand` for the view-less main menu. Both pure and total;
-    bad input returns `invalid`, never throws.
+  - **`cli/commands.ts`** — a typed line + the current view → a `Command`, and a separate
+    `parseMainMenuCommand` for the view-less main menu. Both pure and total; bad input
+    returns `invalid`, never throws.
   - **`cli/session.ts`** — the driver. Owns the socket, holds the loop, takes its input
     and output injected so tests can drive it. **It imports nothing from `src/` except
     types** — no `RoomManager`, no `GameState`. The moment it does, it stops being a
@@ -112,9 +115,6 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
   and a whole match is reproducible from the seed alone — which is what makes it the tool
   for judging bot play. Keep it that way; there is deliberately no socket equivalent, since
   the server owns the rng and seats its own bots, and no client event asks for a seed.
-
-The two are not redundant: `play.ts` answers "do the rules and the bot behave?", and
-`playSocket.ts` answers "does the wire work?".
 
 ### `client/src/`
 
@@ -264,36 +264,35 @@ would mean a smarter bot silently narrows what the fuzz test covers. It does sha
 ### Errors are values
 
 Every rule-violating action returns a `Result<T>` (`ok: true/false`) carrying a
-`GameErrorCode`, never throws. TypeScript then forces call sites to handle failure.
-Anything that *does* throw (`RoomManager` code allocation exhaustion, `deal` given too
-small a deck) is a genuine defect, not a rule violation — the socket layer, when it
-exists, should let those propagate rather than reporting them to a player.
+`GameErrorCode`, never throws, so TypeScript forces call sites to handle failure. Anything
+that *does* throw (`RoomManager` code allocation exhaustion, `deal` given too small a deck)
+is a genuine defect, not a rule violation — the socket layer lets those propagate rather
+than reporting them to a player.
 
 ### Randomness is injected, never ambient
 
-Every function needing randomness takes an explicit `Rng` argument
-(`() => number`, same contract as `Math.random`). Tests use `mulberry32(seed)` so a
-match, a deal, or a bug report is reproducible from its seed —
-`server/test/integration.test.ts` has a test asserting two runs with the same seed
-produce byte-identical final scores.
+Every function needing randomness takes an explicit `Rng` argument (`() => number`, same
+contract as `Math.random`). Tests use `mulberry32(seed)` so a match, a deal, or a bug
+report is reproducible from its seed — `server/test/integration.test.ts` asserts two runs
+with the same seed produce byte-identical final scores.
 
 ### Serialization is the security boundary
 
 `GameState` contains every hand and the full draw pile order and **must never reach a
-client**. `serializeStateForPlayer` (in `serialize.ts`) is the one function that reduces
-it to a `PlayerGameView`: the viewer's own hand, opponents reduced to a `handSize`
-(never an optional `hand` field — the type doesn't allow the shape that could leak),
-draw pile as a count only. Hands are revealed to everyone only at `phase: 'roundEnd'` /
-`'gameEnd'`, when the rules require it. Tests assert no hidden card id appears anywhere
-in the serialized JSON string, and this has been mutation-tested (deliberately breaking
-the serializer to confirm the leak tests actually fail).
+client**. `serializeStateForPlayer` (in `serialize.ts`) is the one function that reduces it
+to a `PlayerGameView`: the viewer's own hand, opponents reduced to a `handSize` (never an
+optional `hand` field — the type doesn't allow the shape that could leak), draw pile as a
+count only. Hands are revealed to everyone only at `phase: 'roundEnd'` / `'gameEnd'`, when
+the rules require it. Tests assert no hidden card id appears anywhere in the serialized
+JSON string, mutation-tested by breaking the serializer on purpose to confirm the leak
+tests fail.
 
-**A finished round names its own players.** `PlayerRoundResult` carries a `name` copied
-in when the round is scored, and the serializer uses that rather than looking the id up
-in `players`. The duplication is deliberate: a seat can be given up once the match ends
-(`exitToMenu`), and a round result is the record of who played it — resolving names
-against the live roster left a departed player nameless on everyone else's scoreboard,
-with no way for a client to recover the name it was never sent.
+**A finished round names its own players.** `PlayerRoundResult` carries a `name` copied in
+when the round is scored, and the serializer uses that rather than looking the id up in
+`players`. The duplication is deliberate: a seat can be given up once the match ends
+(`exitToMenu`), and a round result is the record of who played it — resolving names against
+the live roster left a departed player nameless on everyone else's scoreboard, with no way
+for a client to recover the name it was never sent.
 
 ### Player identity
 
@@ -317,32 +316,42 @@ no connection able to act for them, and unrecoverable while reconnect is out of 
 ### Room lifecycle
 
 Lobby → host calls `startGame` → `playing` → `roundEnd` after a Yaniv call → host calls
-`startNextRound`, or `gameEnd` once someone busts past 100. 2–6 players. `RoomManager` is
-an **in-memory `Map`** — a server restart drops every game in progress. This is a
-documented, accepted limitation, not an oversight; persistence is explicitly out of scope
-for now (see below).
+`startNextRound`, or `gameEnd` once someone busts past the room's `maxScore`. 2–6 players.
+`RoomManager` is an **in-memory `Map`** — a server restart drops every game in progress: a
+documented, accepted limitation, not an oversight (persistence is out of scope, see below).
 
-**`startGame` fills every empty seat with bots**, so a player's whole setup is two steps:
-create a room, start the game. They are never asked how many opponents they want and
-never manage them. (Letting them choose is intended future work — see issue #2.) The
-engine's ≥2-player minimum therefore can't be hit from the socket layer any more; it
-still guards the transition itself.
+**`startGame` fills up to `settings.botCount` empty seats with bots**, reevaluated against
+the room's current human count at read time rather than a stored, possibly-stale number
+(`effectiveBotCount`, `shared/src/settings.ts` — docs/adr/0006). `botCount` defaults to
+**zero** on a fresh room, a deliberate change from "always fill to six", and that is what
+gives `MIN_PLAYERS` teeth again: the check counts every seat, bots included, so a lone host
+who asked for bots plays as before, while one who asked for none is now correctly turned
+away rather than passing a check that could never fire.
+
+**The host edits all four settings from the lobby and nowhere else** (`updateSettings`,
+docs/adr/0006): the whole object at once, never a patch, so a room never plays under half
+of one set of choices and half of another. Refused outside `lobby` (`WRONG_PHASE`), from
+anyone but the host (`NOT_HOST`), and for a field outside its range or enum
+(`INVALID_SETTINGS`) — the last of which a typed client cannot produce, and which is there
+to stop an off-contract one asking for a state the engine assumes away, like a hand size 54
+cards cannot deal. The payload stays `unknown` until `isValidSettings` says otherwise: its
+wire type is a claim by whoever sent it, like a client-supplied player id. That guard lives
+in `shared` on the rulebook's own grounds (ADR-0002) — the lobby offers exactly what the
+server accepts. The first deal locks the lot for the life of the room; `playAgain` never
+returns to the lobby to offer another edit.
 
 `RoomManager.seatBots(state)` is **pure** — it returns a filled state and stores nothing.
 The socket handler folds it into the `startGame` transition passed to `apply`, so a start
-that is then rejected (by someone who is not the host, say) discards the seating along
-with everything else. Seating first and checking after would fill a table off the back of
-a refused call, and the next player to try that lobby would find it full. There is
-deliberately **no client-callable event for adding a bot**; the shared event contract is
-unchanged by bots existing.
+that is then rejected (by someone who is not the host, say) discards the seating along with
+everything else, rather than filling a table off the back of a refused call.
 
 **A disconnect removes the room outright**, unconditionally, for whichever connection
-drops. This is one-directional cleanup, not the start of reconnect support: with no way
-to resume a session, a room whose player has gone can never be played again, so keeping
-it only leaks memory. That reasoning holds only while a room holds one human, and rooms
-can now hold several (see `play --join`), so a player dropping out takes everyone else's
-match down with them. Known and deliberately not fixed here — it belongs with reconnect,
-which is the next thing on the out-of-scope list, not bolted onto the join flow.
+drops. This is one-directional cleanup, not the start of reconnect support: with no way to
+resume a session, a room whose player has gone can never be played again, so keeping it
+only leaks memory. That reasoning holds only while a room holds one human, and rooms can
+now hold several (see `play --join`), so a player dropping out takes everyone else's match
+down with them. Known and deliberately not fixed here — it belongs with reconnect, the next
+thing on the out-of-scope list, not bolted onto the join flow.
 
 ### Leaving a room without dropping the connection
 
@@ -491,15 +500,13 @@ strictly newer position** — a turn, the Yaniv call that replaces one, or a sla
 sent through the same `play` helper, which keeps the CLI's `Position { view, version }` /
 `actedOn` watermark in the session core. A slapdown is the one of the three sent off turn,
 so what releases it may be the next player's move rather than its own answer; both are
-strictly newer, and by either the window is spent. The server acks an in-game action *before* it
-broadcasts the result, so controls released on the ack would come back to life over a
-position still showing the mover's own turn and their discarded cards in hand. A rejected move is the exception and
-releases at once: nothing was published, so no newer position is coming, and the turn is
-still theirs.
-
-The ordering trap is worth stating plainly: the first snapshot carrying a view after
-entering a room is one the player still cannot act from. Tests wait on
-`view !== null && !busy` rather than on the view alone.
+strictly newer, and by either the window is spent. The server acks an in-game action
+*before* it broadcasts the result, so controls released on the ack would come back to life
+over a position still showing the mover's own turn and their discarded cards in hand. A
+rejected move is the exception and releases at once: nothing was published, so no newer
+position is coming, and the turn is still theirs. The ordering trap is worth stating
+plainly: the first snapshot carrying a view after entering a room is one the player still
+cannot act from — tests wait on `view !== null && !busy` rather than on the view alone.
 
 **Positions are drawn on a clock, not on arrival.** A run of bot turns lands as one
 broadcast per move within a few milliseconds of itself (see "Broadcasting" above), so a
@@ -512,18 +519,13 @@ position is the last link of the chain, and pacing only `playing` would skip pas
 that ended it. The accepted cost — a position landing behind a drawn one waits out the rest
 of its beat, `busy` and all — is set out in full in `pacing.ts`.
 
-Two things fall out of the queue and are worth keeping straight:
-
-- **The watermark counts arrivals, not drawings.** A queued position carries the `version`
-  it *landed* on, and `busy` releases on drawing one newer than the move. Counting
-  drawings would let a position that was already in flight when the move went out pass for
-  an answer to it.
-- **A room that has gone takes its queue with it.** `roomClosed` and a successful
-  `exitToMenu` both `reset` the pacer; otherwise the next beat would draw a table the
-  player has already left back over the main menu.
-
-The clock is injected (`systemClock` by default) so the queue is driven a beat at a time
-under `node:test`; every other client suite passes one that fires each beat immediately.
+Two things fall out of the queue. **The watermark counts arrivals, not drawings** — a
+queued position carries the `version` it *landed* on, or one already in flight when a move
+went out could pass for an answer to it. And **a room that has gone takes its queue with
+it**: `roomClosed` and a successful `exitToMenu` both `reset` the pacer, or the next beat
+would draw a table the player has left back over the main menu. The clock is injected
+(`systemClock` by default), so the queue is driven a beat at a time under `node:test`;
+every other client suite passes one that fires each beat immediately.
 
 **A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
 `null`, `commitTurn` returns, and no error is published — the screen should not have
@@ -636,18 +638,20 @@ Not oversights — deferred on purpose, in this order of likely next work:
   on their turn vs. a timer vs. removal are all live options).
 - **Starting a match with seats still open for latecomers.** Several humans can share a
   room now — each joins by code from their own terminal (`play --join`) and the host
-  starts when everyone is in — but `startGame` still fills every remaining seat with
-  bots, so anyone who has not joined by then is playing the next match, not this one.
-- **Choosing how many opponents you want.** `startGame` always fills to six. Adding bots
-  one at a time from the lobby, with its own rejections, is deferred (issue #2).
+  starts when everyone is in — but `startGame` still seats bots on the spot, so anyone
+  who has not joined by then is playing the next match, not this one.
+- **Any client that can send `updateSettings`.** The event and its transition are in
+  (docs/adr/0006), but nothing offers a control that emits it, so every room still plays
+  with the defaults it was created with. The session intent and the lobby editor are
+  issues #53 and #54; the CLI harness is out of scope for both.
 - **Persistence.** Rooms are in-memory only, so a redeploy drops every match in progress —
   same as a restart, and the reason splitting client and server into two services (giving
   up same-origin, ADR-0003) would be the fix if that cost ever matters.
 - **Deployment happened ahead of reconnect.** ADR-0004 orders client, reconnect, deploy,
   because a backgrounded mobile tab drops its socket and so ends the room for everyone in
   it. Deploying first went ahead anyway (Railway, one service: `railway.json` +
-  `server/src/staticServer.ts`, per ADR-0003), so that gap is live in production: solo play
-  against bots is unaffected, inviting other humans to a deployed room is not yet safe.
+  `server/src/staticServer.ts`, per ADR-0003), so that gap is live: solo play against bots
+  is unaffected, inviting other humans to a deployed room is not yet safe.
 - **Slapdown against a bot.** Both clients offer it now, but bots neither slap down for
   themselves nor can meaningfully be raced by a human, since `playBotTurns` runs in the
   same tick. Both deliberate, per ADR-0005 — a human needs another human behind them.
@@ -659,13 +663,12 @@ Not oversights — deferred on purpose, in this order of likely next work:
 ## Deviations from the original sketch (`docs/backend-archetechture.md`)
 
 If the architecture doc describes something you cannot find, it is probably one of these:
-
-- `Deck` is not a class — pure functions over plain arrays instead, since the sketch's
-  `Deck` was drained into an array on creation, leaving two sources of truth for the pile.
-- `playCards`/`drawFromPile` don't exist as separate functions — see "Turn model" above.
-- The discard pile isn't a flat `Card[]` — see "discard pile is two parts" above.
-- Errors are a `Result` union, not `throw new Error(...)`; `Player.id` is not `socket.id`.
-- `serializeStateForPlayer` returns `{ you, opponents }`, not one `players[]` with a `hand`.
+`Deck` is not a class but pure functions over plain arrays (the sketch's `Deck` was drained
+into an array on creation, leaving two sources of truth for the pile); `playCards`/
+`drawFromPile` are one `takeTurn` ("Turn model" above); the discard pile is two fields
+rather than a flat `Card[]` ("discard pile is two parts"); errors are a `Result` union, not
+`throw new Error(...)`; `Player.id` is not `socket.id`; and `serializeStateForPlayer`
+returns `{ you, opponents }`, not one `players[]` with a `hand`.
 
 ## Running things
 
@@ -691,10 +694,5 @@ disconnecting still ends the room for everyone — see "Room lifecycle".
 
 ## Agent skills
 
-### Issue tracker
-
-Issues live in GitHub Issues (`fuzzymango/yaniv2`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Domain docs
-
-Single-context — `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+- **Issue tracker** — GitHub Issues (`fuzzymango/yaniv2`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+- **Domain docs** — single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

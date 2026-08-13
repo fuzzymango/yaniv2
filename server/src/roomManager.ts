@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { MAX_PLAYERS } from "@yaniv/shared";
+import {
+  HAND_SIZE,
+  MAX_PLAYERS,
+  MAX_SCORE,
+  YANIV_THRESHOLD,
+  effectiveBotCount,
+  type RoomSettings,
+} from "@yaniv/shared";
 import { BOT_NAMES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "./config.ts";
 import { err, ok, type Result } from "./result.ts";
 import { randomInt, systemRng, type Rng } from "./rng.ts";
@@ -21,6 +28,13 @@ export interface RoomManagerOptions {
   newPlayerId?: () => string;
   /** Override to give each room a seeded rng in tests. */
   newRoomRng?: () => Rng;
+  /**
+   * Overrides layered onto `createRoom`'s default `RoomSettings` seed. `updateSettings`
+   * is how a host raises `botCount` above its zero default (docs/adr/0006), but no client
+   * emits it yet — so a harness that wants a room's lone human sitting down against a bot
+   * uses this instead of driving the wire for every room it creates.
+   */
+  defaultSettings?: Partial<RoomSettings>;
 }
 
 function normalizeName(name: string): string | null {
@@ -39,11 +53,13 @@ export class RoomManager {
   private readonly rng: Rng;
   private readonly newPlayerId: () => string;
   private readonly newRoomRng: () => Rng;
+  private readonly defaultSettings: Partial<RoomSettings>;
 
   constructor(options: RoomManagerOptions = {}) {
     this.rng = options.rng ?? systemRng;
     this.newPlayerId = options.newPlayerId ?? (() => randomUUID());
     this.newRoomRng = options.newRoomRng ?? (() => this.rng);
+    this.defaultSettings = options.defaultSettings ?? {};
   }
 
   private generateRoomCode(): string {
@@ -74,6 +90,15 @@ export class RoomManager {
       phase: "lobby",
       hostId: host.id,
       players: [host],
+      // Today's constants, seeded as defaults — except `botCount`, which defaults to
+      // zero rather than "fill to six". docs/adr/0006.
+      settings: {
+        handSize: HAND_SIZE,
+        yanivThreshold: YANIV_THRESHOLD,
+        maxScore: MAX_SCORE,
+        botCount: 0,
+        ...this.defaultSettings,
+      },
       roundNumber: 0,
       round: null,
       lastRoundResult: null,
@@ -108,20 +133,23 @@ export class RoomManager {
   }
 
   /**
-   * `state` with a bot seated in every empty chair, each issued a player id exactly the
-   * way a human join is. This is the whole of a player's opponent setup: they create a
-   * room and start the game, and never manage bots. Letting them choose how many
-   * opponents they want is intended future work — see issue #2.
+   * `state` with up to `settings.botCount` bots seated in empty chairs, each issued a
+   * player id exactly the way a human join is. `effectiveBotCount` reevaluates that
+   * setting against the room's current human count rather than trusting a stored value
+   * that may since have gone stale (docs/adr/0006) — a room's `botCount` defaults to
+   * zero, so a freshly created room seats none until a host raises it.
    *
    * Pure: nothing is stored. Callers fold it into a transition passed to `apply`, so a
    * start that is then rejected discards the seating along with everything else, rather
    * than leaving a table filled on the back of a refused call.
    */
   seatBots(state: GameState): GameState {
-    if (state.players.length >= MAX_PLAYERS) return state;
+    const humanCount = state.players.filter((p) => !p.isBot).length;
+    const targetSize = humanCount + effectiveBotCount(state.settings, humanCount);
+    if (state.players.length >= targetSize) return state;
 
     const players = [...state.players];
-    while (players.length < MAX_PLAYERS) {
+    while (players.length < targetSize) {
       // Safe to index directly: a table holds at most MAX_PLAYERS seats and its creator
       // is human, so BOT_NAMES has a name for every seat a bot can occupy.
       const taken = players.filter((p) => p.isBot).length;

@@ -554,7 +554,7 @@ export function createSession(
       // The same rulebook the server will judge the call by, and the same silence when it
       // says no: an inert control that was tapped anyway has asked for nothing. Whether it
       // is this player's turn is left to the server, exactly as it is for a discard.
-      if (!isLegalCall(snapshot.view.you.hand)) return;
+      if (!isLegalCall(snapshot.view.you.hand, snapshot.view.settings.yanivThreshold)) return;
 
       play((ack) => socket.emit("callYaniv", ack));
     },

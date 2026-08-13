@@ -43,6 +43,16 @@ export type {
 export { standings } from "./standings.ts";
 export type { Standing } from "./standings.ts";
 
+export {
+  BOT_COUNT_LIMITS,
+  HAND_SIZES,
+  MAX_SCORE_LIMITS,
+  YANIV_THRESHOLDS,
+  effectiveBotCount,
+  isValidSettings,
+} from "./settings.ts";
+export type { HandSize, YanivThreshold, RoomSettings } from "./settings.ts";
+
 export type {
   DrawAction,
   TurnAction,

@@ -1,4 +1,5 @@
 import type { Card } from "./cards.ts";
+import type { RoomSettings } from "./settings.ts";
 
 export type Phase = "lobby" | "playing" | "roundEnd" | "gameEnd";
 
@@ -61,6 +62,13 @@ export interface PlayerGameView {
   phase: Phase;
   roundNumber: number;
   hostId: string;
+  /**
+   * The room's live settings — present in every phase, not just `lobby`. Load-bearing
+   * for a client's own pre-turn legality check (`isLegalCall`), not just display: a
+   * hardcoded threshold would silently diverge from a room started with a non-default
+   * one. docs/adr/0006.
+   */
+  settings: RoomSettings;
 
   you: SelfView;
   opponents: OpponentView[];

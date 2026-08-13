@@ -16,7 +16,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import type { PlayerGameView } from "@yaniv/shared";
-import { YANIV_THRESHOLD, handValue } from "@yaniv/shared";
+import { MAX_PLAYERS, YANIV_THRESHOLD, handValue } from "@yaniv/shared";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
 import { RoomManager } from "../../src/roomManager.ts";
 import { mulberry32 } from "../../src/rng.ts";
@@ -30,7 +30,14 @@ interface Harness {
   close: () => Promise<void>;
 }
 
-/** A server on an OS-assigned port, seeded so the deal is the same every run. */
+/**
+ * A server on an OS-assigned port, seeded so the deal is the same every run.
+ *
+ * Every room is seeded to fill its remaining seats with bots. That is what `startGame`
+ * did unconditionally until `botCount` became a room setting defaulting to zero
+ * (docs/adr/0006), and the harness has no settings prompt to raise it with — so this
+ * keeps the tables below exactly the size the scripts were written against.
+ */
 async function startServer(seed: number): Promise<Harness> {
   const httpServer = createServer();
   const io = createSocketServer(
@@ -38,6 +45,7 @@ async function startServer(seed: number): Promise<Harness> {
     new RoomManager({
       rng: mulberry32(seed),
       newRoomRng: () => mulberry32(seed + 1),
+      defaultSettings: { botCount: MAX_PLAYERS - 1 },
     }),
   );
 

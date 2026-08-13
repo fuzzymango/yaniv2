@@ -50,7 +50,7 @@ export type BotAction =
  * which is why the bot takes the whole view rather than just its hand.
  */
 export function shouldCallYaniv(view: PlayerGameView): boolean {
-  return canCallYaniv(view.you.hand);
+  return canCallYaniv(view.you.hand, view.settings.yanivThreshold);
 }
 
 /**

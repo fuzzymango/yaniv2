@@ -23,6 +23,7 @@ import {
   HAND_SIZE,
   MAX_PLAYERS,
   MAX_SCORE,
+  YANIV_THRESHOLD,
   handValue,
   isValidSet,
   legalDiscards,
@@ -87,13 +88,20 @@ const CONNECTION: Partial<ManagerOptions & SocketOptions> = {
 };
 
 /** A server on an OS-assigned port, seeded so every run deals the same cards. */
-async function startServer(seed: number): Promise<Harness> {
+async function startServer(
+  seed: number,
+  botCount = MAX_PLAYERS - 1,
+): Promise<Harness> {
   const httpServer = createServer();
   const io = createSocketServer(
     httpServer,
     new RoomManager({
       rng: mulberry32(seed),
       newRoomRng: () => mulberry32(seed + 1),
+      // Fills the table, which is what `startGame` did unconditionally until `botCount`
+      // became a room setting defaulting to zero (docs/adr/0006). No wire event raises
+      // it yet, so this keeps the tables the size these tests were written against.
+      defaultSettings: { botCount },
     }),
   );
 
@@ -297,7 +305,7 @@ async function playUntilCallable(session: Session): Promise<SessionSnapshot> {
     );
     const view = resting.view!;
     assert.equal(view.phase, "playing", "a bot called Yaniv before this seat could");
-    if (isLegalCall(view.you.hand)) return resting;
+    if (isLegalCall(view.you.hand, view.settings.yanivThreshold)) return resting;
 
     takeATurn(session, view);
   }
@@ -359,7 +367,7 @@ async function playToMatchEnd(sessions: Session[]): Promise<SessionSnapshot> {
     if (turn !== -1) {
       const mover = sessions[turn]!;
       const view = seen[turn]!.view!;
-      if (isLegalCall(view.you.hand)) mover.callYaniv();
+      if (isLegalCall(view.you.hand, view.settings.yanivThreshold)) mover.callYaniv();
       else takeATurn(mover, view);
     } else if (
       onHost.view?.phase === "roundEnd" &&
@@ -544,6 +552,43 @@ describe("the session core", () => {
         "every seat the host did not fill is a bot",
       );
       assert.equal(playing.view!.you.hand.length, HAND_SIZE, "and the cards are dealt");
+      assert.equal(
+        playing.view!.settings.yanivThreshold,
+        YANIV_THRESHOLD,
+        "and the room's settings came with the position",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("seats only as many bots as the room asks for", async () => {
+    const server = await startServer(7, 2);
+    try {
+      const [host] = await hostARoom(server, "Ada");
+      host.startGame();
+
+      const playing = await waitForSnapshot(
+        host,
+        "the match to start",
+        (s) => s.view?.phase === "playing",
+      );
+
+      assert.equal(playing.view!.opponents.length, 2, "botCount seats, not a full table");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refuses a start with nobody to play against", async () => {
+    const server = await startServer(7, 0);
+    try {
+      const [host] = await hostARoom(server, "Ada");
+      host.startGame();
+
+      const refused = await waitForSnapshot(host, "the refusal", (s) => s.error !== null);
+      assert.equal(refused.error!.code, "NOT_ENOUGH_PLAYERS");
+      assert.equal(refused.view!.phase, "lobby", "still waiting in the lobby");
     } finally {
       await server.close();
     }
@@ -1208,8 +1253,12 @@ describe("calling Yaniv", () => {
     const server = await startServer(HUMAN_CALLS_FIRST);
     try {
       const host = await soloMatch(server);
-      const hand = host.getSnapshot().view!.you.hand;
-      assert.equal(isLegalCall(hand), false, "five dealt cards are worth more than the threshold");
+      const view = host.getSnapshot().view!;
+      assert.equal(
+        isLegalCall(view.you.hand, view.settings.yanivThreshold),
+        false,
+        "five dealt cards are worth more than the threshold",
+      );
 
       // A control that is inert should send nothing when it is tapped anyway, and say
       // nothing either: nothing was asked for, so nothing was refused.

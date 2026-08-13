@@ -18,6 +18,7 @@ import {
   startGame,
   startNextRound,
   takeTurn,
+  updateSettings,
 } from "./game.ts";
 import { err } from "./result.ts";
 import type { RoomManager } from "./roomManager.ts";
@@ -237,6 +238,20 @@ export function createSocketServer(
       broadcastState(session.roomCode);
       runBotTurns(session.roomCode);
     }
+
+    /**
+     * The lobby is a position like any other, so a settings change is published like any
+     * other move: whoever is sitting in it sees the host's choices land. Ordinary `act`
+     * shape despite there being no turn involved — the caller is identified the same way,
+     * and a refusal (not the host, not the lobby, not settings a room could play on)
+     * publishes nothing, leaving the room exactly as it was.
+     *
+     * The payload is passed on untrusted. Its wire type is a claim by whoever sent it,
+     * and `updateSettings` is where that claim is checked.
+     */
+    socket.on("updateSettings", (settings, ack) => {
+      act(ack, (session, state) => updateSettings(state, session.playerId, settings));
+    });
 
     socket.on("startGame", (ack) => {
       // Seating the bots is the whole of opponent setup: a player creates a room and

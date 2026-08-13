@@ -1,10 +1,6 @@
 import type { Card } from "./cards.ts";
 import { RANKS, rankOrder } from "./cards.ts";
-import {
-  MIN_RUN_LENGTH,
-  MIN_RUN_REAL_CARDS,
-  YANIV_THRESHOLD,
-} from "./config.ts";
+import { MIN_RUN_LENGTH, MIN_RUN_REAL_CARDS } from "./config.ts";
 
 const HIGHEST_RANK_INDEX = RANKS.length - 1;
 
@@ -144,10 +140,12 @@ export function legalDiscards(hand: readonly Card[]): Card[][] {
  * Whether a hand is low enough to call Yaniv. docs/rules.md §6.
  *
  * This is the rule — "may I" — and deliberately says nothing about whether calling
- * is a good idea, which is a player's or a bot's judgement.
+ * is a good idea, which is a player's or a bot's judgement. `yanivThreshold` is the
+ * room's own setting (docs/adr/0006) rather than a global constant, so every caller
+ * carries it explicitly, the same discipline `Rng` already requires.
  */
-export function canCallYaniv(hand: readonly Card[]): boolean {
-  return handValue(hand) <= YANIV_THRESHOLD;
+export function canCallYaniv(hand: readonly Card[], yanivThreshold: number): boolean {
+  return handValue(hand) <= yanivThreshold;
 }
 
 /**

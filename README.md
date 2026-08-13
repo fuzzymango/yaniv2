@@ -45,8 +45,10 @@ npm run dev                               # terminal 2 — opens on http://local
 Open http://localhost:5173 in your browser. The frontend proxies `/socket.io` requests to
 port 3000, so the client and server talk to each other automatically.
 
-Enter a name, create a room or join one by its code, and the host starts the match — every
-empty seat is filled with a bot. A turn is two taps and no button: tap cards in your hand
+Enter a name, create a room or join one by its code, and the host starts the match. A
+fresh room's bot count defaults to zero (`docs/adr/0006`) and no control raises it yet, so
+for now a match needs someone else to join — a host with an empty table is turned away
+with `NOT_ENOUGH_PLAYERS`. A turn is two taps and no button: tap cards in your hand
 to choose them (chosen cards are outlined in yellow, tapped again to unchoose), then tap
 either the deck or one of the two end cards of the face-up discard. That second tap is the
 move — the chosen cards are discarded and the tapped card drawn, in one action. The deck
@@ -58,8 +60,8 @@ than the table jumping straight back to your turn.
 Once in a while the discard pile starts flashing on somebody else's turn: you discarded a
 same-rank set (or a lone card) and drew that same rank off the deck, so the card can go
 straight back down (`docs/rules.md` §9). One tap on the pile sheds it, and the window shuts the moment the
-next player moves — which against bots is immediately, since their turns are played in the
-same tick (`docs/adr/0005`), so this is something you will see against other people.
+next player moves — against a bot-controlled seat that is immediate, since bot turns play
+in the same tick (`docs/adr/0005`), so this is something you will see against other people.
 
 The **Yaniv** button above your hand is the exception — the one control that is not a card.
 It lights up the moment your hand is worth 7 or less and is dead until then, and pressing
@@ -101,8 +103,10 @@ straight into a room; without either, the menu offers the same two choices inter
 A bad or expired code typed at the menu shows the error and returns you to the menu to
 try again, rather than ending the session.
 
-The host (first player) types `start` once everyone has joined. Any remaining empty seats
-are filled with bots. Everyone plays through to a winner. At the prompt:
+The host (first player) types `start` once everyone has joined. A fresh room's bot count
+defaults to zero (`docs/adr/0006`) and nothing raises it yet, so a host alone at the table
+is turned away with `NOT_ENOUGH_PLAYERS`. Everyone plays through to a winner. At the
+prompt:
 
 | Input | Meaning |
 |---|---|
