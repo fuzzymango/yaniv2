@@ -15,3 +15,40 @@ export function bySeat(
 ): (a: { id: string }, b: { id: string }) => number {
   return (a, b) => view.turnOrder.indexOf(a.id) - view.turnOrder.indexOf(b.id);
 }
+
+/** The three sides of the felt an opponent can be drawn on. The viewer holds the bottom. */
+export type Zone = "left" | "top" | "right";
+
+function zoneAt(i: number): Zone {
+  switch (i % 3) {
+    case 0:
+      return "left";
+    case 1:
+      return "top";
+    default:
+      return "right";
+  }
+}
+
+/**
+ * Deals a turn-ordered opponent list around the table: 1st left, 2nd top, 3rd right, 4th
+ * back to left, 5th back to top. Every zone is filled before any is doubled, and a zone
+ * that doubles keeps both opponents in turn order, so the table reads the same way round
+ * on everybody's screen — the whole point of sorting by `bySeat` in the first place.
+ *
+ * `right` cannot hold two: doubling it needs a 6th opponent, and `MAX_PLAYERS` is 6, so
+ * five is all there ever are. That is a fact about the room, not a case handled here.
+ *
+ * Generic over the opponent because the two screens due to consume it hold different
+ * payloads — the live table a `PlayerGameView` opponent, the round-end reveal a scored
+ * player off the round's own record — and the same seats have to come out of both without
+ * either being wrapped in a type this function would then have to know about. Neither
+ * calls it yet; the layout that will is a later ticket.
+ */
+export function seatZones<T>(opponents: readonly T[]): Record<Zone, T[]> {
+  const zones: Record<Zone, T[]> = { left: [], top: [], right: [] };
+  opponents.forEach((opponent, i) => {
+    zones[zoneAt(i)].push(opponent);
+  });
+  return zones;
+}

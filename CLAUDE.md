@@ -127,7 +127,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `session.ts` | The session core: owns the socket, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
-| `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by |
+| `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). Generic over the opponent, for the live table and the round-end reveal to zone their own payloads once the seated layout lands |
 | `settings.ts` | What only a settings *form* knows: `wholeNumber` (a field part-way through being typed) and `sameSettings` (has the room caught up?). Pure and total, `turn.ts`'s counterpart — what a room may be set to is asked of `shared` |
 | `unload.ts` | `guardUnload` — the `beforeunload` warning, on while a round is live and off otherwise. Injected target, so it is driven under `node:test` with no browser |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
