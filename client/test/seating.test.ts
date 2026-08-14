@@ -11,11 +11,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MAX_PLAYERS } from "@yaniv/shared";
-import { seatZones } from "../src/seating.ts";
+import { ZONES, seatZones } from "../src/seating.ts";
 
 /** Opponents stand in as names — `seatZones` is generic and never looks inside one. */
 const opponents = (n: number): string[] =>
   Array.from({ length: n }, (_, i) => `opponent-${i + 1}`);
+
+describe("ZONES", () => {
+  it("lists every zone a seating can come back with, and nothing else", () => {
+    assert.deepEqual([...ZONES].sort(), Object.keys(seatZones([])).sort());
+  });
+});
 
 describe("seatZones", () => {
   it("seats nobody at a heads-up table, and still offers all three zones", () => {

@@ -1,5 +1,13 @@
 Build and test top-down, in this order. Don't touch Socket.io until the layers below it are unit tested.
 
+> **Stale in places — kept for history, not authority.** What was built deviates from this
+> sketch as follows, and `CLAUDE.md` carries the reasoning for each: `Deck` is not a class
+> but pure functions over plain arrays (the sketch's `Deck` was drained into an array on
+> creation, leaving two sources of truth for the pile); `playCards`/`drawFromPile` are one
+> atomic `takeTurn`; the discard pile is two fields rather than a flat `Card[]`; errors are
+> a `Result` union, not `throw new Error(...)`; `Player.id` is a server-issued id, not
+> `socket.id`; and `serializeStateForPlayer` returns `{ you, opponents }`.
+
 ---
 
 ## 1. Card model

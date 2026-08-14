@@ -16,8 +16,17 @@ export function bySeat(
   return (a, b) => view.turnOrder.indexOf(a.id) - view.turnOrder.indexOf(b.id);
 }
 
-/** The three sides of the felt an opponent can be drawn on. The viewer holds the bottom. */
-export type Zone = "left" | "top" | "right";
+/**
+ * The three sides of the felt an opponent can be drawn on, in the order they are dealt.
+ * The viewer holds the fourth, and is not a zone: their hand is at the bottom of the
+ * screen whoever else is at the table.
+ *
+ * A list rather than a bare union because a screen has to draw all three whether anybody
+ * is sitting at them or not, and the union is taken off it so the two cannot drift.
+ */
+export const ZONES = ["left", "top", "right"] as const;
+
+export type Zone = (typeof ZONES)[number];
 
 function zoneAt(i: number): Zone {
   switch (i % 3) {

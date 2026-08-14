@@ -592,21 +592,189 @@ body {
 .table {
   --card-w: min(3.5rem, 15vw);
 
+  position: relative;
   justify-content: flex-start;
   height: 100dvh;
   gap: 0.75rem;
+  /*
+   * A seat's fan is deliberately drawn off the edge of the table (see `.table__seats`),
+   * and this is the edge: on a phone it is the viewport, and on anything wider it is the
+   * capped column, so the same layout cuts off in the same place at every width.
+   */
+  overflow: hidden;
 }
 
-.players {
+/*
+ * Everybody else, seated round three sides of the felt.
+ *
+ * The band the seats are dealt into. Taken out of the column's flow and pinned to the top
+ * of the screen itself, edges included: a player sits at the *edge* of the table, and the
+ * padding that keeps the column's text off that edge is a rule about text. Out of flow is
+ * also what lets a fan hang off the top of the screen at all — in the column it would
+ * start below the settings icon, and "off the edge" would mean off the edge of nothing.
+ *
+ * The top of the screen rather than all of it, because the bottom is the local player's:
+ * the hand, and the felt they play it onto. Nothing here is tappable, so it passes taps
+ * through to whatever the felt puts under it.
+ *
+ * Cards here are smaller than the ones on the felt and in the hand, and that is the whole
+ * of the size difference between a hand being played and five being watched: these are
+ * never tapped, and at full size a table of six leaves no middle to play in.
+ */
+.table__seats {
+  /*
+   * 0.78 of a card on the felt, which is where the prototype's variant D landed (issue
+   * #56) — smaller than that read as cramped at a table of six. The `vh` term is here and
+   * nowhere else cards are sized: a doubled zone stacks two seats up one edge, so on a
+   * short screen it is the height that runs out first. Scaling down is the answer at every
+   * size rather than reflowing — the table is the same table on a phone as on a monitor.
+   */
+  --card-w: calc(min(3.5rem, 15vw, 7.5vh) * 0.78);
+
+  position: absolute;
+  inset: 0 0 auto;
+  /*
+   * Deep enough for a doubled zone — two whole seats, stacked — to sit inside it without
+   * the first one's fan being cut off by the top of the screen, at every size the cards
+   * scale to. Any deeper and the seats sit down among the hand rather than around it.
+   */
+  height: 56%;
+  pointer-events: none;
+}
+
+/*
+ * A side of the table. Two seats' worth at most (`seatZones`), and a doubled one grows
+ * along its own edge rather than shrinking to fit: a seat that shrank when a fifth player
+ * joined would say something about the table that isn't true.
+ */
+.table-zone {
+  position: absolute;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.table-zone--left {
+  top: 50%;
+  left: 0;
+  flex-direction: column;
+  transform: translateY(-50%);
+}
+
+.table-zone--right {
+  top: 50%;
+  right: 0;
+  flex-direction: column;
+  transform: translateY(-50%);
+}
+
+.table-zone--top {
+  top: 0;
+  left: 50%;
+  flex-direction: row;
+  transform: translateX(-50%);
+}
+
+/*
+ * One player's place: their cards, and their name under them. The label is a child rather
+ * than an overlay, so the fan's own reserved height is what holds the two apart — see
+ * `fanFootprint`, which is sized off the same angles the cards are drawn at.
+ */
+.table-seat {
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border-radius: 0.5rem;
 }
 
-.player,
+/* Each seat's label hugs its own edge of the screen, where the seat is. */
+.table-seat--left {
+  align-items: flex-start;
+}
+
+.table-seat--right {
+  align-items: flex-end;
+}
+
+.table-seat--top {
+  align-items: center;
+}
+
+/*
+ * Whose turn it is: the seat entire, cards and name together, because that is what a
+ * player is looking for when they ask who is playing. The same ring the text row it
+ * replaces used to carry.
+ */
+.table-seat--turn {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/*
+ * The fan. Its size comes from `fanFootprint` and its push off the edge from
+ * `fanOverhang`, both inline, both in card widths — nothing about the arc is written
+ * twice, here or there.
+ */
+.table-seat__fan {
+  position: relative;
+}
+
+/*
+ * Every card hangs off the fan's hinge, which is the point the margins put its bottom
+ * edge's centre on and the origin it turns about. Where that hinge sits in the box is the
+ * only thing that differs by zone, because the rotation is already in the transform.
+ *
+ * The 1.4 is the card's own shape (`aspect-ratio: 5 / 7` above), which is what `fan.ts`
+ * measures the box with too — one number, in one unit, on both sides.
+ */
+.table-seat__card {
+  position: absolute;
+  margin-top: calc(var(--card-w) * -1.4);
+  margin-left: calc(var(--card-w) * -0.5);
+  transform-origin: 50% 100%;
+}
+
+.table-seat__fan--left .table-seat__card {
+  top: 50%;
+  left: 0;
+}
+
+.table-seat__fan--right .table-seat__card {
+  top: 50%;
+  left: 100%;
+}
+
+.table-seat__fan--top .table-seat__card {
+  top: 0;
+  left: 50%;
+}
+
+/*
+ * Upright in every zone, and never rotated with the cards above it. Small: five of these
+ * are on the screen at a full table, and none of them is what anybody is playing.
+ */
+.table-seat__label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  max-width: 7.5rem;
+  margin: 0;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  font-size: 0.7rem;
+}
+
+.table-seat__name {
+  /* A line of its own, so a long name pushes the numbers down rather than sideways. */
+  flex: 0 0 100%;
+  /* Names are bounded server-side but not narrow; the counts keep their place. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
 .you {
   display: flex;
   align-items: center;
@@ -638,14 +806,10 @@ body {
   font-weight: 700;
 }
 
-/* Whose turn it is, on the seat itself as well as in words below the table. */
-.player--turn {
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
 /*
- * The deck and the discard, floating in whatever height is left between the opponents
- * and the hand.
+ * The deck and the discard, floating in whatever height is left above the hand — which
+ * the seats no longer take any of, being out of the column's flow, so they float higher
+ * than they did and can meet a seat's label. Issue #59 pins them just above the hand.
  *
  * It wraps, and that is the whole answer to sizing: a card is `--tap` wide or wider on
  * every screen, which for a five-card discard beside the deck is more than a 320px phone
