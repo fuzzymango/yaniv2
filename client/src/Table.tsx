@@ -25,7 +25,7 @@ import { bySeat } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
 // [PROTOTYPE — issue #56] throwaway seating-layout variants; delete with the switcher.
-import { SeatsA, SeatsB, SeatsC } from "./prototype/OpponentSeats.tsx";
+import { SeatsA, SeatsB, SeatsC, SeatsD } from "./prototype/OpponentSeats.tsx";
 import { PrototypeSwitcher } from "./prototype/PrototypeSwitcher.tsx";
 import { useVariant } from "./prototype/useVariant.ts";
 import type { SeatEntry } from "./prototype/seatEntry.ts";
@@ -96,7 +96,8 @@ export function Table({
     isTurn: opponent.id === view.currentTurnPlayerId,
     cardCount: opponent.handSize,
   }));
-  const SeatsComponent = variant === "a" ? SeatsA : variant === "b" ? SeatsB : variant === "c" ? SeatsC : null;
+  const SeatsComponent =
+    variant === "a" ? SeatsA : variant === "b" ? SeatsB : variant === "c" ? SeatsC : variant === "d" ? SeatsD : null;
 
   return (
     <main className="screen table">

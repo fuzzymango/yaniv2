@@ -14,3 +14,14 @@ export const ZONE_ROTATION: Record<"left" | "top" | "right", number> = {
   top: 180,
   right: 90,
 };
+
+/**
+ * [PROTOTYPE — issue #56 — variant D] Corrected from `ZONE_ROTATION`: the fan's open,
+ * spread edge points toward the felt and its hinge toward the screen edge — the opposite
+ * of what A did. Only the fan rotates by this; D's labels stay upright in every zone.
+ */
+export const ZONE_ROTATION_FAN_D: Record<"left" | "top" | "right", number> = {
+  left: 90,
+  top: 180,
+  right: -90,
+};

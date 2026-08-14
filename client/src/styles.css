@@ -1164,6 +1164,9 @@ body {
   background: var(--surface);
   font-size: 0.7rem;
   text-align: center;
+  margin-top: 0.8rem;
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
 }
 
 .proto-label__name {
@@ -1248,6 +1251,42 @@ body {
 .round__center-spacer {
   width: 1px;
   height: 1px;
+}
+
+/* --- Variant D: A's arc (orientation fixed) live, B's stack (upright) revealed --- */
+
+.proto-seat--d {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.proto-fan-rotator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.proto-cascade {
+  position: relative;
+}
+
+.proto-cascade--vertical {
+  width: calc(var(--card-w) * 1.05);
+  height: 9rem;
+}
+
+.proto-cascade--horizontal {
+  width: 9rem;
+  height: calc(var(--card-w) * 1.5);
+}
+
+.proto-cascade__card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  --card-w: calc(min(3.5rem, 15vw) * 0.78);
 }
 
 @media (min-width: 48rem) {

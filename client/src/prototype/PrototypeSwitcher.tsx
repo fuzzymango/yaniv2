@@ -10,6 +10,7 @@ export const VARIANTS = [
   { key: "a", label: "A — Felt oval" },
   { key: "b", label: "B — Minimal corners" },
   { key: "c", label: "C — Compact stacked" },
+  { key: "d", label: "D — A's arc, fixed + upright labels" },
 ] as const;
 
 export type VariantKey = (typeof VARIANTS)[number]["key"];

@@ -10,7 +10,7 @@
 import type { ReactNode } from "react";
 import { PlayingCard } from "../PlayingCard.tsx";
 import { seatZones, type Zone } from "../seating.ts";
-import { fanAngles, ZONE_ROTATION } from "./fan.ts";
+import { fanAngles, ZONE_ROTATION, ZONE_ROTATION_FAN_D } from "./fan.ts";
 import type { SeatEntry } from "./seatEntry.ts";
 
 interface SeatsProps {
@@ -162,6 +162,82 @@ export function SeatsC({ opponents, children }: SeatsProps) {
       <ZoneC zone="left" seats={zones.left} />
       <ZoneC zone="top" seats={zones.top} />
       <ZoneC zone="right" seats={zones.right} />
+      <div className="felt proto-felt-slot">{children}</div>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+ * Variant D — synthesis: A's arc shape (orientation fixed — open edge toward the
+ * felt, hinge toward the screen edge, left/right mirrored), B's straight stack for
+ * a *revealed* hand (clearer to read than an arc of overlapping faces), and
+ * C/B's upright, below-the-cards label, never rotated with the seat.
+ * ---------------------------------------------------------------------------- */
+
+/** Live play: A's arc, corrected orientation, sized up from C's cramped scale. */
+function ArcFanD({ seat, zone }: { seat: SeatEntry; zone: Zone }) {
+  return (
+    <div
+      className="proto-fan-rotator"
+      style={{ transform: `rotate(${ZONE_ROTATION_FAN_D[zone]}deg)` }}
+    >
+      <ArcFan seat={seat} cardScale={0.78} />
+    </div>
+  );
+}
+
+/**
+ * Round end: a revealed hand read like a hand of cards fanned on a table, not
+ * rotated — cards must stay upright to be legible, whichever edge they sit
+ * against. Left/right zones cascade downward (the zone is already a column);
+ * top cascades sideways (the zone is already a row).
+ */
+function CascadeReveal({ seat, axis }: { seat: SeatEntry; axis: "vertical" | "horizontal" }) {
+  const cards = seat.cards ?? [];
+  return (
+    <div className={`proto-cascade proto-cascade--${axis}`}>
+      {cards.map((card, i) => (
+        <div
+          key={card.id}
+          className="proto-cascade__card"
+          style={
+            axis === "vertical"
+              ? { transform: `translateY(${i * 14}px)`, zIndex: i }
+              : { transform: `translateX(${i * 14}px)`, zIndex: i }
+          }
+        >
+          <PlayingCard card={card} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ZoneD({ zone, seats }: { zone: Zone; seats: SeatEntry[] }) {
+  const axis: "vertical" | "horizontal" = zone === "top" ? "horizontal" : "vertical";
+  return (
+    <div className={`proto-zone proto-zone--${zone} proto-zone--d`}>
+      {seats.map((seat) => (
+        <div className="proto-seat proto-seat--d" key={seat.id}>
+          {seat.cards ? (
+            <CascadeReveal seat={seat} axis={axis} />
+          ) : (
+            <ArcFanD seat={seat} zone={zone} />
+          )}
+          <SeatLabel seat={seat} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function SeatsD({ opponents, children }: SeatsProps) {
+  const zones = seatZones(opponents);
+  return (
+    <div className="proto-table proto-table--d">
+      <ZoneD zone="left" seats={zones.left} />
+      <ZoneD zone="top" seats={zones.top} />
+      <ZoneD zone="right" seats={zones.right} />
       <div className="felt proto-felt-slot">{children}</div>
     </div>
   );

@@ -19,7 +19,7 @@ import type { GameError, PlayerGameView, RoundResultView } from "@yaniv/shared";
 import { PlayingCard } from "./PlayingCard.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
 // [PROTOTYPE — issue #56] throwaway seating-layout variants; delete with the switcher.
-import { SeatsA, SeatsB, SeatsC } from "./prototype/OpponentSeats.tsx";
+import { SeatsA, SeatsB, SeatsC, SeatsD } from "./prototype/OpponentSeats.tsx";
 import { PrototypeSwitcher } from "./prototype/PrototypeSwitcher.tsx";
 import { useVariant } from "./prototype/useVariant.ts";
 import type { SeatEntry } from "./prototype/seatEntry.ts";
@@ -50,7 +50,8 @@ export function RoundEnd({ view, result, error, busy, onNextRound }: RoundEndPro
 
   // [PROTOTYPE — issue #56]
   const variant = useVariant();
-  const SeatsComponent = variant === "a" ? SeatsA : variant === "b" ? SeatsB : variant === "c" ? SeatsC : null;
+  const SeatsComponent =
+    variant === "a" ? SeatsA : variant === "b" ? SeatsB : variant === "c" ? SeatsC : variant === "d" ? SeatsD : null;
   const you = result.players.find((p) => p.playerId === view.you.id);
   const seatEntries: SeatEntry[] = result.players
     .filter((p) => p.playerId !== view.you.id)
