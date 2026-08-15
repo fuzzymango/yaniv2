@@ -118,6 +118,7 @@ export function viewOf(
     drawPileCount: 30,
     lastDiscard,
     buriedCount: 2,
+    lastMove: null,
     roundResult: null,
     winnerIds: null,
   };

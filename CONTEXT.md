@@ -70,6 +70,23 @@ discard; otherwise it is inert, and a tap on it asks for nothing and is refused 
 carries as `DrawAction` — which pile, and which card if it came off the discard — named for
 the tap that produces it rather than the message it sends.
 
+## Last move
+
+The turn that just resolved, named as a fact rather than reconstructed: who took it, which
+pile they drew from, and which card they drew — `RoundState.lastMove`, and `lastMove` on
+the view. Exactly one move, overwritten by the next — not a history, not a log.
+
+It exists because the drawn card is otherwise **unknowable downstream**: what is left of a
+pile after a pickup reaches a client as a count, so a run's two ends, or a same-rank set,
+leave nothing to say which card went. A **slapdown** and a **Yaniv call** are not draws and
+so are not moves in this sense — both leave the last move standing, which is why a client
+watches it for *changes* rather than treating every arrival as fresh news.
+
+Its **drawn card** is the one part that varies by viewer: public when it came off the
+discard pile, since it was face up there a moment earlier, and the mover's alone when it
+came off the deck, since it is a card of a hidden hand now. See
+[ADR-0007](docs/adr/0007-last-move-on-the-wire.md).
+
 ## Slapdown and the slapdown window
 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it

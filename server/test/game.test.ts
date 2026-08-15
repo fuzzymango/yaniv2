@@ -1156,6 +1156,162 @@ describe("callYaniv — ending the match", () => {
   });
 });
 
+/**
+ * `round.lastMove` is what makes "which exact card did they draw" answerable at all: a
+ * client diffing two consecutive views cannot recover it whenever more than one card of
+ * the pile was pickup-eligible, since what is left behind is only ever reported as a
+ * count. One fact, overwritten by the next turn — never a log. See issue #70.
+ */
+describe("the last move", () => {
+  const base = () =>
+    makeState({
+      hands: {
+        p1: ["hearts-3", "spades-9", "clubs-2"],
+        p2: ["diamonds-8"],
+      },
+      drawPile: ["spades-A", "hearts-10"],
+      lastDiscard: ["hearts-4", "hearts-5", "hearts-6"],
+    });
+
+  it("records the mover and the card they took off the deck", () => {
+    const after = unwrap(
+      takeTurn(
+        base(),
+        "p1",
+        { discardCardIds: ["hearts-3"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round.lastMove, {
+      playerId: "p1",
+      drawSource: "deck",
+      drawnCard: card("spades-A"),
+    });
+  });
+
+  /**
+   * The case the field exists for: a run exposes both its ends, so the two cards left on
+   * the table after this pickup are indistinguishable from the one that was taken.
+   */
+  it("records which end of an ambiguous pile was picked up", () => {
+    const after = unwrap(
+      takeTurn(
+        base(),
+        "p1",
+        {
+          discardCardIds: ["hearts-3"],
+          draw: { source: "discard", cardId: "hearts-6" },
+        },
+        rng(),
+      ),
+    );
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round.lastMove, {
+      playerId: "p1",
+      drawSource: "discard",
+      drawnCard: card("hearts-6"),
+    });
+  });
+
+  it("is replaced by the next turn rather than added to", () => {
+    const first = unwrap(
+      takeTurn(
+        base(),
+        "p1",
+        { discardCardIds: ["hearts-3"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+    const second = unwrap(
+      takeTurn(
+        first,
+        "p2",
+        { discardCardIds: ["diamonds-8"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+
+    assert.equal(second.phase, "playing");
+    assert.deepEqual(second.round.lastMove, {
+      playerId: "p2",
+      drawSource: "deck",
+      drawnCard: card("hearts-10"),
+    });
+  });
+
+  /**
+   * A slapdown is not a turn and neither is a Yaniv call a draw, so neither has a move of
+   * its own to record — and clearing what is there would erase the turn a client has not
+   * finished drawing yet.
+   */
+  it("survives a slapdown untouched", () => {
+    const state = makeState({
+      hands: { p1: ["spades-7", "clubs-9"], p2: ["clubs-2"] },
+      drawPile: ["hearts-10"],
+      lastDiscard: ["hearts-7", "diamonds-7"],
+      currentTurnPlayerId: "p2",
+      slapdown: { playerId: "p1", cardId: "spades-7" },
+      lastMove: { playerId: "p1", drawSource: "deck", drawnCardId: "spades-7" },
+    });
+
+    const after = unwrap(slapDown(state, "p1"));
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round.lastMove, {
+      playerId: "p1",
+      drawSource: "deck",
+      drawnCard: card("spades-7"),
+    });
+  });
+
+  it("survives a Yaniv call untouched", () => {
+    const state = makeState({
+      hands: { p1: ["hearts-A", "hearts-2"], p2: ["spades-K", "spades-Q"] },
+      lastMove: { playerId: "p2", drawSource: "discard", drawnCardId: "clubs-4" },
+    });
+
+    const after = unwrap(callYaniv(state, "p1"));
+
+    assert.equal(after.phase, "roundEnd");
+    assert.deepEqual(after.round.lastMove, {
+      playerId: "p2",
+      drawSource: "discard",
+      drawnCard: card("clubs-4"),
+    });
+  });
+
+  it("is empty on a freshly dealt match", () => {
+    const state = unwrap(
+      startGame(makeState({ phase: "lobby", roundNumber: 0 }), "p1", rng()),
+    );
+    assert.equal(state.phase, "playing");
+    assert.equal(state.round.lastMove, null);
+  });
+
+  it("is cleared by the next round, so nothing replays over a fresh deal", () => {
+    const played = unwrap(
+      takeTurn(
+        makeState({
+          hands: { p1: ["hearts-3", "clubs-2"], p2: ["diamonds-4"] },
+          drawPile: ["spades-A"],
+          lastDiscard: ["hearts-6"],
+        }),
+        "p1",
+        { discardCardIds: ["hearts-3"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+    const scored = unwrap(callYaniv(played, "p2"));
+    const next = unwrap(startNextRound(scored, "p1", rng()));
+
+    assert.equal(next.phase, "playing");
+    assert.equal(next.round.lastMove, null);
+  });
+});
+
 describe("startNextRound", () => {
   const finished = () => {
     const state = makeState({

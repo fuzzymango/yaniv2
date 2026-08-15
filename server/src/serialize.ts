@@ -1,11 +1,12 @@
 import type {
+  LastMoveView,
   OpponentView,
   PlayerGameView,
   RoundResultView,
   SelfView,
 } from "@yaniv/shared";
 import { sortHand } from "@yaniv/shared";
-import type { GameState, RoundResult } from "./state.ts";
+import type { GameState, LastMove, RoundResult } from "./state.ts";
 
 /**
  * Names come from the result itself, not from the roster: a player may have given their
@@ -25,6 +26,25 @@ function toRoundResultView(result: RoundResult): RoundResultView {
       delta: p.delta,
       scoreAfter: p.scoreAfter,
     })),
+  };
+}
+
+/**
+ * Redact the move that just resolved for one viewer.
+ *
+ * Whose turn it was and where they drew from are public — a table can watch both happen.
+ * Which card it was is not, when it came off the deck: that card is now part of a hidden
+ * hand, and naming it here would leak through the back door what `OpponentView` is shaped
+ * to keep out. A card taken off the pile was face up a moment earlier, so there is
+ * nothing left to hide about it.
+ */
+function toLastMoveView(move: LastMove, viewerPlayerId: string): LastMoveView {
+  const revealed =
+    move.drawSource === "discard" || move.playerId === viewerPlayerId;
+  return {
+    playerId: move.playerId,
+    drawSource: move.drawSource,
+    drawnCard: revealed ? move.drawnCard : null,
   };
 }
 
@@ -77,6 +97,7 @@ export function serializeStateForPlayer(
       drawPileCount: 0,
       lastDiscard: [],
       buriedCount: 0,
+      lastMove: null,
       roundResult: null,
       winnerIds: null,
     };
@@ -122,6 +143,7 @@ export function serializeStateForPlayer(
     drawPileCount: round.drawPile.length,
     lastDiscard: round.lastDiscard,
     buriedCount: round.buried.length,
+    lastMove: round.lastMove ? toLastMoveView(round.lastMove, viewer.id) : null,
     roundResult:
       revealing && state.lastRoundResult
         ? toRoundResultView(state.lastRoundResult)

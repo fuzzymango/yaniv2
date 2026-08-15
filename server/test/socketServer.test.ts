@@ -920,10 +920,21 @@ describe("playing a match", () => {
       const maySee = new Set(
         [...published.you.hand, ...published.lastDiscard].map((card) => card.id),
       );
+      // A card taken off the face-up pile is public the moment before it is taken, so
+      // `lastMove` is allowed to name it even once it has left the pile for a hand.
+      const lastMove = published.lastMove;
+      if (lastMove?.drawSource === "discard" && lastMove.drawnCard) {
+        maySee.add(lastMove.drawnCard.id);
+      }
       const json = JSON.stringify(published);
       for (const cardId of everyCardId) {
         if (maySee.has(cardId)) continue;
         assert.ok(!json.includes(`"${cardId}"`), `${cardId} leaked into a broadcast`);
+      }
+      // The other half of the same rule: a card off the deck is a card of the mover's
+      // hidden hand, so nobody else is told which one it was.
+      if (lastMove?.drawSource === "deck" && lastMove.playerId !== me) {
+        assert.equal(lastMove.drawnCard, null, "a bot's deck draw was named to us");
       }
       for (const opponent of published.opponents) {
         assert.ok(!("hand" in opponent), "an opponent was sent with a hand attached");

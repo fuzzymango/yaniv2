@@ -157,9 +157,8 @@ window cannot survive a turn. No lock and no timer — ADR-0005.
 
 The wire keeps that shape: a payload-free `slapDown` — the server already knows which card
 is meant — through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for
-whoever loses the race, and eligibility on `SelfView` alone. Both clients had to grow a
-place to offer it: the CLI's `isOurMove` gained the open window, the one position there
-that is not our turn, and the browser's is under "The turn is two taps" below. Against bots
+whoever loses the race, and eligibility on `SelfView` alone. Both clients offer it (the
+CLI's `isOurMove`, the browser's under "The turn is two taps" below), and against bots
 neither can win the race, per ADR-0005 — what it costs, not a defect in either.
 
 ### Round state is nested
@@ -235,17 +234,16 @@ as humans do — it exists so the layer above knows whose turn it has to play. R
 rather than optional so no construction can leave a seat ambiguously controlled.
 
 The integration test's fuzzer (`server/test/integration.test.ts`) has its **own** separate
-discard/draw logic and deliberately does not import from `bot.ts`: its job is to explore
-weird states via randomized draw choices, and coupling it to the real bot would mean a
-smarter bot silently narrows what the fuzz test covers. It does share `legalDiscards`,
-since that's a rules query, not a policy.
+discard/draw logic and deliberately does not import from `bot.ts`: it explores weird states
+via randomized draws, and coupling it to the real bot would let a smarter bot silently
+narrow what it covers. It does share `legalDiscards` — a rules query, not a policy.
 
 ### Errors are values
 
 Every rule-violating action returns a `Result<T>` (`ok: true/false`) carrying a
 `GameErrorCode`, never throws, so TypeScript forces call sites to handle failure. Anything
-that *does* throw (`RoomManager` code allocation exhaustion, `deal` given too small a deck) is
-a genuine defect, not a rule violation — the socket layer lets those propagate rather than
+that *does* throw (`RoomManager` code exhaustion, `deal` given too small a deck) is a
+genuine defect, not a rule violation — the socket layer lets those propagate rather than
 reporting them to a player.
 
 ### Randomness is injected, never ambient
@@ -260,10 +258,14 @@ same seed produce byte-identical final scores.
 `GameState` contains every hand and the full draw pile order and **must never reach a
 client**. `serializeStateForPlayer` (in `serialize.ts`) is the one function that reduces it
 to a `PlayerGameView`: the viewer's own hand, opponents reduced to a `handSize` (never an
-optional `hand` field — the type doesn't allow the shape that could leak), draw pile as a
-count only. Hands are revealed to everyone only at `phase: 'roundEnd'` / `'gameEnd'`, when
-the rules require it. Tests assert no hidden card id appears anywhere in the serialized JSON
-string, mutation-tested by breaking the serializer on purpose to confirm the leak tests fail.
+optional `hand` — the type disallows the leaky shape), draw pile as a count only. Hands are
+revealed to everyone only at `phase: 'roundEnd'` / `'gameEnd'`, where the rules require it.
+Tests assert no hidden card id reaches a payload, mutation-tested by breaking the
+serializer on purpose to confirm the leak tests fail.
+
+**The last move is sent with its drawn card redacted.** `RoundState.lastMove` records who
+just took a turn, which pile they drew from and the card itself; the serializer sends that
+card to everyone off the face-up discard and to the mover alone off the deck. docs/adr/0007.
 
 **A finished round names its own players.** `PlayerRoundResult` carries a `name` copied in
 when the round is scored, and the serializer uses that rather than looking the id up in
@@ -658,11 +660,11 @@ Split, `shared/src` importing a Node builtin is a typecheck error.
 Not oversights — deferred on purpose, in this order of likely next work:
 
 - **What a mid-round seat does while its player is gone.** Reconnect itself is built and
-  whole — the server holds the seat (#64), the session core claims it back (#65), and the
-  page keeps the credential and covers the wait (#66) — so a reload or a backgrounded tab
-  costs a round trip. Nothing pauses, times out, bot-plays or frees a seat whose player
-  never comes back: the table waits on them as on a slow player, and `Player` has no
-  `connected` field for a screen to say so with. The next thing to decide here.
+  whole — the server holds the seat (#64), the session core claims it back (#65), the page
+  keeps the credential and covers the wait (#66) — so a reload costs a round trip. Nothing
+  pauses, times out, bot-plays or frees a seat whose player never comes back: the table
+  waits on them as on a slow player, and `Player` has no `connected` field for a screen to
+  say so with. The next thing to decide here.
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
   spot, so anyone who has not joined by then is playing the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four
@@ -670,8 +672,7 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **Persistence, and sweeping abandoned rooms.** Rooms are in-memory only, so a redeploy
   drops every match in progress — same as a restart, and the reason splitting client and
   server into two services (giving up same-origin, ADR-0003) would be the fix if that cost
-  ever matters. A room nobody resumes and no host closes now leaks until then, on the same
-  accepted terms: no idle sweep is built.
+  ever matters. A room nobody resumes and no host closes leaks until then: no idle sweep.
 - **Slapdown against a bot.** Both clients offer it, but bots neither slap down for
   themselves nor can be raced by a human, `playBotTurns` running in the same tick — both
   deliberate per ADR-0005: a human needs another human behind them.
