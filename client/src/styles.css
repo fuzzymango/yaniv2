@@ -142,6 +142,16 @@ body {
   color: #1c1917;
 }
 
+/*
+ * The one control in this client that ends something for other people. Coloured rather
+ * than filled: it is the answer to a question already being asked in a panel, so it needs
+ * to be findable and not shouted.
+ */
+.button--danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .notice {
   margin: 0;
   padding: 0.75rem;
@@ -187,6 +197,62 @@ body {
   margin: 0;
   font-size: 1rem;
   line-height: 1.45;
+}
+
+/* --- a seat being claimed back --- */
+
+/*
+ * Centred and quiet, like the lost connection and for the same reason: there is nothing to
+ * do here but wait. It is deliberately plainer than that screen — nothing has gone wrong,
+ * the page is simply still arriving — and short-lived, being one round trip long.
+ */
+.resuming {
+  justify-content: center;
+}
+
+.resuming__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.resuming__detail {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 1rem;
+}
+
+/* Drawn rather than loaded, like the cards: a ring with one quarter left open. */
+.spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 3px solid rgb(255 255 255 / 20%);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/*
+ * A phone set to reduce motion gets a pulse instead of a spin — the point is only to say
+ * that something is still happening, and there is more than one way to say it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    50% {
+      opacity: 0.3;
+    }
+  }
 }
 
 /* --- the room code --- */
@@ -461,8 +527,9 @@ body {
 }
 
 /*
- * Where the settings live once they are locked: a single icon in the corner of every
- * in-match screen, and nothing else about them anywhere on it.
+ * The corner of every in-match screen: the settings once they are locked, and — for the
+ * host, and nowhere the host has a row of controls to put it in — closing the room. Never
+ * more than those two, and nothing else about either anywhere else on the screen.
  */
 .topbar {
   display: flex;
@@ -487,6 +554,16 @@ body {
 .topbar__button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/*
+ * Ending the room, which is not the same kind of thing as reading the settings — so it is
+ * the one icon up here that carries a colour. Still dim beside the game itself: a host
+ * looking for it will find it, and nobody else has to look past it every turn.
+ */
+.topbar__button--danger {
+  color: var(--danger);
+  opacity: 0.75;
 }
 
 .topbar__icon {

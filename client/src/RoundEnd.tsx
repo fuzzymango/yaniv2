@@ -27,6 +27,7 @@ import type {
   PlayerRoundResultView,
   RoundResultView,
 } from "@yaniv/shared";
+import { CloseRoom } from "./CloseRoom.tsx";
 import { ZONE_CASCADE } from "./fan.ts";
 import { PlayingCard } from "./PlayingCard.tsx";
 import { CascadeReveal, Seat, SeatZone } from "./Seat.tsx";
@@ -40,6 +41,8 @@ interface RoundEndProps {
   error: GameError | null;
   busy: boolean;
   onNextRound: () => void;
+  /** End the room. Offered to the host alone — see `CloseRoom.tsx`. */
+  onCloseRoom: () => void;
 }
 
 /**
@@ -85,7 +88,14 @@ function RoundDetail({
   );
 }
 
-export function RoundEnd({ view, result, error, busy, onNextRound }: RoundEndProps) {
+export function RoundEnd({
+  view,
+  result,
+  error,
+  busy,
+  onNextRound,
+  onCloseRoom,
+}: RoundEndProps) {
   const isHost = view.hostId === view.you.id;
 
   /** A name off the round's own record, which is the only place a departed seat is left. */
@@ -105,7 +115,10 @@ export function RoundEnd({ view, result, error, busy, onNextRound }: RoundEndPro
   return (
     <main className="screen round">
       {/* The same corner on every in-match screen, so it is always in the same place. */}
-      <SettingsDialog settings={view.settings} />
+      <div className="topbar">
+        {isHost && <CloseRoom variant="icon" busy={busy} onClose={onCloseRoom} />}
+        <SettingsDialog settings={view.settings} />
+      </div>
 
       <header className="round__header">
         <p className="code__label">Round {result.roundNumber}</p>

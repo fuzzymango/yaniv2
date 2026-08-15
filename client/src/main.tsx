@@ -12,20 +12,21 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { io } from "socket.io-client";
 import { App } from "./App.tsx";
+import { systemClock } from "./pacing.ts";
 import { createSession } from "./session.ts";
-import { guardUnload } from "./unload.ts";
+import { seatStore } from "./tokens.ts";
 import "./styles.css";
 
-// Created outside React, so a remount — StrictMode's double render, or any later one —
-// cannot open a second connection and orphan the seat held by the first.
-const session = createSession(io());
-
 /*
- * The only global this client touches, and it is handed over here for the same reason the
- * socket is: everything below this file is testable without a browser. Never torn down —
- * the page outliving the guard is the page going away, which is the event itself.
+ * Created outside React, so a remount — StrictMode's double render, or any later one —
+ * cannot open a second connection and orphan the seat held by the first.
+ *
+ * The store is the one global this client touches, handed over here for the same reason
+ * the socket is: everything below this file is testable without a browser. It is also what
+ * makes a reload cost nothing — the session claims its seat back from whatever it finds
+ * written down, before the page is ever the main menu.
  */
-guardUnload(session, window);
+const session = createSession(io(), systemClock, seatStore(window));
 
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html is missing its root element");

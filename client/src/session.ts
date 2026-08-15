@@ -53,10 +53,11 @@ export type YanivClientSocket = Socket<ServerToClientEvents, ClientToServerEvent
  * CONTEXT.md). Storing them as one thing is the same reasoning that makes the socket
  * layer's session one optional object — a half-remembered seat is unrepresentable.
  *
- * Injected rather than reached for, exactly as `unload.ts` takes its `UnloadTarget`: this
- * and the unload guard are the only two things in the client that want a global, and
- * neither is allowed to hold one. `main.tsx` is where a real store is handed over, and a
- * session given none simply holds its seat for as long as the page is open.
+ * Injected rather than reached for, exactly as the socket is: storage is the one global
+ * anything below `main.tsx` would otherwise want, and nothing below it is allowed to hold
+ * one — which is what keeps this module testable with no browser anywhere in it. The real
+ * one is `seatStore` in `tokens.ts`, handed over in `main.tsx`; a session given none simply
+ * holds its seat for as long as the page is open.
  */
 export interface TokenStore {
   /** The seat to claim back, or null when this page knows of none. */
@@ -185,6 +186,20 @@ export interface Session {
    * which happened, and does not need to be — either way it is out.
    */
   exitToMenu: () => void;
+  /**
+   * End the room for everyone and go back to the main menu. The host's alone, and the
+   * server is what says so — anyone else is answered `NOT_HOST` and left where they are.
+   *
+   * Distinct from `exitToMenu`, which is about a seat: this is about the room, works in
+   * every phase, and a mid-round table nobody is playing on any more is exactly the one it
+   * exists for. That the host's `exitToMenu` closes the room too is a consequence of the
+   * seat they hold, not the same act — there is no phase in which it is offered and this
+   * is not, and no phase where the host may leave a room standing.
+   *
+   * Answered by the ack alone, for `exitToMenu`'s reason: the server stops publishing to a
+   * connection it has turned out of a room, so nothing is coming behind it.
+   */
+  closeRoom: () => void;
   /** Choose a card for the next turn, or un-choose one already chosen. */
   toggleCard: (cardId: string) => void;
   /**
@@ -754,6 +769,11 @@ export function createSession(
     // The view goes with the seat: there is no room to render any more, and a null view
     // *is* the main menu.
     exitToMenu: () => act((ack) => socket.emit("exitToMenu", ack), true),
+
+    // The same shape as leaving, and for the same reason: the room this connection was in
+    // is gone, so the ack is the last thing it will hear about it. A refusal — anyone but
+    // the host — leaves the table exactly where it was, `act` having published nothing.
+    closeRoom: () => act((ack) => socket.emit("closeRoom", ack), true),
 
     // Choosing costs nothing and asks for nothing, so there is no error to clear and no
     // lock to take — only the one already held by a turn on its way out.

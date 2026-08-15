@@ -1,8 +1,8 @@
 /**
  * The screen for a session with no socket under it.
  *
- * Above every other screen rather than beside them, and the second one that is not a
- * function of `view.phase`: whatever position was last drawn is still on the client, but
+ * Above every other screen rather than beside them, and the first of the three that are not
+ * a function of `view.phase`: whatever position was last drawn is still on the client, but
  * none of it is true any more and none of its controls do anything. A player left tapping
  * at a table that has quietly stopped answering is the exact failure this ticket exists
  * for.

@@ -8,6 +8,9 @@
  * things to look past on every turn. Behind an icon they cost a tap on the rare occasion
  * anybody wants them, which is usually once: "why is Yaniv not lighting up at seven?"
  *
+ * The bar it sits in belongs to the screen rather than to this component, because the host
+ * has a second icon in it — closing the room (`CloseRoom.tsx`).
+ *
  * Read-only for everybody, host included, because by now they are read-only *for*
  * everybody: `startGame` locks them for the life of the room and `playAgain` never passes
  * back through the lobby to reopen them (docs/adr/0006). There is no control to show, so
@@ -54,7 +57,7 @@ export function SettingsDialog({ settings }: { settings: RoomSettings }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="topbar">
+    <>
       <button
         className="topbar__button"
         type="button"
@@ -107,6 +110,6 @@ export function SettingsDialog({ settings }: { settings: RoomSettings }) {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

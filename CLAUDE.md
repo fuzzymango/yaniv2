@@ -103,26 +103,28 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 
 | File | Contents |
 |---|---|
-| `main.tsx` | The entrypoint. Opens the socket and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
+| `main.tsx` | The entrypoint. Opens the socket, hands over the seat store and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
 | `session.ts` | The session core: owns the socket and the seat's credential, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). Generic over the opponent, so the live table and the round-end reveal zone their own payloads. `revealSeats` is the round end's own: the viewer's row out for the bottom of the screen, the rest zoned in the order the round scored them |
 | `fan.ts` | The geometry of a hand held at a seat, in two shapes. Arced during play: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Cascaded once it is revealed: `cascadeOffset`, `cascadeFootprint`, `ZONE_CASCADE` (down the sides, across the top) and the `CARD_INDEX_STRIP`/`CASCADE_STEP` pair that keeps a covered card readable. Distances in card widths, so the CSS scales it |
 | `settings.ts` | What only a settings *form* knows: `wholeNumber` (a field part-way through being typed) and `sameSettings` (has the room caught up?). Pure and total, `turn.ts`'s counterpart — what a room may be set to is asked of `shared` |
-| `unload.ts` | `guardUnload` — the `beforeunload` warning, on while a round is live and off otherwise. Injected target, so it is driven under `node:test` with no browser |
+| `tokens.ts` | `seatStore` — the seat written down where a reload will find it, and the only file here that knows the word `localStorage`. Injected storage, so it is driven under `node:test` with no browser; storage that is off, full or holding junk is answered with "no seat" rather than an error |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
-| `App.tsx` | Which screen: no connection comes first, then no view is the main menu, then everything else is a function of `view.phase` |
+| `App.tsx` | Which screen: no connection comes first, then a seat being claimed back, then no view is the main menu, then everything else is a function of `view.phase` |
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
-| `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), leave |
+| `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
 | `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open |
 | `Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held) and `CascadeReveal` (the same hand face up and read). `OpponentSeat` composes the first three for live play; the round end composes its own. Presentational throughout |
 | `RoundEnd.tsx` | `phase: 'roundEnd'` — who called, whether they were Assafed, and the same seated table with every hand face up, each player's round folded onto their own seat's label |
-| `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and leaving |
+| `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and the same two ways out the lobby offers |
 | `SettingsEditor.tsx` | The host's four controls, in the lobby and nowhere else. Offers exactly what `isValidSettings` accepts, and sends the whole object per change |
 | `SettingsValues.tsx` | The four values as text — the lobby for everyone but the host, and the in-match modal for everyone — plus the box (`SettingsPanel`) and title both lobby listings share |
-| `SettingsDialog.tsx` | The icon every in-match screen carries, and the modal behind it. The only place a setting is shown once the match is running |
-| `Disconnected.tsx` | No socket — the second screen with no view behind it. One screen for a connection that went and one that never arrived, since neither leaves anything to tap |
+| `SettingsDialog.tsx` | The settings icon every in-match screen carries, and the modal behind it. The only place a setting is shown once the match is running. The bar it sits in belongs to the screen, since the host has a second icon in it |
+| `CloseRoom.tsx` | The host's way of ending a room, drawn as a topbar icon where there is no row of controls and as a button where there is. The one control in this client that asks before it acts |
+| `Resuming.tsx` | A seat being claimed back — the third screen with no view behind it, drawn where the main menu otherwise would be so a reload never flashes it |
+| `Disconnected.tsx` | No socket — the screen above every other. One screen for a connection that went and one that never arrived, since neither leaves anything to tap |
 | `PlayingCard.tsx` | One card, drawn in CSS. Presentational only — it does not know what a card means where it sits |
 | `Room.tsx` | The fallback for a `roundEnd` with no result behind it — a position the wire type allows and the server does not produce |
 | `styles.css` | Mobile-first. Cards are drawn in CSS — no image assets |
@@ -560,9 +562,10 @@ the server sends one today; the handler exists because the contract does.
 each of them as a fresh view, and a screen that re-renders in place shows a seat filling or
 emptying by itself. The CLI needs those nudges only because its frames scroll apart.
 
-**The client never enforces a rule the server owns.** Showing the start control to the
-host alone is a courtesy so a guest is not hunting for a button that was never theirs; the
-rule is `NOT_HOST`, and the server is what says it. Refusing an empty name locally is the
+**The client never enforces a rule the server owns.** Showing the start control — and the
+close-room control, on every screen a room has — to the host alone is a courtesy so a guest
+is not hunting for a button that was never theirs; the rule is `NOT_HOST`, and the server is
+what says it. Refusing an empty name locally is the
 one exception, and only because the server enforces the same rule — it is the client
 declining to offer a move it knows will be refused, not a rule of its own.
 
@@ -570,10 +573,12 @@ declining to offer a move it knows will be refused, not a rule of its own.
 
 The session holds its seat's `ResumeRequest` in two places, and the split is the whole
 design: **in memory**, which survives a dropped socket, and in an injected **`TokenStore`**,
-which is what could survive the page. `createSession` takes the store the way `guardUnload`
-takes its window — the client reaches for no global anywhere — and defaults to one that
-keeps nothing, so a session given none still resumes across a live reconnect and simply
-starts over on a reload. `main.tsx` hands over no real store yet (issue #66).
+which survives the page. `createSession` takes the store the way it takes its socket — the
+client reaches for no global below `main.tsx` — and defaults to one that keeps nothing, so a
+session given none still resumes across a live reconnect and simply starts over on a reload.
+The real one is `seatStore` (`tokens.ts`), one `localStorage` key holding one seat, and
+`main.tsx` is the only place it is built: a reload therefore lands back at the table, and a
+page that cannot write anything down behaves exactly as the client did before it existed.
 
 The credential is written down at the two ways in and nowhere else, since the ack of a
 seating event is the only place a token is ever sent; `joinRoom`'s names the seat but not
@@ -622,17 +627,12 @@ nothing and says nothing.
 buffered into a socket that has reached nothing is the same dead screen. Only the first of a
 run of failed retries is news.
 
-**The `beforeunload` warning is registered while a round is live and not otherwise**
-(`unload.ts`). A reload drops the socket, and while nothing hands the session a store to
-keep a credential in (issue #66) that costs the player their place in a hand being played
-— worth an argument at
-`playing` and `roundEnd`, and not worth one at the main menu, the lobby or a finished match,
-where a control on the screen already does exactly that. `connected` is part of the same
-question: a connection already gone has already cost them whatever it was going to cost, so
-arguing over the tab argues over nothing. It is added and removed rather than left
-listening, because a page with a `beforeunload` listener is held out of the back/forward
-cache either way. The target is injected, so `main.tsx` is the only place that hands a
-global over; whether the warning appears at all is the browser's call.
+**Nothing argues about the tab closing.** A `beforeunload` warning guarded a live round
+until issue #66, and went with it: it existed because a reload cost the player their place
+in a hand, and a reload now costs a round trip and a spinner. It would also be worse than
+nothing on a phone, since a page carrying that listener is held out of the back/forward
+cache — which is exactly how a backgrounded tab comes back without reloading at all. A
+player who cannot be resumed at all (storage off, or full) loses their place in silence.
 
 ### Tooling
 
@@ -657,12 +657,12 @@ Split, `shared/src` importing a Node builtin is a typecheck error.
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **Reconnect, on the page.** The server half landed with issue #64 and the session core's
-  with #65: a backgrounded mobile tab comes back to its own seat, since the socket returning
-  claims it. A *reload* does not, because nothing hands the session a `TokenStore` that
-  outlives the page (issue #66), and nothing renders `resuming` — so `App` would flash the
-  main menu even once one does. `Player` has no `connected` field, deliberately absent
-  rather than half-built. Still open: what a mid-round seat does while its player is gone.
+- **What a mid-round seat does while its player is gone.** Reconnect itself is built and
+  whole — the server holds the seat (#64), the session core claims it back (#65), and the
+  page keeps the credential and covers the wait (#66) — so a reload or a backgrounded tab
+  costs a round trip. Nothing pauses, times out, bot-plays or frees a seat whose player
+  never comes back: the table waits on them as on a slow player, and `Player` has no
+  `connected` field for a screen to say so with. The next thing to decide here.
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
   spot, so anyone who has not joined by then is playing the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four

@@ -55,10 +55,10 @@ import { testClock } from "./helpers.ts";
 /**
  * Somewhere to keep a seat's credential, standing in for whatever the browser will use.
  *
- * The same shape `unload.test.ts` gives the guard's window: the store is injected precisely
- * so that this suite can hold it in a variable, read what was put there, and hand the same
- * one to a second session the way a reload hands `localStorage` back to a fresh page — with
- * no browser anywhere in it.
+ * The store is injected precisely so that this suite can hold it in a variable, read what
+ * was put there, and hand the same one to a second session the way a reload hands
+ * `localStorage` back to a fresh page — with no browser anywhere in it. What the browser's
+ * own store does with a seat is `tokens.test.ts`'s question, not this one's.
  */
 function fakeTokens(seat: ResumeRequest | null = null) {
   let held = seat;
@@ -756,6 +756,81 @@ describe("the session core", () => {
       assert.equal(own.view!.phase, "lobby");
       assert.equal(own.notice, null, "the last room's news is not this room's");
       assert.equal(own.error, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /*
+   * Closing is the host's own way out of a room, and the only one that works mid-round —
+   * `exitToMenu` is refused there, for a hand and a turn order the round is still being
+   * played against. From the caller's side it is `exitToMenu`'s shape exactly: the ack is
+   * the whole of the answer, because the server stops publishing to a connection it has
+   * just turned out.
+   */
+  it("closes a room mid-round when the host says so", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await twoHumanMatch(server);
+      const tokens = fakeTokens();
+      // The host's seat, written down where a reload would find it — a room that has been
+      // closed must not leave a credential behind to be claimed back.
+      tokens.store.set({
+        roomCode: host.getSnapshot().view!.roomCode,
+        playerId: host.getSnapshot().view!.you.id,
+        resumeToken: "the host's",
+      });
+
+      host.closeRoom();
+
+      const gone = await waitForSnapshot(host, "the host's menu", (s) => s.view === null);
+      assert.equal(gone.error, null, "closing a room is not a failure");
+      assert.equal(gone.busy, false);
+      assert.deepEqual(gone.selection, [], "nothing chosen carries out of a closed room");
+
+      // Everyone else hears it where they are sitting, mid-hand and with nothing tapped.
+      const closed = await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null);
+      assert.match(closed.notice ?? "", /host/, "and is told which of them ended it");
+      assert.equal(closed.error, null, "nothing the guest did was refused");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("forgets the seat of a host who closes the room", async () => {
+    const server = await startServer(7);
+    try {
+      const tokens = fakeTokens();
+      const host = await server.openSession(undefined, tokens.store);
+      host.createRoom("Ada");
+      await waitForSnapshot(host, "the room", (s) => s.view !== null && !s.busy);
+      assert.ok(tokens.stored(), "seated, so there is a seat to claim back");
+
+      host.closeRoom();
+      await waitForSnapshot(host, "the host's menu", (s) => s.view === null && !s.busy);
+
+      assert.equal(tokens.stored(), null, "a room that has been closed is not one to return to");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refuses a guest who asks to close the room, and leaves them at the table", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, guest] = await twoHumanMatch(server);
+
+      guest.closeRoom();
+
+      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
+      assert.equal(refused.error!.code, "NOT_HOST");
+      assert.equal(refused.view!.phase, "playing", "and the round they are in plays on");
+      assert.equal(refused.busy, false, "with the controls back");
+      assert.equal(
+        host.getSnapshot().view!.phase,
+        "playing",
+        "the host's table is untouched by a guest asking",
+      );
     } finally {
       await server.close();
     }
