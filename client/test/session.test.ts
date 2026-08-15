@@ -30,6 +30,7 @@ import {
   pickupCandidates,
   type GameError,
   type PlayerGameView,
+  type ResumeRequest,
   type RoomSettings,
 } from "@yaniv/shared";
 import { RoomManager } from "@yaniv/server/src/roomManager.ts";
@@ -42,9 +43,36 @@ import {
   type SocketOptions,
 } from "socket.io-client";
 import type { Clock } from "../src/pacing.ts";
-import { createSession, type Session, type SessionSnapshot } from "../src/session.ts";
+import {
+  createSession,
+  type Session,
+  type SessionSnapshot,
+  type TokenStore,
+} from "../src/session.ts";
 import { isLegalCall } from "../src/turn.ts";
 import { testClock } from "./helpers.ts";
+
+/**
+ * Somewhere to keep a seat's credential, standing in for whatever the browser will use.
+ *
+ * The same shape `unload.test.ts` gives the guard's window: the store is injected precisely
+ * so that this suite can hold it in a variable, read what was put there, and hand the same
+ * one to a second session the way a reload hands `localStorage` back to a fresh page — with
+ * no browser anywhere in it.
+ */
+function fakeTokens(seat: ResumeRequest | null = null) {
+  let held = seat;
+  const store: TokenStore = {
+    get: () => held,
+    set: (next) => {
+      held = next;
+    },
+    clear: () => {
+      held = null;
+    },
+  };
+  return { store, stored: () => held };
+}
 
 interface Harness {
   /**
@@ -54,8 +82,20 @@ interface Harness {
    * in: a suite about anything other than pacing wants the positions as the server sent
    * them, not spread over seconds of real time. A test that *is* about pacing hands in a
    * clock it holds.
+   *
+   * The store is optional for the same reason it is optional in `main.tsx`: a session that
+   * keeps nothing behaves exactly as one did before there was anything to keep.
    */
-  openSession: (clock?: Clock) => Promise<Session>;
+  openSession: (clock?: Clock, tokens?: TokenStore) => Promise<Session>;
+  /**
+   * A session opened the way a page load opens one — built on a socket that has not
+   * connected yet, rather than waited for.
+   *
+   * That is the whole of what "cold boot" means here, and it is a different path through
+   * the session core from `openSession`: a claim made before there is a socket to make it
+   * on has to wait for one.
+   */
+  bootSession: (tokens: TokenStore, clock?: Clock) => Session;
   /**
    * Take a session's connection away, the way a tunnel or a locked phone does.
    *
@@ -116,17 +156,23 @@ async function startServer(
   const connections = new Map<Session, ClientSocket>();
 
   return {
-    openSession: (clock = testClock()) =>
+    openSession: (clock = testClock(), tokens) =>
       new Promise((resolve) => {
         const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
         // `once`, because a connection that comes back fires this again — and a second
         // session on the same socket would double every handler the first one attached.
         client.once("connect", () => {
-          const session = createSession(client, clock);
+          const session = createSession(client, clock, tokens);
           connections.set(session, client);
           resolve(session);
         });
       }),
+    bootSession: (tokens, clock = testClock()) => {
+      const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
+      const session = createSession(client, clock, tokens);
+      connections.set(session, client);
+      return session;
+    },
     drop: (session, keepTrying = false) => {
       const client = connections.get(session);
       if (!client) throw new Error("that session was never opened here");
@@ -1582,10 +1628,11 @@ describe("a finished match", () => {
 /**
  * The ways a session goes wrong, and what a player is told about each.
  *
- * A dropped connection is the one that matters most on a phone: the tab is backgrounded,
- * the socket is torn down with no chance to react, and the room goes with it (ADR-0004).
- * Nothing on the screen would say so, and every control on the table would still look
- * live, which is the state this covers.
+ * A dropped connection is the one that matters most on a phone: the tab is backgrounded and
+ * the socket is torn down with no chance to react. Nothing on the screen would say so, and
+ * every control on the table would still look live, which is the state this covers — along
+ * with the way back out of it, since the seat is held for whoever can produce its
+ * credential and the whole point of keeping one is sitting down in it again.
  */
 describe("when the connection goes", () => {
   it("says so when the connection drops", async () => {
@@ -1623,29 +1670,67 @@ describe("when the connection goes", () => {
     }
   });
 
-  it("returns to the main menu, saying why, when the connection comes back", async () => {
+  it("sits back down at the same table when the connection comes back", async () => {
     const server = await startServer(7);
     try {
       const host = await soloMatch(server);
+      const table = host.getSnapshot().view!;
 
       // The transport closed underneath the client rather than hung up, so socket.io
       // reconnects by itself — the flaky-network case, and the only one that comes back.
       server.drop(host, true);
       await waitForSnapshot(host, "the drop", (s) => !s.connected);
 
-      const back = await waitForSnapshot(host, "the connection", (s) => s.connected);
-      assert.equal(
-        back.view,
-        null,
-        "the room did not survive the drop, so there is no table to return to",
+      const back = await waitForSnapshot(
+        host,
+        "the seat",
+        (s) => s.connected && !s.resuming,
       );
-      assert.ok(back.notice, "and the player is told where it went");
+      assert.equal(back.view!.roomCode, table.roomCode, "the same table, not the menu");
+      assert.equal(back.view!.phase, "playing");
+      assert.equal(back.notice, null, "nothing was lost, so there is nothing to say");
+      assert.equal(back.error, null);
+      assert.equal(back.busy, false);
+
+      // A seat really claimed back, not merely a position left on the screen: the proof
+      // is a move made from it.
+      takeATurn(host, back.view!);
+      const played = await waitForSnapshot(host, "the move", (s) => !s.busy);
+      assert.equal(played.error, null, "the server took the turn from this connection");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns to the main menu, saying why, when the room did not survive", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, roomCode] = await hostARoom(server, "Ada");
+      const guest = await server.openSession();
+      guest.joinRoom(roomCode, "Grace");
+      await seated(guest, "the guest");
+
+      // The guest is off the air when the host closes the room under them: nothing
+      // reaches them to say so, and the seat they come back to has gone with it.
+      server.drop(guest, true);
+      await waitForSnapshot(guest, "the drop", (s) => !s.connected);
+      host.exitToMenu();
+      await waitForSnapshot(host, "the host's exit", (s) => s.view === null && !s.busy);
+
+      const back = await waitForSnapshot(
+        guest,
+        "the failed claim",
+        (s) => s.connected && !s.resuming,
+      );
+      assert.equal(back.view, null, "there is no table to return to");
+      assert.ok(back.notice, "and the player is told so");
       assert.equal(back.error, null, "which is news, not a refusal of anything they did");
       assert.deepEqual(back.selection, [], "nothing chosen carries into a room that is gone");
+      assert.equal(back.busy, false);
 
       // A working connection, not merely a hopeful screen: the proof is a room on it.
-      host.createRoom("Ada");
-      const another = await waitForSnapshot(host, "a fresh room", (s) => s.view !== null);
+      guest.createRoom("Grace");
+      const another = await waitForSnapshot(guest, "a fresh room", (s) => s.view !== null);
       assert.equal(another.view!.phase, "lobby");
       assert.equal(another.notice, null, "and the news goes when they act again");
     } finally {
@@ -1669,6 +1754,34 @@ describe("when the connection goes", () => {
       const nothing = await waitForSnapshot(session, "the failure", (s) => !s.connected);
       assert.equal(nothing.view, null, "there was never a room to be in");
       assert.equal(nothing.notice, null, "and so nothing was lost to say anything about");
+    } finally {
+      client.disconnect();
+    }
+  });
+
+  it("stops claiming a seat when there is no server to claim it from", async () => {
+    // The same dead port as above, opened on a page that has a seat to ask for. The claim
+    // never reaches anybody, so nothing is ever going to answer it.
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, resolve));
+    const { port } = probe.address() as AddressInfo;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    const tokens = fakeTokens({
+      roomCode: "ABCD",
+      playerId: "a-seat-somewhere",
+      resumeToken: "its-token",
+    });
+    const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
+    try {
+      const session = createSession(client, testClock(), tokens.store);
+      assert.equal(session.getSnapshot().resuming, true, "the claim is owed from the off");
+
+      const nothing = await waitForSnapshot(session, "the failure", (s) => !s.connected);
+      assert.equal(nothing.resuming, false, "but nothing has been asked of anybody");
+      assert.equal(nothing.busy, false);
+      assert.equal(nothing.notice, null, "and no seat has been refused to say so about");
+      assert.ok(tokens.stored(), "the seat is still there to ask for when a socket lands");
     } finally {
       client.disconnect();
     }
@@ -1701,6 +1814,115 @@ describe("when the connection goes", () => {
 
       await new Promise((resolve) => setTimeout(resolve, 50));
       assert.equal(menu.getSnapshot().error, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("claims a stored seat back on a cold boot, before the main menu", async () => {
+    const server = await startServer(7);
+    try {
+      const tokens = fakeTokens();
+      const first = await server.openSession(undefined, tokens.store);
+      first.createRoom("Ada");
+      const lobby = await waitForSnapshot(
+        first,
+        "the room",
+        (s) => s.view !== null && !s.busy,
+      );
+      const { roomCode } = lobby.view!;
+      assert.equal(tokens.stored()?.roomCode, roomCode, "the seat was written down");
+
+      // The page is reloaded: the socket goes for good and a fresh session comes up on
+      // the same store, which is all a new page inherits from the old one.
+      server.drop(first);
+      const back = server.bootSession(tokens.store);
+
+      assert.equal(back.getSnapshot().resuming, true, "the claim is under way at once");
+      assert.equal(back.getSnapshot().view, null, "with nothing yet to show for it");
+
+      const seat = await waitForSnapshot(back, "the seat", (s) => !s.resuming);
+      assert.equal(seat.view!.roomCode, roomCode, "the room it left off in");
+      assert.equal(seat.view!.you.name, "Ada", "and the same seat at it");
+      assert.equal(seat.busy, false, "with the controls back");
+      assert.equal(seat.notice, null);
+      assert.equal(seat.error, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("forgets a seat it is refused, and says the game has gone", async () => {
+    const server = await startServer(7);
+    try {
+      const tokens = fakeTokens();
+      const first = await server.openSession(undefined, tokens.store);
+      first.createRoom("Ada");
+      await waitForSnapshot(first, "the room", (s) => s.view !== null && !s.busy);
+
+      // A credential that names a live room and cannot open a seat in it — a token from
+      // a room the server has since forgotten, or one that was never this seat's.
+      tokens.store.set({ ...tokens.stored()!, resumeToken: "not-that-seat's-token" });
+      server.drop(first);
+
+      const back = server.bootSession(tokens.store);
+      const menu = await waitForSnapshot(back, "the refusal", (s) => !s.resuming);
+
+      assert.equal(menu.view, null, "which leaves the main menu");
+      assert.ok(menu.notice, "and says why they are looking at it");
+      assert.equal(menu.error, null, "news, not a refusal of anything they did");
+      assert.equal(menu.busy, false);
+      assert.equal(tokens.stored(), null, "a credential that fails is not kept to fail again");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("forgets the seat when the player gives it up", async () => {
+    const server = await startServer(7);
+    try {
+      const tokens = fakeTokens();
+      const session = await server.openSession(undefined, tokens.store);
+      session.createRoom("Ada");
+      await waitForSnapshot(session, "the room", (s) => s.view !== null && !s.busy);
+      assert.ok(tokens.stored(), "seated, so there is a seat to claim back");
+
+      session.exitToMenu();
+      await waitForSnapshot(session, "the menu", (s) => s.view === null && !s.busy);
+
+      assert.equal(tokens.stored(), null, "a seat given up is not one to come back to");
+
+      // And not held in memory either, which only a returning connection can show: one
+      // that still had the seat would claim it, and be told the seat had gone.
+      server.drop(session, true);
+      await waitForSnapshot(session, "the drop", (s) => !s.connected);
+      const back = await waitForSnapshot(session, "the connection", (s) => s.connected);
+      assert.equal(back.notice, null, "nothing was asked for, so nothing was refused");
+      assert.equal(back.resuming, false, "and nothing was claimed on the way back");
+      assert.equal(back.view, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("forgets the seat when the room closes under it", async () => {
+    const server = await startServer(7);
+    try {
+      const [host, roomCode] = await hostARoom(server, "Ada");
+      const tokens = fakeTokens();
+      const guest = await server.openSession(undefined, tokens.store);
+      guest.joinRoom(roomCode.toLowerCase(), "Grace");
+      await seated(guest, "the guest");
+      assert.equal(
+        tokens.stored()?.roomCode,
+        roomCode,
+        "the room as the server spells it, not as it was typed",
+      );
+
+      host.exitToMenu();
+      await waitForSnapshot(guest, "the closure", (s) => s.view === null);
+
+      assert.equal(tokens.stored(), null, "there is no room left to claim a seat in");
     } finally {
       await server.close();
     }

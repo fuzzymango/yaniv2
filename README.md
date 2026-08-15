@@ -209,12 +209,13 @@ automatically as part of the build phase.
 
 ## Not yet built
 
-Reconnecting on the client, and persistence (rooms are in-memory, so a restart or redeploy
+Surviving a page reload, and persistence (rooms are in-memory, so a restart or redeploy
 drops games in progress). A match plays end to end in the browser now: create or join, set
 the room up, deal, take turns, watch a paced run of bot turns, call Yaniv, and finish on the
 standings with another match one tap away; a dropped connection says so on screen rather
-than leaving you tapping at a dead table. The server half of reconnect has landed — a drop
-leaves the room and the seat alone, and a `resumeSeat` with the seat's token puts a fresh
-connection back in it, while the host can end a room outright from any phase with
-`closeRoom`. No client presents a token yet, so a backgrounded mobile tab still loses its
-own place, even though it no longer ends anyone else's match (`docs/adr/0004`).
+than leaving you tapping at a dead table. Reconnect works within a page — a drop leaves the
+room and the seat alone, and the socket coming back presents the seat's token and picks up
+where it left off, while the host can end a room outright from any phase. What is missing is
+somewhere to keep that token across a reload, and a loading screen to cover the wait, so a
+refresh still costs you your own place even though it no longer ends anyone else's match
+(`docs/adr/0004`).

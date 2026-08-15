@@ -55,6 +55,7 @@ function snapshotOf(phase: Phase | null, connected = true): SessionSnapshot {
     notice: null,
     busy: false,
     connected,
+    resuming: false,
     selection: [],
   };
 }

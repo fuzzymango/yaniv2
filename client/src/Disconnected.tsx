@@ -7,15 +7,16 @@
  * at a table that has quietly stopped answering is the exact failure this ticket exists
  * for.
  *
- * It says the match is over rather than holding out hope for it, because it is: the server
- * destroys a room the moment a connection in it drops, and reconnect is the next piece of
- * work rather than this one (ADR-0004). What is being waited for is a *fresh* connection,
- * which lands the player back at the main menu — see the `connect` handler in `session.ts`.
+ * It says the seat is waiting rather than that the match is over, because it is: the server
+ * holds a room open through a drop, and the connection coming back claims the seat straight
+ * back — see the `connect` handler in `session.ts`. What is being waited for is a *fresh*
+ * connection, and the player is put back where it finds them. If the table did go while
+ * they were away, they are told so then, on a screen that can say it.
  *
  * One screen for both ways there is no socket — one that went, and one that never arrived
  * — because they are the same screen to whoever is looking at it: nothing they tap will do
  * anything, and the only thing to do about either is wait. The words are chosen to be true
- * of both.
+ * of both: from the main menu, where the player left off *is* the main menu.
  *
  * There is no retry control, deliberately. socket.io is already trying, on its own backoff,
  * and a button that did the same thing on demand would mostly be a way of asking a player
@@ -32,8 +33,8 @@ export function Disconnected() {
       <div className="dropped__body" role="alert">
         <h1 className="dropped__title">No connection</h1>
         <p className="dropped__detail">
-          Trying to reach the server. Any match you were in has ended — you will be back at
-          the main menu when the connection returns.
+          Trying to reach the server. You will pick up where you left off when the
+          connection returns.
         </p>
         <p className="code__hint">Check your signal if this stays up.</p>
       </div>

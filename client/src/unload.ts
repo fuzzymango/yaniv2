@@ -1,10 +1,10 @@
 /**
  * The one thing this client asks the browser for: don't close that tab yet.
  *
- * A reload or a closed tab drops the socket. The server holds the seat open for whoever
- * dropped, but this client cannot yet present the token that would claim it back (issue
- * #65), so the gesture still costs the player the hand they were in the middle of — and
- * they are asked whether they meant it.
+ * A reload or a closed tab drops the socket. The session core can claim a dropped seat
+ * back, but only from a credential that outlived the page, and `main.tsx` hands it nowhere
+ * to keep one yet (issue #66) — so a reload still costs the player the hand they were in
+ * the middle of, and they are asked whether they meant it.
  *
  * Only while a round is live. The positions where leaving is *allowed* — the main menu,
  * the lobby, a finished match — have a control on the screen that does exactly that, and a

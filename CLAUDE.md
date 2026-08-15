@@ -104,7 +104,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | File | Contents |
 |---|---|
 | `main.tsx` | The entrypoint. Opens the socket and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
-| `session.ts` | The session core: owns the socket, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
+| `session.ts` | The session core: owns the socket and the seat's credential, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). Generic over the opponent, so the live table and the round-end reveal zone their own payloads. `revealSeats` is the round end's own: the viewer's row out for the bottom of the screen, the rest zoned in the order the round scored them |
@@ -469,20 +469,22 @@ Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` c
 identity, so a mutated object would leave React rendering a position that has already
 moved on.
 
-Five fields, and each answers a different question:
+Six fields, and each answers a different question:
 
 - **`view`** — the position, or `null`. Null *is* the main menu: the one screen that is
   not a function of `view.phase`, because before a room exists there is nothing for the
-  server to have sent. See `docs/adr/0004`.
+  server to have sent — with `resuming` the one qualification, below. See `docs/adr/0004`.
 - **`error`** — a `GameError`, i.e. something the player asked for and was refused, or one
   the server pushed as `errorMessage`. Cleared the moment they try again, because a refused
   action costs them nothing.
-- **`notice`** — news about the room that is *not* a refusal: `roomClosed`, and a
-  connection that dropped and took its room with it. Separate from `error` precisely
-  because there is no action to blame and nothing to retry, and because it arrives while
-  the player is sitting still.
+- **`notice`** — news about the room that is *not* a refusal: `roomClosed`, and a seat that
+  could not be claimed back. Separate from `error` precisely because there is no action to
+  blame and nothing to retry, and because it arrives while the player is sitting still.
 - **`connected`** — whether there is a socket to play over. See "A session that loses its
   socket" below.
+- **`resuming`** — a seat is being claimed back and the answer has not landed. It always
+  rides with `busy`, and says what `busy` cannot: that a null view is a table still being
+  asked for rather than the main menu. See "Claiming a seat back" below.
 - **`selection`** — the cards tapped for the next turn, by id, in tap order. It lives here
   rather than in a component because it has to survive views arriving underneath it: a card
   that leaves the hand leaves the selection with it, which is `retainSelection` applied to
@@ -564,6 +566,36 @@ rule is `NOT_HOST`, and the server is what says it. Refusing an empty name local
 one exception, and only because the server enforces the same rule — it is the client
 declining to offer a move it knows will be refused, not a rule of its own.
 
+### Claiming a seat back
+
+The session holds its seat's `ResumeRequest` in two places, and the split is the whole
+design: **in memory**, which survives a dropped socket, and in an injected **`TokenStore`**,
+which is what could survive the page. `createSession` takes the store the way `guardUnload`
+takes its window — the client reaches for no global anywhere — and defaults to one that
+keeps nothing, so a session given none still resumes across a live reconnect and simply
+starts over on a reload. `main.tsx` hands over no real store yet (issue #66).
+
+The credential is written down at the two ways in and nowhere else, since the ack of a
+seating event is the only place a token is ever sent; `joinRoom`'s names the seat but not
+the room, so the room is completed from what was sent — upper-cased as the server matched
+it, not as it was typed. It is forgotten in exactly three cases: the player's own
+`exitToMenu`, an incoming `roomClosed`, and a claim the server refuses. **A dropped
+connection is pointedly not one of them** — that is what it is kept for.
+
+A claim goes out on session creation (a stored seat, i.e. a cold boot) and on every
+reconnect, and **nothing is emitted into a socket that is down**: socket.io would buffer it,
+the `connect` handler sends one anyway, and the second is answered `ALREADY_IN_ROOM` — a
+refusal indistinguishable from a seat that has gone. So `claimSeat` publishes `resuming` and
+emits only if `socket.connected`, and `connect` does the sending for a claim made before
+there was a socket to make it on; `resuming` and `connected` go up in one publish, or a
+screen would read the moment between them as the main menu.
+
+A refused claim clears the credential, empties the pacer and lands on `view: null` with one
+`notice` — the same sentence a room that has gone gets, since which of the two it was is a
+distinction the server deliberately does not draw. A successful one publishes the acked view
+directly rather than through the pacer: it is the answer to this call and to nobody else's,
+with no chain behind it to spread out.
+
 ### A session that loses its socket
 
 **`connected` is asked about before the view is.** A dropped socket makes every control on
@@ -573,13 +605,17 @@ every screen a lie, whatever the last position drawn still shows, so `App` rende
 what is emitted before then, and a page that announced a lost connection for the first
 moment of every load would be crying wolf.
 
-**A drop leaves the player on the disconnected screen, and the session says why once there
-is a screen to say it on.** `disconnect` resets the pacer, drops the watermark and releases
-`busy` — nothing is in flight over a socket that is not there — but leaves the view alone,
-since that screen is over it anyway. The *reconnect* clears it, landing the player on the
-main menu with a `notice`: the socket comes back with an identity the server has never heard
-of. It should now present a `resumeSeat` instead — the client has not caught up (issue #65).
-A drop at the menu costs nothing and says nothing.
+**A drop leaves the player on the disconnected screen, and the connection coming back sits
+them straight back down.** `disconnect` resets the pacer, drops the watermark and releases
+`busy` — nothing is in flight over a socket that is not there, a claim included — but leaves
+the view alone, since that screen is over it anyway and is very likely the position still
+there when the socket returns. The *reconnect* claims the seat rather than clearing
+anything: `connect` sends `resumeSeat` with the credential the session is holding, and the
+position comes back in the ack. The main menu is now the fallback, for a returning
+connection with no seat to claim — which is a real if narrow case, since the server
+broadcasts the lobby *before* it acks the join that names the seat, so a drop in between
+leaves a view on the screen and nothing to ask for it back with. A drop at the menu costs
+nothing and says nothing.
 
 **A connection that never arrived is the same screen.** `connect_error` is treated the way
 `disconnect` is, because the two are indistinguishable to whoever is looking at them: taps
@@ -587,8 +623,9 @@ buffered into a socket that has reached nothing is the same dead screen. Only th
 run of failed retries is news.
 
 **The `beforeunload` warning is registered while a round is live and not otherwise**
-(`unload.ts`). A reload drops the socket, and while the browser cannot yet resume a seat
-(issue #65) that costs the player their place in a hand being played — worth an argument at
+(`unload.ts`). A reload drops the socket, and while nothing hands the session a store to
+keep a credential in (issue #66) that costs the player their place in a hand being played
+— worth an argument at
 `playing` and `roundEnd`, and not worth one at the main menu, the lobby or a finished match,
 where a control on the screen already does exactly that. `connected` is part of the same
 question: a connection already gone has already cost them whatever it was going to cost, so
@@ -620,12 +657,12 @@ Split, `shared/src` importing a Node builtin is a typecheck error.
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **Reconnect, on the client.** The server half has landed (issue #64): rooms survive a
-  drop and `resumeSeat` rebinds. The browser still treats a reconnect as a dead room
-  (issue #65), so a backgrounded mobile tab cannot yet come back to its own seat — though
-  it no longer ends anyone else's match, which is the gap deploying ahead of reconnect
-  (ADR-0004) left live. `Player` has no `connected` field, deliberately absent rather than
-  half-built. Still open: what a mid-round seat does while its player is gone.
+- **Reconnect, on the page.** The server half landed with issue #64 and the session core's
+  with #65: a backgrounded mobile tab comes back to its own seat, since the socket returning
+  claims it. A *reload* does not, because nothing hands the session a `TokenStore` that
+  outlives the page (issue #66), and nothing renders `resuming` — so `App` would flash the
+  main menu even once one does. `Player` has no `connected` field, deliberately absent
+  rather than half-built. Still open: what a mid-round seat does while its player is gone.
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
   spot, so anyone who has not joined by then is playing the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four
