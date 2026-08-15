@@ -48,11 +48,10 @@ function zoneAt(i: number): Zone {
  * `right` cannot hold two: doubling it needs a 6th opponent, and `MAX_PLAYERS` is 6, so
  * five is all there ever are. That is a fact about the room, not a case handled here.
  *
- * Generic over the opponent because the two screens due to consume it hold different
- * payloads — the live table a `PlayerGameView` opponent, the round-end reveal a scored
- * player off the round's own record — and the same seats have to come out of both without
- * either being wrapped in a type this function would then have to know about. Neither
- * calls it yet; the layout that will is a later ticket.
+ * Generic over the opponent because the two screens consuming it hold different payloads —
+ * the live table a `PlayerGameView` opponent, the round-end reveal a scored player off the
+ * round's own record — and the same seats have to come out of both without either being
+ * wrapped in a type this function would then have to know about.
  */
 export function seatZones<T>(opponents: readonly T[]): Record<Zone, T[]> {
   const zones: Record<Zone, T[]> = { left: [], top: [], right: [] };
@@ -60,4 +59,39 @@ export function seatZones<T>(opponents: readonly T[]): Record<Zone, T[]> {
     zones[zoneAt(i)].push(opponent);
   });
   return zones;
+}
+
+/** A scored round dealt out onto the table: the viewer's own row, and everybody else's. */
+export interface RevealSeating<T> {
+  /**
+   * The viewer's row, or null if the round has none. Their hand is drawn at the bottom of
+   * the screen where they held it during play, so it is not in a zone.
+   */
+  you: T | null;
+  zones: Record<Zone, T[]>;
+}
+
+/**
+ * Seats a finished round: the viewer's row taken out for the bottom of the screen, and
+ * everyone else dealt round the three sides in the order the round recorded them.
+ *
+ * **Off the round's own list, and never off `turnOrder`.** A round names its own players
+ * (see "A finished round names its own players" in CLAUDE.md) precisely because a seat can
+ * be given up, and a player who has gone is in no `turnOrder` for `bySeat` to sort them
+ * against — sorting would put them first, or drop them, depending on how `indexOf`'s -1
+ * fell. The recorded order *is* the seating order the round was scored in, so nothing is
+ * lost by reading it straight.
+ *
+ * A round with no row for the viewer comes back with `you: null` rather than a seat short:
+ * the screen is not reachable in that state, and a viewer who somehow is must not cost
+ * somebody else their cards.
+ */
+export function revealSeats<T extends { playerId: string }>(
+  players: readonly T[],
+  youId: string,
+): RevealSeating<T> {
+  return {
+    you: players.find((player) => player.playerId === youId) ?? null,
+    zones: seatZones(players.filter((player) => player.playerId !== youId)),
+  };
 }

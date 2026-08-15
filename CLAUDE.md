@@ -16,27 +16,22 @@ This section bullet points specific behavior patterns that you should follow whe
 
 ## Where the rules live
 
-**`docs/rules.md` is the single source of truth for gameplay.** Every rule maps to at least
-one test; if code and `rules.md` disagree, `rules.md` is right and the code has a bug. Adding
-or changing a rule goes `docs/rules.md` first, then the code, then tests — never let a rule
-exist only in code. `docs/backend-archetechture.md` is the original design sketch, **stale**
-in several places, kept for history only: if it describes something you cannot find, it is
-one of the deviations listed at the top of that file, and every one has its reasoning below.
+**`docs/rules.md` is the single source of truth for gameplay.** Every rule maps to at least one
+test; if code and `rules.md` disagree, `rules.md` is right and the code has a bug. Adding or
+changing a rule goes `docs/rules.md` first, then the code, then tests — never let a rule exist
+only in code. `docs/backend-archetechture.md` is the original design sketch, **stale** in
+several places, kept for history only: what it describes and you cannot find is one of the
+deviations listed at the top of that file, each with its reasoning below.
 
 ## Code structure
 
-```
-shared/src   Card/view/error types, the socket contract, and the rulebook. Dependency-free.
-server/src   The engine: deck, pure state transitions, serialization, rooms, bots.
-server/scripts  play.ts (bots-only, in process) + playSocket.ts & cli/ (human, over a
-                socket). Not shipped.
-client/src   The browser client: the framework-free session core, plus one React component
-             per screen. Vite + React.
-```
-
-Every workspace has a `test/` of `node:test` suites beside its `src/`: one file per module,
-plus the server's `integration.test.ts` fuzzer, and `socketServer.test.ts` and the client's
-suites driving real `socket.io-client` connections against a real server.
+Four trees, tabulated one by one below: `shared/src` (types, the socket contract and the
+rulebook, dependency-free), `server/src` (the engine — deck, pure transitions, serialization,
+rooms, bots), `server/scripts` (two smoke-test harnesses, not shipped) and `client/src` (Vite +
+React: a framework-free session core plus one component per screen). Every workspace has a
+`test/` of `node:test` suites beside its `src/`: one file per module, plus the server's
+`integration.test.ts` fuzzer, and `socketServer.test.ts` and the client's suites driving real
+`socket.io-client` connections against a real server.
 
 ### `shared/src/`
 
@@ -52,11 +47,11 @@ suites driving real `socket.io-client` connections against a real server.
 | `standings.ts` | `standings` — a finished match's final table, lowest score first, including whoever has left since. Read by both clients |
 
 Imported by the server and the client, so the wire contract can't drift between them. The
-rulebook is here rather than in `server/src` for the same reason: a client must offer
-exactly the moves the server will accept, and cannot reach into `server/src` to find out.
-`standings` is here on the same grounds — a match that is over cannot finish two different
-ways depending on which client is looking. Every function is pure over values the wire
-already carries, so this costs `shared` none of its dependency-freedom. See `docs/adr/0002`.
+rulebook is here rather than in `server/src` for the same reason: a client must offer exactly
+the moves the server will accept, and cannot reach into `server/src` to find out. `standings`
+is here on the same grounds — a match that is over cannot finish two different ways depending
+on which client is looking. Every function is pure over values the wire already carries, so
+this costs `shared` none of its dependency-freedom. See `docs/adr/0002`.
 
 ### `server/src/`
 
@@ -78,29 +73,29 @@ already carries, so this costs `shared` none of its dependency-freedom. See `doc
 
 `bot.ts` is shipped, not a dev tool: bot opponents are part of the real game, so the socket
 layer calls `decideTurn` in production to play a bot's turn. It decides only from a
-`PlayerGameView` — the same payload a real client gets — so it is structurally unable to
-see hidden hands or the draw pile.
+`PlayerGameView` — the same payload a real client gets — so it is structurally unable to see
+hidden hands or the draw pile.
 
 ### `server/scripts/`
 
-Not part of the shipped engine — two smoke-test harnesses, split by what they exercise, and
-not redundant: `play.ts` answers "do the rules and the bot behave?", and `playSocket.ts`
-answers "does the wire work?".
+Not part of the shipped engine — two smoke-test harnesses, split by what they exercise and
+not redundant: `play.ts` answers "do the rules and the bot behave?", `playSocket.ts` answers
+"does the wire work?".
 
 - **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
   their own terminals, over a **real socket connection** to a separately running server
   (`npm run serve` first); flags are tabulated in `README.md`. Composition only, like
-  `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`. `cli/render.ts` (view →
-  frame, plus the view-less main menu) and `cli/commands.ts` (typed line + view → a
-  `Command`) are pure and total — bad input returns `invalid`, never throws. `cli/session.ts`
-  drives the loop, with its input and output injected so tests can drive it, and **imports
-  nothing from `src/` except types**: the moment it reaches for `RoomManager` or `GameState`
-  it stops being a test of the transport and becomes a second copy of the server.
-- **`play.ts`** — `npm run demo`. Bots only, in process, no transport: drives
-  `RoomManager` and the pure transitions directly. Accepts `--seed <n>` and `--players <n>`,
-  and a whole match is reproducible from the seed alone — which is what makes it the tool
-  for judging bot play. Keep it that way; there is deliberately no socket equivalent, since
-  the server owns the rng and seats its own bots, and no client event asks for a seed.
+  `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`. `render.ts` (view → frame,
+  plus the view-less main menu) and `commands.ts` (typed line + view → a `Command`) are pure
+  and total — bad input returns `invalid`, never throws. `session.ts` drives the loop, its
+  input and output injected so tests can, and **imports nothing from `src/` except types**:
+  reaching for `RoomManager` or `GameState` makes it a second copy of the server rather than
+  a test of the transport.
+- **`play.ts`** — `npm run demo`. Bots only, in process, no transport: drives `RoomManager`
+  and the pure transitions directly. Accepts `--seed <n>` and `--players <n>`, and a whole
+  match is reproducible from the seed alone — which makes it the tool for judging bot play.
+  Keep it that way; there is deliberately no socket equivalent, since the server owns the
+  rng and seats its own bots, and no client event asks for a seed.
 
 ### `client/src/`
 
@@ -113,8 +108,8 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `session.ts` | The session core: owns the socket, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
-| `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). Generic over the opponent, so the live table and the round-end reveal zone their own payloads |
-| `fan.ts` | The geometry of a hand held at a seat: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Distances in card widths, so the CSS scales it |
+| `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). Generic over the opponent, so the live table and the round-end reveal zone their own payloads. `revealSeats` is the round end's own: the viewer's row out for the bottom of the screen, the rest zoned in the order the round scored them |
+| `fan.ts` | The geometry of a hand held at a seat, in two shapes. Arced during play: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Cascaded once it is revealed: `cascadeOffset`, `cascadeFootprint`, `ZONE_CASCADE` (down the sides, across the top) and the `CARD_INDEX_STRIP`/`CASCADE_STEP` pair that keeps a covered card readable. Distances in card widths, so the CSS scales it |
 | `settings.ts` | What only a settings *form* knows: `wholeNumber` (a field part-way through being typed) and `sameSettings` (has the room caught up?). Pure and total, `turn.ts`'s counterpart — what a room may be set to is asked of `shared` |
 | `unload.ts` | `guardUnload` — the `beforeunload` warning, on while a round is live and off otherwise. Injected target, so it is driven under `node:test` with no browser |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
@@ -122,8 +117,8 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), leave |
 | `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open |
-| `Seat.tsx` | An opponent in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), `CardFan` (the arc of backs, one per card held) and `OpponentSeat` composing the three for live play. Presentational, and shared with the round-end reveal to come |
-| `RoundEnd.tsx` | `phase: 'roundEnd'` — every hand face up, who called, whether they were Assafed, and what the round cost each player |
+| `Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held) and `CascadeReveal` (the same hand face up and read). `OpponentSeat` composes the first three for live play; the round end composes its own. Presentational throughout |
+| `RoundEnd.tsx` | `phase: 'roundEnd'` — who called, whether they were Assafed, and the same seated table with every hand face up, each player's round folded onto their own seat's label |
 | `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and leaving |
 | `SettingsEditor.tsx` | The host's four controls, in the lobby and nowhere else. Offers exactly what `isValidSettings` accepts, and sends the whole object per change |
 | `SettingsValues.tsx` | The four values as text — the lobby for everyone but the host, and the in-match modal for everyone — plus the box (`SettingsPanel`) and title both lobby listings share |
@@ -160,22 +155,17 @@ window cannot survive a turn. No lock and no timer — ADR-0005.
 
 The wire keeps that shape: a payload-free `slapDown` — the server already knows which card
 is meant — through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for
-whoever loses the race, and eligibility on `SelfView` alone.
-
-Both clients offer it, and both had to grow a place to. The CLI prompts serially at
-positions worth acting on, so `isOurMove` gained the open window — the one entry there that
-is not our turn — and `slap` routes through the same `send` as every other command. The
-browser makes the discard pile one flashing control in place of its row of draw targets
-(`isSlapdownTarget` in `client/src/turn.ts`), since a tap has to mean one thing. Against
-bots neither can win the race, per ADR-0005; that is what it costs, not a defect in either.
+whoever loses the race, and eligibility on `SelfView` alone. Both clients had to grow a
+place to offer it: the CLI's `isOurMove` gained the open window, the one position there
+that is not our turn, and the browser's is under "The turn is two taps" below. Against bots
+neither can win the race, per ADR-0005 — what it costs, not a defect in either.
 
 ### Round state is nested
 
-`GameState.round: RoundState | null` holds everything that resets between rounds (hands,
-piles, whose turn it is). Starting a round replaces this object wholesale
-(`dealRound` in `game.ts`), so no field can leak from the previous round by omission.
-Match-scoped data (`players[].score`, `roomCode`, `hostId`) lives one level up and
-persists across rounds.
+`GameState.round: RoundState | null` holds everything that resets between rounds (hands, piles,
+whose turn it is). Starting a round replaces this object wholesale (`dealRound` in `game.ts`),
+so no field can leak from the previous round by omission. Match-scoped data
+(`players[].score`, `roomCode`, `hostId`) lives one level up and persists across rounds.
 
 ### The discard pile is two parts, not a flat array
 
@@ -183,9 +173,9 @@ persists across rounds.
 cards may be taken depends on its shape (`pickupCandidates` in `shared/src/rules.ts`): a run
 exposes **only its two ends**, a same-rank set of any length exposes **every card**, since a
 set has no sequence for a middle position to protect. A slapdown extends that same array, so
-a slapped card is takeable like the rest of the set it joined. `RoundState.buried: Card[]`
-is everything discarded earlier — visible but permanently out of play until the draw pile
-empties and it gets reshuffled. A flat array can't express "only part of the last discard is
+a slapped card is takeable like the rest of the set it joined. `RoundState.buried: Card[]` is
+everything discarded earlier — visible but permanently out of play until the draw pile empties
+and it gets reshuffled. A flat array can't express "only part of the last discard is
 takeable," which is why this is two fields.
 
 ### Wildcard jokers in runs (docs/rules.md §4)
@@ -193,80 +183,75 @@ takeable," which is why this is two fields.
 - Jokers are wild **in runs only** — never in same-rank sets (`Jk 7♠ 7♣` is not a set).
 - A run needs **at least 2 real cards** to anchor it (`Jk Jk 5♥` is not a run).
 - `isRun` in `shared/src/rules.ts` checks this via a span test, not a walk: real cards fit in
-  a window of `cards.length` consecutive ranks
-  (`max(rank) - min(rank) + 1 <= cards.length`). No wrap past King/Ace falls out for
-  free, since Ace and King are 12 apart.
+  a window of `cards.length` consecutive ranks (`max(rank) - min(rank) + 1 <= cards.length`).
+  No wrap past King/Ace falls out for free, since Ace and King are 12 apart.
 - **Joker placement in a laid-out run is decided by the player.** A joker that fills an
-  interior gap has one possible position. A joker that *extends* the run
-  (`7♥ 8♥ Jk` → could be 6-7-8 or 7-8-9) is ambiguous, and `layOutRun` resolves it from
-  the order the player submitted the discard in: jokers listed before the first real
-  card extend downward, the rest extend upward. This matters because it decides what
-  the *next* player is offered for pickup. Overridden only at the deck boundary — a
-  joker can never be placed below Ace or above King.
+  interior gap has one possible position; one that *extends* the run (`7♥ 8♥ Jk` → 6-7-8 or
+  7-8-9) is ambiguous, and `layOutRun` resolves it from the order the player submitted the
+  discard in: jokers listed before the first real card extend downward, the rest upward.
+  This matters because it decides what the *next* player is offered for pickup. Overridden
+  only at the deck boundary — a joker can never be placed below Ace or above King.
 
 ### Hand display order is presentation only
 
 `sortHand`/`compareCards` in `shared/src/cards.ts` sort a hand for display: ascending by
-value (jokers left, tens/faces right), tied cards broken by rank then suit then card id
-(the id tie-break exists because two jokers otherwise compare fully equal and would
-visibly swap places between renders). **This has zero effect on engine state** — hands in
-`RoundState` stay in whatever order the engine produces them; sorting is applied only at
-`serializeStateForPlayer`, which is the one place every client is guaranteed to pass
-through.
+value (jokers left, tens/faces right), tied cards broken by rank then suit then card id (the
+id tie-break exists because two jokers otherwise compare fully equal and would visibly swap
+places between renders). **This has zero effect on engine state** — hands in `RoundState`
+stay in whatever order the engine produces them; sorting is applied only at
+`serializeStateForPlayer`, the one place every client is guaranteed to pass through.
 
 ### Bot architecture: "may I" vs "should I" vs "who plays it"
 
 Split deliberately across three layers:
 
-- **`shared/src/rules.ts`** owns what's *legal* — `legalDiscards` (every valid discard
-  from a hand) and `canCallYaniv` (is the hand low enough). These are rules queries, not
-  bot logic, which is why they sit in `shared`, where a client can reach them to
-  highlight playable cards.
-- **`server/src/bot.ts`** owns *judgement* — `shouldCallYaniv`, `chooseDiscard`,
-  `chooseDraw`, composed by `decideTurn`. It takes a `PlayerGameView`, never raw
-  `GameState`, so it cannot cheat by construction.
-- **`server/src/botTurns.ts`** owns *execution* — `playBotTurns` loops while the current
-  seat is bot-controlled, applying each decision through the same transitions a human
-  goes through, and calling back once per action. It knows nothing about sockets, so it
-  is testable without one, and takes its decision function as an argument (defaulting to
-  `decideTurn`) so a test can drive a deliberately broken bot.
+- **`shared/src/rules.ts`** owns what's *legal* — `legalDiscards` (every valid discard from a
+  hand) and `canCallYaniv` (is the hand low enough). Rules queries, not bot logic, which is
+  why they sit in `shared`, where a client can reach them to highlight playable cards.
+- **`server/src/bot.ts`** owns *judgement* — `shouldCallYaniv`, `chooseDiscard`, `chooseDraw`,
+  composed by `decideTurn`. It takes a `PlayerGameView`, never raw `GameState`, so it cannot
+  cheat by construction.
+- **`server/src/botTurns.ts`** owns *execution* — `playBotTurns` loops while the current seat
+  is bot-controlled, applying each decision through the same transitions a human goes through,
+  and calling back once per action. It knows nothing about sockets, so it is testable without
+  one, and takes its decision function as an argument (defaulting to `decideTurn`) so a test
+  can drive a deliberately broken bot.
 
 The bot is intentionally weak: it calls Yaniv the instant it's legal (no regard for
 opponents' hand sizes), and picks up an exposed card only by face value in isolation (no
-synergy with its own hand). This is a known, accepted limitation, not a bug — improving
-it is future work, not a defect to fix incidentally.
+synergy with its own hand). A known, accepted limitation — improving it is future work,
+not a defect to fix incidentally.
 
 **A bot's decision being rejected by the engine is a defect, not a rule violation.**
-`playBotTurns` throws when `apply` refuses a bot's own move. There is no client at fault
-to report it to, and swallowing it would wedge the table on a turn nobody can take — so
-it surfaces as the server bug it is. This is the one place in the server where a failed
-`Result` becomes a thrown error rather than an ack.
+`playBotTurns` throws when `apply` refuses a bot's own move: there is no client at fault to
+report it to, and swallowing it would wedge the table on a turn nobody can take. The one
+place in the server where a failed `Result` becomes a thrown error rather than an ack.
 
 **Which seats are bot-controlled is `Player.isBot`**, a required field on the domain
 model. The engine ignores it entirely — bots move through `takeTurn`/`callYaniv` exactly
 as humans do — it exists so the layer above knows whose turn it has to play. Required
 rather than optional so no construction can leave a seat ambiguously controlled.
 
-The integration test's fuzzer (`server/test/integration.test.ts`) has its **own**
-separate discard/draw logic and deliberately does not import from `bot.ts` — its job is
-to explore weird states via randomized draw choices, and coupling it to the real bot
-would mean a smarter bot silently narrows what the fuzz test covers. It does share
-`legalDiscards`, since that's a rules query, not a policy.
+The integration test's fuzzer (`server/test/integration.test.ts`) has its **own** separate
+discard/draw logic and deliberately does not import from `bot.ts`: its job is to explore
+weird states via randomized draw choices, and coupling it to the real bot would mean a
+smarter bot silently narrows what the fuzz test covers. It does share `legalDiscards`,
+since that's a rules query, not a policy.
 
 ### Errors are values
 
 Every rule-violating action returns a `Result<T>` (`ok: true/false`) carrying a
 `GameErrorCode`, never throws, so TypeScript forces call sites to handle failure. Anything
-that *does* throw (`RoomManager` code allocation exhaustion, `deal` given too small a deck)
-is a genuine defect, not a rule violation — the socket layer lets those propagate rather
-than reporting them to a player.
+that *does* throw (`RoomManager` code allocation exhaustion, `deal` given too small a deck) is
+a genuine defect, not a rule violation — the socket layer lets those propagate rather than
+reporting them to a player.
 
 ### Randomness is injected, never ambient
 
 Every function needing randomness takes an explicit `Rng` argument (`() => number`, same
-contract as `Math.random`). Tests use `mulberry32(seed)` so a match, a deal, or a bug
-report is reproducible from its seed — `server/test/integration.test.ts` asserts two runs
-with the same seed produce byte-identical final scores.
+contract as `Math.random`). Tests use `mulberry32(seed)` so a match, a deal, or a bug report
+is reproducible from its seed — `server/test/integration.test.ts` asserts two runs with the
+same seed produce byte-identical final scores.
 
 ### Serialization is the security boundary
 
@@ -275,15 +260,15 @@ client**. `serializeStateForPlayer` (in `serialize.ts`) is the one function that
 to a `PlayerGameView`: the viewer's own hand, opponents reduced to a `handSize` (never an
 optional `hand` field — the type doesn't allow the shape that could leak), draw pile as a
 count only. Hands are revealed to everyone only at `phase: 'roundEnd'` / `'gameEnd'`, when
-the rules require it. Tests assert no hidden card id appears anywhere in the serialized
-JSON string, mutation-tested by breaking the serializer on purpose to confirm the leak
-tests fail.
+the rules require it. Tests assert no hidden card id appears anywhere in the serialized JSON
+string, mutation-tested by breaking the serializer on purpose to confirm the leak tests fail.
 
 **A finished round names its own players.** `PlayerRoundResult` carries a `name` copied in
 when the round is scored, and the serializer uses that rather than looking the id up in
 `players`. The duplication is deliberate: a seat can be given up once the match ends
 (`exitToMenu`), and resolving names against the live roster left a departed player nameless
-on everyone else's scoreboard, with no way for a client to recover it.
+on everyone else's scoreboard, with no way for a client to recover it. It is also why the
+round-end reveal seats off `result.players` rather than `turnOrder`.
 
 ### Player identity
 
@@ -292,17 +277,16 @@ on everyone else's scoreboard, with no way for a client to recover it.
 keeps the Socket.io layer thin. (The original sketch used `socket.id` directly; that would
 make reconnect support a retrofit touching every fixture.)
 
-The socket layer bridges the two with a **session bound to the connection**: on a
-successful `createRoom`/`joinRoom`, `socket.data.session = { playerId, roomCode }`, and
-every later handler reads identity from there. A client-supplied player id is **never**
-trusted — a socket could otherwise act as any player just by saying so. The session is
-one optional object rather than two optional fields, so a half-bound connection is
-unrepresentable.
+The socket layer bridges the two with a **session bound to the connection**: on a successful
+`createRoom`/`joinRoom`, `socket.data.session = { playerId, roomCode }`, and every later
+handler reads identity from there. A client-supplied player id is **never** trusted — a
+socket could otherwise act as any player just by saying so. The session is one optional
+object rather than two optional fields, so a half-bound connection is unrepresentable.
 
-A connection binds **once**. A second `createRoom`/`joinRoom` on an already-bound socket
-is rejected with `ALREADY_IN_ROOM` (the one error code that exists purely because there
-is a transport). Silently rebinding would orphan the first player — seated in a room with
-no connection able to act for them, and unrecoverable while reconnect is out of scope.
+A connection binds **once**. A second `createRoom`/`joinRoom` on an already-bound socket is
+rejected with `ALREADY_IN_ROOM` (the one error code that exists purely because there is a
+transport). Silently rebinding would orphan the first player — seated in a room with no
+connection able to act for them, and unrecoverable while reconnect is out of scope.
 
 ### Room lifecycle
 
@@ -325,9 +309,9 @@ anyone but the host (`NOT_HOST`), and for a field outside its range or enum
 (`INVALID_SETTINGS`) — the last of which a typed client cannot produce, and which stops an
 off-contract one asking for a state the engine assumes away, like a hand size 54 cards
 cannot deal. The payload stays `unknown` until `isValidSettings` says otherwise: its wire
-type is a claim by whoever sent it, like a client-supplied player id, and that guard lives
-in `shared` on the rulebook's own grounds (ADR-0002). The first deal locks the lot for the
-life of the room; `playAgain` never returns to the lobby to offer another edit.
+type is a claim by whoever sent it, like a client-supplied player id, and the guard lives in
+`shared` on the rulebook's own grounds (ADR-0002). The first deal locks the lot; `playAgain`
+never returns to the lobby to offer another edit.
 
 `RoomManager.seatBots(state)` is **pure** — it returns a filled state and stores nothing.
 The socket handler folds it into the `startGame` transition passed to `apply`, so a start
@@ -342,31 +326,29 @@ them — known, and belonging with reconnect rather than bolted onto the join fl
 
 ### Leaving a room without dropping the connection
 
-`exitToMenu` is the one exit that is not a disconnect, and `playAgain` is the one way out
-of `gameEnd` other than closing the room. Both are allowed only where the table is not
-mid-round — the lobby and `gameEnd` — for the same reason mid-match leaving is out of
-scope: a hand and a turn order the round is still being played against.
+`exitToMenu` is the one exit that is not a disconnect, and `playAgain` is the one way out of
+`gameEnd` other than closing the room. Both are allowed only where the table is not mid-round
+— the lobby and `gameEnd` — for the same reason mid-match leaving is out of scope: a hand and
+a turn order the round is still being played against.
 
-Who invokes `exitToMenu` decides what it costs everyone else, and the caller does not get
-to choose: **a non-host frees only their own seat** (the room plays on for whoever remains,
-told by `playerLeft` and then handed the shrunk roster), while **the host closes the room
-outright** (everyone else gets `roomClosed(reason)`, the last thing they hear about it).
-Identical in both phases, deliberately: "a non-host leaving a finished match ends it, since
-the match is over anyway" was the plausible drift, and one rule for both was chosen.
+Who invokes `exitToMenu` decides what it costs everyone else, and the caller does not get to
+choose: **a non-host frees only their own seat** (the room plays on for whoever remains, told
+by `playerLeft` and then handed the shrunk roster), while **the host closes the room outright**
+(everyone else gets `roomClosed(reason)`, the last thing they hear about it). Identical in both
+phases, deliberately: "a non-host leaving a finished match ends it, since the match is over
+anyway" was the plausible drift, and one rule for both was chosen.
 
 The split across layers mirrors bot seating. `removePlayer` in `game.ts` is a pure
 transition that filters a player out; "the room must be destroyed" is not a `GameState` it
 could return, so that branch lives in `socketServer.ts`, where rooms and connections are
-owned — which is also why the `exitToMenu` handler is not `act()`-shaped.
+owned — which is also why the `exitToMenu` handler is not `act()`-shaped. Leaving also
+**clears `socket.data.session` and calls `socket.leave(roomCode)`**: clearing the session is
+what stops `ALREADY_IN_ROOM` meaning "for the life of this connection", since a sessionless
+socket is indistinguishable from a fresh one, and leaving the Socket.io room keeps it out of
+the next broadcast.
 
-Leaving **clears `socket.data.session` and calls `socket.leave(roomCode)`**. Clearing the
-session is what stops `ALREADY_IN_ROOM` meaning "for the life of this connection": a
-sessionless socket is indistinguishable from a fresh one, so the same connection can go
-straight into another room. Leaving the Socket.io room keeps it out of the next broadcast.
-
-**`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a
-table that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS` rather than
-quietly refilled.
+**`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a table
+that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS` rather than quietly refilled.
 
 ### Socket layer: wiring is separate from listening
 
@@ -374,10 +356,9 @@ quietly refilled.
 never calls `listen`. `index.ts` does that and nothing else. The split exists so tests can
 stand up a real server on an ephemeral port (`listen(0)`) without duplicating handler logic
 or racing for a fixed port — `test/socketServer.test.ts` drives real `socket.io-client`
-connections rather than a stub, since this layer's whole job *is* its wire behaviour.
-
-The same reasoning shapes how those tests verify: server-side facts are observed through
-the socket, never by asking `RoomManager`. Disconnect cleanup, for instance, is proven by a
+connections rather than a stub, since this layer's whole job *is* its wire behaviour. The
+same reasoning shapes how those tests verify: server-side facts are observed through the
+socket, never by asking `RoomManager`. Disconnect cleanup, for instance, is proven by a
 subsequent join being rejected with `ROOM_NOT_FOUND` — the way a real client would find out.
 
 ### Broadcasting: one send per socket, one broadcast per move
@@ -406,13 +387,12 @@ turn is still theirs.
 
 ### The turn is two taps, and draw targets are inert until legal
 
-A turn on the client is never a button — it is built from two taps. Tapping a card in
-hand adds it to an ordered **selection** (`CONTEXT.md`'s **Selection**); tapping a draw
-target — the deck, or one of the two takeable ends of the last discard — commits it: the
-selection is discarded and the tapped card drawn, in the same action. This mirrors the
-server's atomic `takeTurn` (see "Turn model" above) rather than splitting discard and draw
-into two client-side steps the engine has no matching state for — a "discard" button
-followed by a "draw" button would imply a moment in between that does not exist.
+A turn on the client is never a button — it is built from two taps. Tapping a card in hand
+adds it to an ordered **selection** (`CONTEXT.md`'s **Selection**); tapping a draw target —
+the deck, or one of the two takeable ends of the last discard — commits it: the selection is
+discarded and the tapped card drawn, in the same action. That mirrors the server's atomic
+`takeTurn` (see "Turn model" above); a "discard" button followed by a "draw" button would
+imply a moment in between that the engine has no state for.
 
 Draw targets stay inert — untappable — until the current selection is a legal discard
 (`isValidSet`, from `@yaniv/shared`'s rulebook). This is the reason the rulebook moved to
@@ -436,9 +416,9 @@ the server never sends, so `slapdownEligible` *is* the answer.
 Opponents are drawn round three sides of the felt (`seatZones`), each a fan of face-down
 backs — one per card they are actually holding — under an upright label, in place of a row
 of text. The fan is the point: a hand shrinking is something to watch rather than a number
-to notice. Six decisions hold it up, all in `fan.ts` and `styles.css` — five of them the
-prototype's variant D verdict (issue #56) rather than a re-derivation, and a sixth about
-what the felt had to do to make room for the lot:
+to notice. Six decisions hold it up, in `fan.ts` and `styles.css` — five the prototype's
+variant D verdict (issue #56) rather than a re-derivation, and a sixth about what the felt
+had to give up to make room for the lot:
 
 - **The fan turns and the label never does.** Rotating the cards says whose side of the
   table they are on; a name turned with them is read sideways by the only person looking.
@@ -447,42 +427,63 @@ what the felt had to do to make room for the lot:
   drawn across the label below — the rough edge the prototype left behind.
 - **About 37% of every fan is pushed off its own edge** (`FAN_HIDDEN`, `fanOverhang`): five
   full fans do not fit round a phone's felt, shrinking them to fit read as cramped, and
-  cutting each back to its tips left too little of a hand to watch (issue #58). Enough
-  hidden to fit six on a phone and no more, flat at every hand size and viewport rather
-  than scaled per count or width. The band is out of the column's flow and pinned to the
-  screen, or "off the edge" would mean off the edge of the padding; one layout at every
-  size, the cards scaling by height as well as width since a doubled zone stacks up an edge.
+  cutting each back to its tips left too little of a hand to watch (issue #58). Enough hidden
+  to fit six on a phone and no more, flat at every hand size and viewport rather than scaled
+  per count or width. The band is out of the column's flow and pinned to the screen, or "off
+  the edge" would mean off the edge of the padding; the cards scale by height as well as
+  width, since a doubled zone stacks up an edge.
 - **Only the label is ringed on turn**, not the seat's box — which is mostly the space
-  reserved for an arc turned inside it and hung off the edge, so a ring there reads as a
-  box near a player rather than round them.
+  reserved for an arc turned inside it and hung off the edge, so a ring there reads as a box
+  near a player rather than round them.
 - **The table's settings icon is pinned out of flow too** (`.table > .topbar`), since the
   band covers the top of the screen the column's first row would sit in: it belongs to the
   table's corner, above the band. `RoundEnd`/`GameEnd` have no band and keep theirs in flow.
 - **The felt gave way to the seats** (issue #59, `.felt`): the deck stacks above the discard
   and the pair is pinned against the hand, not centred in a height the seats are out of the
   flow of and float up into — and side by side at the card size the ticket keeps, the two of
-  them are wider than a 320px phone. `.turn` reserves two lines for the same reason: the
-  pair sits on it, and a message that wraps on one turn and not the next would walk it up
-  and down between moves. The one crossing left — a wide discard against a doubled zone's
-  label, six on a short screen — goes to the cards, the felt being lifted over the band,
-  since a label over a tap target reads as one out of play. The table's old desktop rule
-  went the same way: centring its column carries the hand and the felt up, the seats do not.
+  them are wider than a 320px phone. `.turn` reserves two lines for the same reason: the pair
+  sits on it, and a message that wraps on one turn and not the next would walk it up and down
+  between moves. The one crossing left — a wide discard against a doubled zone's label, six
+  on a short screen — goes to the cards, the felt being lifted over the band, since a label
+  over a tap target reads as one out of play. The table's old desktop rule went the same way:
+  centring its column carries the hand and the felt up, the seats do not.
+
+### The scored round is the same table, read rather than watched
+
+`RoundEnd` seats those same three sides — `revealSeats`, off `result.players` and never
+`bySeat`, since a player who has given up their seat is in no `turnOrder` to be sorted
+against — with the viewer's own hand flat along the bottom where they were holding it, and
+the round's numbers riding on each seat's label rather than in a list of their own, so one
+player reads in one place. Three things separate it from live play (issues #56, #60):
+
+- **The arc becomes a straight cascade** (`cascadeOffset`, `cascadeFootprint`), along the
+  zone's own axis (`ZONE_CASCADE`) so a doubled zone does not collide with itself: an arc
+  overlaps faces at an angle, which is what makes checking a call against five hands hard.
+  Nothing rotates either — a rotation says whose hand it is by making it unreadable, a fair
+  trade for a fan of backs and none at all for a hand being added up.
+- **A cascaded card wears its index on the edge the next card leaves showing**
+  (`.cascade--*`, `CARD_INDEX_STRIP`, which `CASCADE_STEP` is chosen to clear). A face carries its
+  rank in the middle, which under another card is blank card — why real cards have corners.
+- **The sides are flowed into a grid, not pinned to a band** (`.round__seats`): no felt to
+  keep clear, and a pinned seat contributes no height for six revealed hands to scroll
+  through, which on a short phone they still must — as the flat list they replace did.
+  `GameEnd` is untouched: `standings` carries no hands, so it stays a plain scoreboard.
 
 ### Settings are edited in one place and shown in another
 
-The lobby is the only screen with the four controls (`SettingsEditor.tsx`, host only) and
-the only one showing the values inline; the three in-match screens carry one icon that
-opens a modal (`SettingsDialog.tsx`), because a room's numbers are worth a tap when
-somebody asks and worth nothing standing over a hand being played. Both read-only
-listings are one component, so a value cannot be worded two ways.
+The lobby is the only screen with the four controls (`SettingsEditor.tsx`, host only) and the
+only one showing the values inline; the three in-match screens carry one icon that opens a
+modal (`SettingsDialog.tsx`), because a room's numbers are worth a tap when somebody asks and
+worth nothing standing over a hand being played. Both read-only listings are one component,
+so a value cannot be worded two ways.
 
 **The editor keeps the last settings it sent until the room says the same thing back**
-(`sameSettings`). An edit is acked as soon as the server has it, but the position behind
-it arrives separately and can be held a beat by the pacer — so a second tap read off the
-screen would send the first one's change still undone in it, and hand size 6 would snap
-back to 5 a moment after the host asked for it. That draft stays in the component, as does
-whether the modal is open: a form half-filled in is no use outside the screen holding it,
-and no arriving view can contradict either.
+(`sameSettings`). An edit is acked as soon as the server has it, but the position behind it
+arrives separately and can be held a beat by the pacer — so a second tap read off the screen
+would send the first one's change still undone in it, and hand size 6 would snap back to 5 a
+moment after the host asked for it. That draft stays in the component, as does whether the
+modal is open: a form half-filled in is no use outside the screen holding it, and no arriving
+view can contradict either.
 
 ### The client's session core
 
@@ -491,10 +492,10 @@ that owns the socket and exposes exactly two things: a `SessionSnapshot` to read
 of intents to call. `useSession` subscribes to it with `useSyncExternalStore` and holds no
 logic — **if that hook ever grows a branch, the branch is in the wrong place.** The point
 is testability: the session core is driven under `node:test` against a real socket server,
-with no browser, no jsdom and no React test dependencies. Components are not tested at
-all, which is a consequence of that split rather than a gap: if a component held behaviour
-worth testing on its own, that behaviour would be in the wrong place and belongs in the
-session core instead.
+with no browser, no jsdom and no React test dependencies. Components are not tested at all,
+a consequence of that split rather than a gap — behaviour worth testing on its own belongs
+in the session core, or in one of the pure modules beside it (`turn.ts`, `seating.ts`,
+`fan.ts`, `settings.ts`), which is where every layout rule with an answer lives.
 
 Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` compares by
 identity, so a mutated object would leave React rendering a position that has already
@@ -535,21 +536,20 @@ one of the three sent off turn, so what releases it may be the next player's mov
 than its own answer; both are strictly newer, and by either the window is spent. The server
 acks an in-game action *before* it broadcasts the result, so controls released on the ack
 would come back to life over a position still showing the mover's own turn. A rejected move
-is the exception and releases at once: nothing was published, so no newer position is
-coming, and the turn is still theirs. The ordering trap is worth stating plainly: the first
-snapshot carrying a view after entering a room is one the player still cannot act from —
-tests wait on `view !== null && !busy` rather than on the view alone.
+is the exception and releases at once: nothing was published, so no newer position is coming,
+and the turn is still theirs. The ordering trap, plainly: the first snapshot carrying a view
+after entering a room is one the player still cannot act from — tests wait on
+`view !== null && !busy` rather than on the view alone.
 
-**Positions are drawn on a clock, not on arrival.** A run of bot turns lands as one
-broadcast per move within a few milliseconds of itself (see "Broadcasting" above), so a
-session that published each on arrival would show only the last. `pacing.ts` queues them
-instead: **the first arrival goes straight through, and anything landing in the beat behind
-it is let go one per `PACE_MS` (700ms)** — a move of the player's own is a lone arrival and
-so is never delayed, which is why the rule is "first one free" rather than "one every
-beat". The queue is phase-blind, and a round a bot's Yaniv ends is *why*: the scored
-position is the last link of the chain, and pacing only `playing` would skip past the move
-that ended it. The accepted cost — a position landing behind a drawn one waits out the rest
-of its beat, `busy` and all — is set out in full in `pacing.ts`.
+**Positions are drawn on a clock, not on arrival.** A run of bot turns lands as one broadcast
+per move within a few milliseconds of itself (see "Broadcasting" above), so a session that
+published each on arrival would show only the last. `pacing.ts` queues them instead: **the
+first arrival goes straight through, and anything landing in the beat behind it is let go one
+per `PACE_MS` (700ms)** — a move of the player's own is a lone arrival and so never delayed,
+which is why the rule is "first one free" rather than "one every beat". The queue is
+phase-blind, and a round a bot's Yaniv ends is *why*: the scored position is the last link of
+the chain, and pacing only `playing` would skip past the move that ended it. The accepted
+cost is set out in full in `pacing.ts`.
 
 Two things fall out of the queue. **The watermark counts arrivals, not drawings** — a
 queued position carries the `version` it *landed* on, or one already in flight when a move
@@ -575,9 +575,9 @@ is the server's decision (see "Leaving a room without dropping the connection").
 **A rejection that lands after the room has gone is swallowed, not shown.** Two players
 leaving at once is the case: the host's exit closes the room and drops everyone's session,
 so a guest's in-flight action acks `PLAYER_NOT_FOUND` about a room that no longer exists.
-They are already on the menu being told why, and a red error blaming them on top would be
-what "a refused action costs the player nothing" rules out — so the session drops an error
-whenever `view` is already null.
+They are already on the menu being told why, and a red error blaming them on top is what "a
+refused action costs the player nothing" rules out — so an error is dropped whenever `view`
+is already null.
 
 **An `errorMessage` shows where a rejected ack does, is dropped where one is dropped, and
 does not touch `busy`.** It is the same news to a player — something that might have
@@ -608,10 +608,10 @@ moment of every load would be crying wolf.
 **A drop takes its room with it, and the session says so once there is a screen to say it
 on.** `disconnect` resets the pacer, drops the watermark and releases `busy` — nothing is in
 flight over a socket that is not there — but leaves the view alone, since the disconnected
-screen is over the top of it anyway. The *reconnect* is what clears it: the socket comes
-back with an identity the server has never heard of, and the room was destroyed when the old
-one dropped (ADR-0004), so the honest place to put the player is the main menu with a
-`notice` saying where the table went. A drop at the menu costs nothing and says nothing.
+screen is over it anyway. The *reconnect* clears it: the socket comes back with an identity
+the server has never heard of, and the room died with the old one (ADR-0004), so the honest
+place for the player is the main menu with a `notice` saying where the table went. A drop at
+the menu costs nothing and says nothing.
 
 **A connection that never arrived is the same screen.** `connect_error` is treated the way
 `disconnect` is, because the two are indistinguishable to whoever is looking at them: taps
@@ -619,14 +619,14 @@ buffered into a socket that has reached nothing is the same dead screen. Only th
 run of failed retries is news.
 
 **The `beforeunload` warning is registered while a round is live and not otherwise**
-(`unload.ts`). A reload drops the socket and so destroys the room for everyone in it, which
-is worth an argument at `playing` and `roundEnd` — and not worth one at the main menu, the
-lobby or a finished match, where a control on the screen already does exactly that.
-`connected` is part of the same question: a dropped connection's room was destroyed when it
-dropped, so arguing over the tab is arguing over a match already lost. It is added and
-removed rather than left listening, because a page with a `beforeunload` listener is held
-out of the back/forward cache either way. The target is injected, so `main.tsx` is the only
-place that hands a global over; whether the warning appears at all is the browser's call.
+(`unload.ts`). A reload drops the socket and so destroys the room for everyone in it, worth
+an argument at `playing` and `roundEnd` and not worth one at the main menu, the lobby or a
+finished match, where a control on the screen already does exactly that. `connected` is part
+of the same question: a dropped connection's room was destroyed when it dropped, so arguing
+over the tab is arguing over a match already lost. It is added and removed rather than left
+listening, because a page with a `beforeunload` listener is held out of the back/forward
+cache either way. The target is injected, so `main.tsx` is the only place that hands a
+global over; whether the warning appears at all is the browser's call.
 
 ### Tooling
 
@@ -669,10 +669,10 @@ Not oversights — deferred on purpose, in this order of likely next work:
   live: solo play against bots is unaffected, inviting other humans is not yet safe.
 - **Slapdown against a bot.** Both clients offer it, but bots neither slap down for
   themselves nor can be raced by a human, `playBotTurns` running in the same tick — both
-  deliberate, per ADR-0005: a human needs another human behind them.
+  deliberate per ADR-0005: a human needs another human behind them.
 - **Disambiguating a joker that extends a run.** The browser sends the selection in tap
   order, so tap order decides where the joker sits (`docs/rules.md` §4) — invisible on the
-  screen. A deliberate wart: a step asking which end they meant is deferred.
+  screen, and a deliberate wart: a step asking which end they meant is deferred.
 
 ## Running things
 

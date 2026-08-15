@@ -7,6 +7,13 @@
  * which way it points from each zone, and what box it needs. `seating.ts` says *where* an
  * opponent sits; this says what their cards look like sitting there.
  *
+ * **Two shapes, not one.** A hand in play is the arc (`fanAngles` and below), and a hand
+ * revealed at the end of a round is a straight cascade (`cascadeOffset` and below). Both
+ * are hands at seats and both answer the same three questions, which is why they are here
+ * together; they differ because a fan of backs is a *gesture* at a hand and a revealed one
+ * has to be read card by card, and an arc overlaps faces in a way that is hard to scan
+ * (issue #56's variant D verdict, issue #60).
+ *
  * **Every distance is in card widths**, the unit `--card-w` already gives the stylesheet,
  * so a fan scales with the cards inside it and this module never learns a pixel. Angles
  * are degrees, clockwise, the way CSS `rotate()` reads them.
@@ -52,6 +59,80 @@ export const FAN_HIDDEN = 0.37;
 
 /** How tall a card is, from the `aspect-ratio: 5 / 7` the stylesheet draws it at. */
 export const CARD_HEIGHT = 7 / 5;
+
+/**
+ * The strip of a card its rank and suit sit in, measured in from the edge a cascade
+ * advances away from — what has to stay uncovered for a card under another one to still
+ * say what it is. Not to be read as a position in a hand, which is what `i` is below.
+ *
+ * Read off the stylesheet like `CARD_HEIGHT` is: the rank is set at `0.4` of a card
+ * (`.card__rank`), a two-digit ten runs a shade wider than that, and the cascade's own
+ * rules (`.cascade--*`) inset the pair a little and pull them onto the edge in question.
+ * Here rather than only in the CSS because it is what `CASCADE_STEP` is chosen against,
+ * and a step under it leaves a hand of blank card behind one readable face.
+ */
+export const CARD_INDEX_STRIP = 0.48;
+
+/**
+ * How far each card of a revealed hand is stepped past the one before it, in card widths.
+ *
+ * Wide enough to clear `CARD_INDEX_STRIP`, so every covered card still shows its rank and
+ * suit, and narrower than a card either way, so a hand is still a stack rather than a row
+ * laid out — six of them are on the screen at once and five laid flat do not fit round a
+ * phone. The same distance on both axes: a top seat and a side seat are the same hand.
+ */
+export const CASCADE_STEP = 0.5;
+
+/** Which way a cascade runs: down a seat at the side of the felt, across one at the top. */
+export type CascadeAxis = "vertical" | "horizontal";
+
+/**
+ * The axis a revealed hand cascades along at each zone.
+ *
+ * It follows the zone's own shape rather than the felt's middle: `.table-zone--left` and
+ * `--right` are already columns and `--top` is already a row, so a cascade running the
+ * other way would grow across the table instead of along the edge the seat sits on, and
+ * two seats sharing a zone would collide. `ZONE_ROTATION`'s counterpart for the shape
+ * that never rotates.
+ */
+export const ZONE_CASCADE: Record<Zone, CascadeAxis> = {
+  left: "vertical",
+  top: "horizontal",
+  right: "vertical",
+};
+
+/**
+ * How far the `i`th card of a revealed hand is pushed along the cascade's axis, in card
+ * widths — the first where the box starts, each one a step past the last.
+ *
+ * Per card rather than per hand, unlike `fanAngles`: an arc's angles depend on how many
+ * cards are in it, and a cascade's offsets do not, so a card can be placed knowing only
+ * where it comes in the hand.
+ */
+export function cascadeOffset(i: number): number {
+  return i * CASCADE_STEP;
+}
+
+/**
+ * The box a seat has to reserve for a revealed hand of `n` cards, in card widths.
+ *
+ * The same job `fanFootprint` does for the arc, and for the same reason: the cards are
+ * placed with transforms, which cost no layout space at all, so without a box sized off
+ * the offsets themselves the label below would sit under the first card and the rest of
+ * the hand would be drawn straight over it (issue #58).
+ *
+ * A cascade grows along one axis only, so the other stays a single card.
+ */
+export function cascadeFootprint(
+  n: number,
+  axis: CascadeAxis,
+): { width: number; height: number } {
+  if (n <= 0) return { width: 0, height: 0 };
+  const run = cascadeOffset(n - 1);
+  return axis === "vertical"
+    ? { width: 1, height: CARD_HEIGHT + run }
+    : { width: 1 + run, height: CARD_HEIGHT };
+}
 
 /**
  * Degrees the fan at each zone is turned by, hinge toward the screen edge and open edge

@@ -1,11 +1,12 @@
 /**
- * The fan module: the geometry of an opponent's hand held face down at their seat.
+ * The fan module: the geometry of a hand held at a seat — face down and arced during play,
+ * face up and cascaded once the round is scored.
  *
  * Pure and total, like `seating.ts` next to it — the angles and the box they need are
  * numbers, so they are asserted as numbers rather than looked at in a browser. The one
- * property worth more than any single number is the last block here: the box a seat
- * reserves has to contain every card in the fan, because a card tip escaping it is a
- * card tip drawn over the label below (issue #58).
+ * property worth more than any single number is asserted of both shapes: the box a seat
+ * reserves has to contain every card in it, because a card escaping it is a card drawn
+ * over the label below (issue #58).
  *
  * Distances are in card widths throughout, the same unit `--card-w` gives the CSS, so
  * nothing here has to know how wide a card is on the screen it lands on.
@@ -15,14 +16,20 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   CARD_HEIGHT,
+  CARD_INDEX_STRIP,
+  CASCADE_STEP,
   FAN_MAX_SPREAD_DEG,
   FAN_RADIUS,
   FAN_STEP_DEG,
+  ZONE_CASCADE,
   ZONE_ROTATION,
+  cascadeFootprint,
+  cascadeOffset,
   fanAngles,
   fanFootprint,
   fanOverhang,
 } from "../src/fan.ts";
+import { ZONES } from "../src/seating.ts";
 
 /** The four corners of the `i`th card, in card widths, around a hinge at the origin. */
 function cardCorners(angleDeg: number): { x: number; y: number }[] {
@@ -180,5 +187,85 @@ describe("fanOverhang", () => {
     const pushes = Array.from({ length: 7 }, (_, i) => fanOverhang(i + 1));
     const drift = Math.max(...pushes) - Math.min(...pushes);
     assert.ok(drift < 0.1, `${drift} card widths across ${pushes}`);
+  });
+});
+
+describe("ZONE_CASCADE", () => {
+  it("gives every zone an axis, so no seat is left without one", () => {
+    assert.deepEqual([...ZONES].sort(), Object.keys(ZONE_CASCADE).sort());
+  });
+
+  it("runs a revealed hand along the zone it sits in — down the sides, across the top", () => {
+    // The zones are already a column each side and a row on top (`.table-zone--*`), so a
+    // cascade that ran the other way would grow across the felt instead of along the edge.
+    assert.equal(ZONE_CASCADE.left, "vertical");
+    assert.equal(ZONE_CASCADE.right, "vertical");
+    assert.equal(ZONE_CASCADE.top, "horizontal");
+  });
+});
+
+describe("cascadeOffset", () => {
+  it("leaves the first card where the box starts, so the cascade fills it from its edge", () => {
+    assert.equal(cascadeOffset(0), 0);
+  });
+
+  it("steps every card the same distance past the one before it", () => {
+    for (let i = 1; i < 7; i++) {
+      const gap = cascadeOffset(i) - cascadeOffset(i - 1);
+      assert.ok(Math.abs(gap - CASCADE_STEP) < 1e-9, `card ${i}: ${gap}`);
+    }
+  });
+
+  it("runs one way only, so cards overlap in the order they are drawn", () => {
+    for (let i = 1; i < 7; i++) {
+      assert.ok(cascadeOffset(i) > cascadeOffset(i - 1), `card ${i}`);
+    }
+  });
+});
+
+describe("CASCADE_STEP", () => {
+  it("leaves every covered card's index showing, which is the whole point of a cascade", () => {
+    // A revealed hand is read rather than gestured at (issue #60), and all that is left of
+    // a card under the next one is the strip the step exposes. Anything under `CARD_INDEX_STRIP`
+    // and that strip is blank card.
+    assert.ok(CASCADE_STEP >= CARD_INDEX_STRIP, `${CASCADE_STEP} < ${CARD_INDEX_STRIP}`);
+  });
+
+  it("still overlaps the cards, on both axes, rather than laying them out in a line", () => {
+    // Six hands are on this screen at once. A step of a whole card is a row, not a
+    // cascade, and five of those do not fit round a phone.
+    assert.ok(CASCADE_STEP < 1);
+    assert.ok(CASCADE_STEP < CARD_HEIGHT);
+  });
+});
+
+describe("cascadeFootprint", () => {
+  it("reserves nothing for a hand with no cards", () => {
+    assert.deepEqual(cascadeFootprint(0, "vertical"), { width: 0, height: 0 });
+    assert.deepEqual(cascadeFootprint(0, "horizontal"), { width: 0, height: 0 });
+  });
+
+  it("is one card either way when there is only one card", () => {
+    assert.deepEqual(cascadeFootprint(1, "vertical"), { width: 1, height: CARD_HEIGHT });
+    assert.deepEqual(cascadeFootprint(1, "horizontal"), { width: 1, height: CARD_HEIGHT });
+  });
+
+  it("grows only along the axis it cascades on", () => {
+    for (let n = 1; n <= 7; n++) {
+      assert.equal(cascadeFootprint(n, "vertical").width, 1, `${n} cards`);
+      assert.equal(cascadeFootprint(n, "horizontal").height, CARD_HEIGHT, `${n} cards`);
+    }
+  });
+
+  it("contains every card in the cascade, so none is drawn across the label below", () => {
+    // The same property the arc's footprint has to hold (issue #58): a transform costs no
+    // layout space, so the box is the only thing keeping the cards off the label.
+    for (let n = 1; n <= 7; n++) {
+      const last = cascadeOffset(n - 1);
+      const down = cascadeFootprint(n, "vertical");
+      assert.ok(last + CARD_HEIGHT <= down.height + 1e-9, `${n} cards: ${down.height} deep`);
+      const across = cascadeFootprint(n, "horizontal");
+      assert.ok(last + 1 <= across.width + 1e-9, `${n} cards: ${across.width} wide`);
+    }
   });
 });

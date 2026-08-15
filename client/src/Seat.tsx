@@ -4,10 +4,10 @@
  *
  * The three pieces are kept apart on purpose. `SeatZone` is a side of the table and knows
  * only how many seats it has been dealt; `Seat` is one player's place at it, cards above
- * and label below; `CardFan` is the hand held there. The round-end reveal is the same
- * three pieces with a different middle one — hands face up, read rather than gestured at
- * (issue #60) — so the outer two take whatever cards they are handed, and `OpponentSeat`
- * is the one composition here that is specific to live play.
+ * and label below; the hand held there is `CardFan` during play and `CascadeReveal` once
+ * the round is scored — face up, read rather than gestured at (issue #60). The outer two
+ * take whatever cards they are handed, and `OpponentSeat` is the one composition here
+ * specific to live play.
  *
  * **The label never turns with the fan.** The cards are rotated to face the middle,
  * because that is what says whose side of the table they are on; a name rotated with them
@@ -25,8 +25,18 @@
  */
 
 import type { CSSProperties, ReactNode } from "react";
-import type { OpponentView } from "@yaniv/shared";
-import { FAN_RADIUS, ZONE_ROTATION, fanAngles, fanFootprint, fanOverhang } from "./fan.ts";
+import type { Card, OpponentView } from "@yaniv/shared";
+import type { CascadeAxis } from "./fan.ts";
+import {
+  FAN_RADIUS,
+  ZONE_ROTATION,
+  cascadeFootprint,
+  cascadeOffset,
+  fanAngles,
+  fanFootprint,
+  fanOverhang,
+} from "./fan.ts";
+import { PlayingCard } from "./PlayingCard.tsx";
 import type { Zone } from "./seating.ts";
 
 /** One side of the felt, holding the seats `seatZones` dealt it, in turn order. */
@@ -58,6 +68,12 @@ export function Seat({ zone, name, isTurn = false, detail, children }: SeatProps
 }
 
 /**
+ * A distance in card widths written as a CSS length — the unit every measurement in
+ * `fan.ts` comes back in, and the one both shapes of hand are placed and sized by.
+ */
+const cardWidths = (n: number) => `calc(var(--card-w) * ${n})`;
+
+/**
  * A hand held face down, arced about its hinge and turned to face the felt.
  *
  * Every card is placed by a transform off that one hinge point, so the fan is a single
@@ -73,8 +89,6 @@ export function Seat({ zone, name, isTurn = false, detail, children }: SeatProps
 export function CardFan({ zone, count }: { zone: Zone; count: number }) {
   const box = fanFootprint(count, zone);
   const overhang = fanOverhang(count);
-  /** Card widths into a length, so the fan scales with the cards in it and nothing else. */
-  const cards = (n: number) => `calc(var(--card-w) * ${n})`;
 
   /*
     The push off the edge is a margin rather than a transform: a transform costs no layout
@@ -82,11 +96,11 @@ export function CardFan({ zone, count }: { zone: Zone; count: number }) {
     away from the cards it names. A margin moves the two together.
   */
   const style: CSSProperties = {
-    width: cards(box.width),
-    height: cards(box.height),
-    marginLeft: zone === "left" ? cards(-overhang) : undefined,
-    marginRight: zone === "right" ? cards(-overhang) : undefined,
-    marginTop: zone === "top" ? cards(-overhang) : undefined,
+    width: cardWidths(box.width),
+    height: cardWidths(box.height),
+    marginLeft: zone === "left" ? cardWidths(-overhang) : undefined,
+    marginRight: zone === "right" ? cardWidths(-overhang) : undefined,
+    marginTop: zone === "top" ? cardWidths(-overhang) : undefined,
   };
 
   return (
@@ -100,9 +114,53 @@ export function CardFan({ zone, count }: { zone: Zone; count: number }) {
           style={{
             // Turned by the zone and its own place in the arc, then pushed out to the
             // radius the footprint was measured with — one hinge, one distance.
-            transform: `rotate(${ZONE_ROTATION[zone] + angle}deg) translateY(${cards(-FAN_RADIUS)})`,
+            transform: `rotate(${ZONE_ROTATION[zone] + angle}deg) translateY(${cardWidths(-FAN_RADIUS)})`,
           }}
         />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A hand revealed at the end of a round: every card face up, stepped along one axis so
+ * each one still shows its rank and suit under the next.
+ *
+ * A cascade rather than the arc the same seat held during play, because these cards are
+ * *read* — an arc overlaps faces at an angle, which is exactly what makes checking a
+ * Yaniv call against five hands hard (issue #56's variant D verdict, issue #60). Nothing
+ * is rotated for the same reason: a zone's rotation says whose side of the table a hand is
+ * on, and it says it by making the cards unreadable, which is a fair trade for a fan of
+ * backs and no trade at all for a hand somebody has to add up. Which side of the table a
+ * seat is on is said by where it sits and by the axis it runs along (`ZONE_CASCADE`).
+ *
+ * Built the way `CardFan` is: an element whose own box is the footprint the cards occupy
+ * (`cascadeFootprint`), with each card placed on it by a transform off the same offsets
+ * the box was measured from — so the label below cannot be drawn over, whatever the hand.
+ */
+export function CascadeReveal({ cards, axis }: { cards: readonly Card[]; axis: CascadeAxis }) {
+  const box = cascadeFootprint(cards.length, axis);
+  /* One place the axis becomes a direction, rather than the same fork in two transforms. */
+  const along = axis === "vertical" ? "translateY" : "translateX";
+
+  return (
+    <div
+      className={`cascade cascade--${axis}`}
+      style={{ width: cardWidths(box.width), height: cardWidths(box.height) }}
+    >
+      {cards.map((card, i) => (
+        <span
+          className="cascade__card"
+          key={card.id}
+          style={{
+            transform: `${along}(${cardWidths(cascadeOffset(i))})`,
+            // Later cards over earlier ones, so the strip left showing of each is the one
+            // its own index sits in — the edge the cascade advances away from.
+            zIndex: i,
+          }}
+        >
+          <PlayingCard card={card} />
+        </span>
       ))}
     </div>
   );

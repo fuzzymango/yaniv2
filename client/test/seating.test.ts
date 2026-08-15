@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MAX_PLAYERS } from "@yaniv/shared";
-import { ZONES, seatZones } from "../src/seating.ts";
+import { ZONES, revealSeats, seatZones } from "../src/seating.ts";
 
 /** Opponents stand in as names — `seatZones` is generic and never looks inside one. */
 const opponents = (n: number): string[] =>
@@ -83,5 +83,67 @@ describe("seatZones", () => {
       top: [{ playerId: "b" }],
       right: [],
     });
+  });
+});
+
+/** A scored player, cut down to the one field `revealSeats` looks at. */
+const scored = (id: string) => ({ playerId: id });
+
+describe("revealSeats", () => {
+  it("seats nobody from a round with nobody in it", () => {
+    assert.deepEqual(revealSeats([], "you"), {
+      you: null,
+      zones: { left: [], top: [], right: [] },
+    });
+  });
+
+  it("takes the viewer out of the zones, since their hand is at the bottom of the screen", () => {
+    assert.deepEqual(revealSeats([scored("you")], "you"), {
+      you: { playerId: "you" },
+      zones: { left: [], top: [], right: [] },
+    });
+  });
+
+  it("deals everybody else round the three sides, in the order the round scored them", () => {
+    const players = ["a", "b", "you", "c", "d"].map(scored);
+    assert.deepEqual(revealSeats(players, "you"), {
+      you: { playerId: "you" },
+      zones: {
+        left: [{ playerId: "a" }, { playerId: "d" }],
+        top: [{ playerId: "b" }],
+        right: [{ playerId: "c" }],
+      },
+    });
+  });
+
+  it("seats the whole round when the viewer is not in it, rather than dropping a seat", () => {
+    // A round the viewer has no row in is a position the screen should never be reached
+    // in — but a missing viewer must not cost somebody else their cards.
+    const players = ["a", "b", "c"].map(scored);
+    assert.deepEqual(revealSeats(players, "nobody"), {
+      you: null,
+      zones: {
+        left: [{ playerId: "a" }],
+        top: [{ playerId: "b" }],
+        right: [{ playerId: "c" }],
+      },
+    });
+  });
+
+  it("keeps a departed player's seat, since the round's own record is all it reads", () => {
+    // The whole reason this is keyed off `result.players` rather than sorted by `bySeat`:
+    // a player who has given up their seat is in no `turnOrder` to be sorted against.
+    const seated = revealSeats([scored("you"), scored("gone")], "you");
+    assert.deepEqual(seated.zones.left, [{ playerId: "gone" }]);
+  });
+
+  it("seats a full table of six", () => {
+    const players = ["you", "a", "b", "c", "d", "e"].map(scored);
+    const seated = revealSeats(players, "you");
+    assert.equal(seated.you?.playerId, "you");
+    assert.deepEqual(
+      ZONES.flatMap((zone) => seated.zones[zone].map((p) => p.playerId)).sort(),
+      ["a", "b", "c", "d", "e"],
+    );
   });
 });

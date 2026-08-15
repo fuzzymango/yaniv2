@@ -80,8 +80,9 @@ in the same tick (`docs/adr/0005`), so this is something you will see against ot
 The **Yaniv** button above your hand is the exception — the one control that is not a card.
 It lights up the moment your hand is worth the room's threshold (7 unless the host changed
 it) or less, and is dead until then, and pressing
-it ends the round. Every hand is then turned face up on a scoreboard showing who called,
-whether they were Assafed, and what the round cost each player against their new total. The
+it ends the round. Everybody then stays in the seat they were playing from, their hand
+turned face up and spread out to be read, with what the round cost them against their new
+total on their own label — plus who called and whether they were Assafed across the top. The
 host deals the next round from there.
 
 Closing or reloading the tab mid-match asks you to confirm first, because a dropped
