@@ -61,3 +61,36 @@ player reads in one place. Three things separate it from live play (issues #56, 
   keep clear, and a pinned seat contributes no height for six revealed hands to scroll
   through, which on a short phone they still must — as the flat list they replace did.
   `GameEnd` is untouched: `standings` carries no hands, so it stays a plain scoreboard.
+
+## A move is watched crossing that table
+
+A position arriving is a move having happened, and the cards it moved are drawn crossing the
+table on their way to where the position already has them (issue #69). What moved is decided
+in the session core and off the wire (`flight.ts`, "Card flight" in `CONTEXT.md`); where on
+the screen it happens is `CardsInFlight.tsx`, the one file in this client that measures a
+rendered element. Five decisions, none of them about the rules of anything:
+
+- **It asks the screen, not the geometry.** Every card names itself in the markup
+  (`data-card-id`, on `PlayingCard` itself), every card on screen is measured after each
+  render, and a move is flown by putting the card that has landed back where it was a moment
+  ago and letting go — FLIP, and `flip.ts` is the whole of the arithmetic. Nothing repeats
+  what the CSS worked out, so an arc, a gap or a card size can change underneath it and a
+  card still flies to where it actually lands. Only the destination boxes are trusted to
+  outlive the animation, which is why the ghost is placed there and moved back rather than
+  the other way round.
+- **The ghost flies and the real card waits.** A card in the air leaves its landing place
+  empty (`.landing`, `visibility` so the row is already laid out as it will settle), or the
+  same card would be drawn twice — once sitting at the end of the other's journey.
+- **`FLIGHT_MS` is nobody's sibling but `PACE_MS`'s.** 300ms against a 700ms beat: how long
+  a card takes to cross and how long a position stays are separate questions, tied only by
+  the flight having to be over inside the beat, with room to read the settled table.
+- **It is decorative, and that is a constraint.** Nothing locks, delays or waits on a
+  flight; a player tapping through one plays exactly as they would with none, and whatever
+  is still in the air when the screen moves on is dropped mid-flight.
+- **Reduced motion is asked in code, not in CSS.** The rest of the client answers
+  `prefers-reduced-motion` with a stylesheet rule, but a measured animation cannot be turned
+  off from one — so the preference is read as a flight that never starts, and the table is
+  the one it was before any of this existed.
+
+Today it flies the viewer's own discard (issue #72). An opponent's discard and the card
+coming back the other way are the same mechanism pointed at other boxes.

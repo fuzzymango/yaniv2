@@ -1119,6 +1119,46 @@ body {
   filter: grayscale(0.5);
 }
 
+/* --- cards in flight --- */
+
+/*
+ * A place on the table a card has not reached yet (issue #72). It keeps its room in the
+ * row — `visibility` rather than `display`, so the pile is laid out exactly as it will be
+ * once everything lands, and the ghost above has a box to fly to that will not move under
+ * it. Which cards these are is decided in `CardsInFlight.tsx` and nowhere in this stylesheet: a
+ * card is only ever hidden while there is one of its own in the air.
+ */
+.landing {
+  visibility: hidden;
+}
+
+/*
+ * The layer the cards fly across: the whole viewport, over everything on the table and
+ * part of none of it.
+ *
+ * Fixed rather than absolute because the boxes it positions against were measured in the
+ * viewport's own coordinates (`getBoundingClientRect`), so anything else would need the
+ * offset working out — the one piece of geometry this feature deliberately does not do by
+ * hand. Untappable throughout: everything a flight illustrates has already happened, and
+ * the live controls are underneath it answering as usual.
+ */
+.flight {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/*
+ * One card in the air. Placed at its landing box and moved back to where it came from —
+ * `transform-origin` is what makes the moving back a subtraction rather than a matrix, and
+ * `flip.ts` assumes exactly this corner.
+ */
+.flight__card {
+  position: absolute;
+  transform-origin: top left;
+}
+
 /*
  * The local player's own hand, at the bottom of the screen: bigger than the table's cards,
  * because on the table they are the ones a player picks out one at a time. The scored round

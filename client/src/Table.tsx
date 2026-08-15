@@ -19,10 +19,12 @@
 
 import type { GameError, PlayerGameView } from "@yaniv/shared";
 import { handValue } from "@yaniv/shared";
+import { CardsInFlight, useCardFlight } from "./CardsInFlight.tsx";
 import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
 import { OpponentSeat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
 import { CloseRoomIcon } from "./WayOut.tsx";
+import type { CardFlight } from "./flight.ts";
 import { ZONES, bySeat, seatZones } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
@@ -32,6 +34,12 @@ interface TableProps {
   selection: readonly string[];
   error: GameError | null;
   busy: boolean;
+  /**
+   * The move this position was reached by, if it is one worth watching happen. A one-shot
+   * off the session snapshot, handed straight to the flight layer and read nowhere else on
+   * this screen — the table itself draws the position, not how it got here.
+   */
+  flight: CardFlight | null;
   onToggleCard: (cardId: string) => void;
   /** The tap that plays the turn — a draw target, because the draw *is* the commit. */
   onCommitTurn: (source: DrawSource) => void;
@@ -48,6 +56,7 @@ export function Table({
   selection,
   error,
   busy,
+  flight,
   onToggleCard,
   onCommitTurn,
   onCallYaniv,
@@ -82,6 +91,22 @@ export function Table({
    */
   const slapdownTarget = isSlapdownTarget(view.you);
 
+  /*
+   * The cards of the move this position was reached by, on their way to where the position
+   * already has them. Nothing else on this screen reads it: `landing` says which cards are
+   * still in the air so their place can be left empty, and the layer draws them. See
+   * `CardsInFlight.tsx` — it is decorative from end to end, and no control below waits on it.
+   */
+  const { rootRef, landing, ghosts, settle } = useCardFlight(flight, view.you.id);
+
+  /**
+   * Whether the pile as a whole is still being landed on. Everything on it is the discard
+   * that has just been played, so a slapdown window opening on the viewer's own move opens
+   * over cards that have not arrived yet — and that pile is one control rather than a card
+   * each, so it waits as one thing.
+   */
+  const pileLanding = view.lastDiscard.some((card) => landing.has(card.id));
+
   const zones = seatZones([...view.opponents].sort(bySeat(view)));
 
   const onTurn = [view.you, ...view.opponents].find(
@@ -89,7 +114,7 @@ export function Table({
   );
 
   return (
-    <main className="screen table">
+    <main className="screen table" ref={rootRef}>
       {/*
         The corner every in-match screen carries. The room's locked settings, one tap away
         and nowhere on the table itself — what a Yaniv may be called on is worth being able
@@ -154,7 +179,7 @@ export function Table({
             is refused by the server for free.
           */
           <button
-            className="slapdown"
+            className={`slapdown ${pileLanding ? "landing" : ""}`}
             type="button"
             aria-label="Slap down the card you just drew"
             disabled={busy}
@@ -174,7 +199,9 @@ export function Table({
           <ul className="discard">
             {view.lastDiscard.map((card) =>
               takeable.has(card.id) ? (
-                <li key={card.id}>
+                // A card still in the air leaves its place empty rather than sitting in it
+                // twice — see `landing` in `CardsInFlight.tsx`.
+                <li className={landing.has(card.id) ? "landing" : ""} key={card.id}>
                   <button
                     className="pick"
                     type="button"
@@ -188,7 +215,10 @@ export function Table({
               ) : (
                 // Deliberately not a `.pick`: there is no control here at all, so there is
                 // nothing to give it a pointer cursor or a focus stop either.
-                <li className="discard__out" key={card.id}>
+                <li
+                  className={`discard__out ${landing.has(card.id) ? "landing" : ""}`}
+                  key={card.id}
+                >
                   <PlayingCard card={card} />
                 </li>
               ),
@@ -273,6 +303,14 @@ export function Table({
           {error.message}
         </p>
       )}
+
+      {/*
+        Last, and over everything: the cards of the move that produced this position, drawn
+        crossing the table on their way to the places left empty for them above. Nothing on
+        the screen is arranged around it — it is fixed to the viewport, inert to every tap,
+        and gone a third of a beat later.
+      */}
+      <CardsInFlight ghosts={ghosts} onSettled={settle} />
     </main>
   );
 }

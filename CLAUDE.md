@@ -107,6 +107,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `session.ts` | The session core: owns the socket and the seat's credential, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
 | `flight.ts` | `flightFrom` — the position on the screen and the one arriving in, and either the move between them (`CardFlight`: mover, discarded cards, draw source, drawn card where the viewer may know it) or nothing. Pure and total, `turn.ts`'s counterpart on the way in; the one seam the card flight is tested at |
+| `flip.ts` | `invert` and `transformOf` — where a card has landed and where it came from, as the transform that puts it back. The arithmetic of the flight, and all of it: measured boxes in, one CSS transform out. Pure and total |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). Generic over the opponent, so the live table and the round-end reveal zone their own payloads. `revealSeats` is the round end's own: the viewer's row out for the bottom of the screen, the rest zoned in the order the round scored them |
 | `fan.ts` | The geometry of a hand held at a seat, in two shapes. Arced during play: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Cascaded once it is revealed: `cascadeOffset`, `cascadeFootprint`, `ZONE_CASCADE` (down the sides, across the top) and the `CARD_INDEX_STRIP`/`CASCADE_STEP` pair that keeps a covered card readable. Distances in card widths, so the CSS scales it |
@@ -117,6 +118,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
 | `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open |
+| `CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen after each render, and answer an arriving `CardFlight` with ghosts and the places to leave empty for them), the `CardsInFlight` overlay they fly across, and `FLIGHT_MS`. The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
 | `Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held) and `CascadeReveal` (the same hand face up and read). `OpponentSeat` composes the first three for live play; the round end composes its own. Presentational throughout |
 | `RoundEnd.tsx` | `phase: 'roundEnd'` — who called, whether they were Assafed, and the same seated table with every hand face up, each player's round folded onto their own seat's label |
 | `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and the same two ways out the lobby offers |
@@ -271,9 +273,8 @@ card to everyone off the face-up discard and to the mover alone off the deck. do
 **A finished round names its own players.** `PlayerRoundResult` carries a `name` copied in
 when the round is scored, and the serializer uses that rather than looking the id up in
 `players`. The duplication is deliberate: a seat can be given up once the match ends
-(`exitToMenu`), and resolving names against the live roster left a departed player nameless
-on everyone else's scoreboard, with no way for a client to recover it. It is also why the
-round-end reveal seats off `result.players` rather than `turnOrder`.
+(`exitToMenu`), and resolving names against the live roster left a departed player nameless on
+everyone else's scoreboard. It is also why the round-end reveal seats off `result.players`.
 
 ### Player identity
 
@@ -396,15 +397,13 @@ turns, and by the time a promise resolved, the position it meant to publish woul
 have been played past.
 
 **Each bot action gets its own broadcast.** `playBotTurns` calls back per move and each
-callback publishes, so a chain of five bot turns is five updates in seating order, not
-one collapsed jump to the final position — a client can replay the chain move by move.
-There is **no artificial delay** between them; pacing that sequence for a human to watch
-is the client's job, and a test asserts the chain resolves without pauses.
+callback publishes, so a chain of five bot turns is five updates in seating order rather than
+one collapsed jump — a client can replay it move by move. There is **no artificial delay**
+between them: pacing a chain for a human is the client's job, asserted by a test.
 
-Every in-game handler shares one `act(ack, transition)` helper: identify the caller from
-their session, apply, and on success ack, broadcast, then run any bot turns. A rejection
-acks the error and publishes nothing, so a refused action costs the player nothing — the
-turn is still theirs.
+Every in-game handler shares one `act(ack, transition)` helper: identify the caller from their
+session, apply, and on success ack, broadcast, then run any bot turns. A rejection acks the
+error and publishes nothing, so a refused action costs the player nothing.
 
 ### The turn is two taps, and draw targets are inert until legal
 
@@ -442,6 +441,13 @@ decision behind the geometry, and what the felt gave up to make room for the sea
 `docs/client-table.md` (issues #56, #58, #59, #60); `fan.ts`, `seating.ts` and `Seat.tsx`
 are where it lives.
 
+**A move is watched crossing that table, not merely published onto it** (issue #69). The
+session says *what* moved (`flight.ts`); `CardsInFlight.tsx` measures where on the screen it
+happens and animates the difference closed (FLIP, `flip.ts`), rather than repeating the
+geometry above — so a change to how a hand is laid out cannot send a card to the wrong place.
+Decorative throughout: nothing waits on a flight and reduced motion skips it. Its decisions
+are in `docs/client-table.md` too; today it flies the viewer's own discard (#72).
+
 ### Settings are edited in one place and shown in another
 
 The lobby is the only screen with the four controls (`SettingsEditor.tsx`, host only) and the
@@ -466,13 +472,14 @@ of intents to call. `useSession` subscribes to it with `useSyncExternalStore` an
 logic — **if that hook ever grows a branch, the branch is in the wrong place.** The point
 is testability: the session core is driven under `node:test` against a real socket server,
 with no browser, no jsdom and no React test dependencies. Components are not tested at all,
-a consequence of that split rather than a gap — behaviour worth testing on its own belongs
-in the session core, or in one of the pure modules beside it (`turn.ts`, `seating.ts`,
-`fan.ts`, `flight.ts`, `settings.ts`), which is where every layout rule with an answer lives.
+a consequence of that split rather than a gap — behaviour worth testing on its own belongs in
+the session core, or in one of the pure modules beside it (`turn.ts`, `seating.ts`, `fan.ts`,
+`flight.ts`, `flip.ts`, `settings.ts`), where every layout rule with an answer lives.
+`useCardFlight` is the one hook outside `useSession`, and only because a flight is measured
+off rendered elements — it decides nothing the pure modules could have been asked instead.
 
 Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` compares by
-identity, so a mutated object would leave React rendering a position that has already
-moved on.
+identity, so a mutated object would leave React rendering a position that has moved on.
 
 Seven fields, and each answers a different question:
 
@@ -501,9 +508,8 @@ Seven fields, and each answers a different question:
 - **`flight`** — the move the position was reached by, when there is one worth watching
   happen, and null otherwise. The **one-shot**: `publish` clears it unless the publication
   being made is the one drawing that move, so a tap, a refusal or a reconnect never flies a
-  card again. Decided in `show`, the one place holding the outgoing position and the arriving
-  one at once, and decided by asking `flight.ts` — nothing here re-derives it. See "Card
-  flight" in `CONTEXT.md` for what counts as one.
+  card again. Decided in `show` — the one place holding the outgoing position and the
+  arriving one at once — by asking `flight.ts`. See "Card flight" in `CONTEXT.md`.
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room
 settles on the **ack**: entry has been broadcast before it is acked, and a departing
@@ -529,40 +535,34 @@ first arrival goes straight through, and anything landing in the beat behind it 
 per `PACE_MS` (700ms)** — a move of the player's own is a lone arrival and so never delayed,
 which is why the rule is "first one free" rather than "one every beat". The queue is
 phase-blind, and a round a bot's Yaniv ends is *why*: the scored position is the last link of
-the chain. The accepted cost is set out in full in `pacing.ts`.
-
-Two things fall out of the queue. **The watermark counts arrivals, not drawings** — a
-queued position carries the `version` it *landed* on, or one already in flight when a move
-went out could pass for an answer to it. And **a room that has gone takes its queue with
-it**: `roomClosed` and a successful `exitToMenu` both `reset` the pacer, or the next beat
-would draw a table the player has left back over the main menu.
+the chain. The accepted cost is set out in full in `pacing.ts`. Two things fall out of it.
+**The watermark counts arrivals, not drawings** — a queued position carries the `version` it
+*landed* on, or one already in flight when a move went out could pass for an answer to it.
+And **a room that has gone takes its queue with it**: `roomClosed` and a successful
+`exitToMenu` both `reset` the pacer, or the next beat would draw a table the player has left
+back over the main menu.
 
 **A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
-`null`, `commitTurn` returns, and no error is published — the screen should not have offered
-a target that lands there, and a player who found a dead one has asked for nothing and been
+`null`, `commitTurn` returns, and no error is published — the screen should not have offered a
+target that lands there, and a player who found a dead one has asked for nothing and been
 refused nothing. `callYaniv` is the same shape via `isLegalCall`. **What is legal about the
 cards** is the whole of what the client applies ahead of the server (ADR-0002, and "The turn
-is two taps" above); everything else the server owns is offered, sent, and answered with a
-`GameError`.
+is two taps" above); everything else the server owns is offered, sent, and refused by it.
 
 **Leaving is the one action answered by the ack alone.** Everything else is confirmed by the
 broadcast behind it, but the server stops publishing to a connection that has left, so
 `exitToMenu` clears the view itself. Which of the two outcomes it got — a freed seat or a
-closed room — the client is never told and does not need to be; either way it is out.
+closed room — it is never told and does not need to be; either way it is out.
 
 **A rejection that lands after the room has gone is swallowed, not shown.** Two players
 leaving at once is the case: the host's exit closes the room and drops everyone's session, so
 a guest's in-flight action acks `PLAYER_NOT_FOUND` about a room that no longer exists. They
 are already on the menu being told why, and a red error blaming them on top is what "a
 refused action costs the player nothing" rules out — so an error is dropped whenever `view`
-is already null.
-
-**An `errorMessage` shows where a rejected ack does, is dropped where one is dropped, and
-does not touch `busy`.** It is the same news to a player — something that might have
-happened did not — so it lands in `error`, and goes by the rule above when `view` is null.
-Unlike an ack it is nobody's answer, so it releases no lock: letting go on news that
-answers nothing in flight would put a second copy of that action on the wire. Nothing in
-the server sends one today; the handler exists because the contract does.
+is already null. **An `errorMessage` shows and is dropped exactly where a rejected ack is**,
+being the same news to a player, **but does not touch `busy`**: it is nobody's answer, and
+letting go on news that answers nothing in flight would put a second copy of that action on
+the wire. Nothing in the server sends one today; the handler exists because the contract does.
 
 **`playerJoined`/`playerLeft` are deliberately unhandled.** The roster arrives right behind
 each of them as a fresh view, and a screen that re-renders in place shows a seat filling or
@@ -604,8 +604,9 @@ screen would read the moment between them as the main menu.
 A refused claim clears the credential, empties the pacer and lands on `view: null` with one
 `notice` — the same sentence a room that has gone gets, since which of the two it was is a
 distinction the server deliberately does not draw. A successful one publishes the acked view
-directly rather than through the pacer: it is the answer to this call and to nobody else's,
-with no chain behind it to spread out.
+directly rather than through the pacer, and with nothing in flight: it answers this call and
+nobody else's, has no chain behind it to spread out, and is a table sat back down at rather
+than a move anybody watched.
 
 ### A session that loses its socket
 
@@ -620,13 +621,12 @@ moment of every load would be crying wolf.
 them straight back down.** `disconnect` resets the pacer, drops the watermark and releases
 `busy` — nothing is in flight over a socket that is not there, a claim included — but leaves
 the view alone, since that screen is over it anyway and is very likely the position still
-there when the socket returns. The *reconnect* claims the seat rather than clearing
-anything: `connect` sends `resumeSeat` with the credential the session is holding, and the
-position comes back in the ack. The main menu is now the fallback, for a returning
-connection with no seat to claim — which is a real if narrow case, since the server
-broadcasts the lobby *before* it acks the join that names the seat, so a drop in between
-leaves a view on the screen and nothing to ask for it back with. A drop at the menu costs
-nothing and says nothing.
+there when the socket returns. The *reconnect* claims the seat rather than clearing anything:
+`connect` sends `resumeSeat` with the credential the session holds, and the position comes
+back in the ack. The main menu is now the fallback, for a returning connection with no seat
+to claim — a real if narrow case, since the server broadcasts the lobby *before* it acks the
+join that names the seat, so a drop in between leaves a view on the screen and nothing to ask
+for it back with. A drop at the menu costs nothing and says nothing.
 
 **A connection that never arrived is the same screen.** `connect_error` is treated the way
 `disconnect` is, because the two are indistinguishable to whoever is looking at them: taps

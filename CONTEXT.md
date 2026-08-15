@@ -106,6 +106,13 @@ The drawn card **may have no face**: `flight.ts` passes the server's redaction t
 untouched, so a card off the deck flies as a back for everyone but the drawer. Nothing on the
 client re-derives what a viewer may see.
 
+What actually crosses the screen is a **ghost** — a copy of the card, drawn over the table and
+inert, flying between two boxes measured off the real thing (`CardsInFlight.tsx`, `flip.ts`).
+The card it is a copy of waits at its **landing place**: the spot the position has already
+given it, kept empty for as long as its ghost is in the air, or the same card would be drawn
+twice. The flight is over in `FLIGHT_MS`, well inside the pacer's beat. Today only the
+viewer's own discard flies (issue #72); `docs/client-table.md` has the decisions.
+
 ## Slapdown and the slapdown window
 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it
