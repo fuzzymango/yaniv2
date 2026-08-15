@@ -42,6 +42,7 @@ import {
   type Socket as ClientSocket,
   type SocketOptions,
 } from "socket.io-client";
+import type { CardFlight } from "../src/flight.ts";
 import type { Clock } from "../src/pacing.ts";
 import {
   createSession,
@@ -1337,6 +1338,138 @@ describe("slapping down", () => {
       const settled = host.getSnapshot();
       assert.equal(settled.busy, false, "nothing was sent, so nothing is locked");
       assert.equal(settled.error, null, "and nothing was refused, so there is nothing to say");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The move a position was reached by, published for whatever draws the cards flying
+ * (issue #69). What counts as one is `flight.ts`'s question and is answered there, against
+ * fixtures; these are about the field arriving where a screen would read it, off a real
+ * server and a real chain of bot turns.
+ */
+describe("the move to animate", () => {
+  /** Every flight the session published, in order — one per move it had something to show for. */
+  function flightsShownTo(session: Session): CardFlight[] {
+    const flights: CardFlight[] = [];
+    session.subscribe(() => {
+      const { flight } = session.getSnapshot();
+      if (flight !== null) flights.push(flight);
+    });
+    return flights;
+  }
+
+  it("carries the move a position was reached by", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      const chosen = host.getSnapshot().view!.you.hand[0]!;
+
+      host.toggleCard(chosen.id);
+      host.commitTurn({ kind: "deck" });
+
+      const ours = await waitForSnapshot(
+        host,
+        "our own move to animate",
+        (s) => s.flight?.playerId === s.view?.you.id,
+      );
+
+      const flight = ours.flight!;
+      assert.deepEqual(
+        flight.discarded.map((c) => c.id),
+        [chosen.id],
+        "the card that left our hand",
+      );
+      assert.equal(flight.drawSource, "deck");
+      assert.ok(flight.drawnCard, "and the card we drew, which is ours to know");
+      assert.ok(
+        ours.view!.you.hand.some((c) => c.id === flight.drawnCard!.id),
+        "and which the position it arrived with has put in our hand",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps a bot's deck draw as hidden as the server left it", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      const flights = flightsShownTo(host);
+
+      takeATurn(host, host.getSnapshot().view!);
+      await waitForSnapshot(
+        host,
+        "the chain to come back round",
+        (s) =>
+          s.view !== null &&
+          !s.busy &&
+          (s.view.phase !== "playing" || s.view.currentTurnPlayerId === s.view.you.id),
+      );
+
+      // Nothing here re-decides what may be shown — the field is the server's redaction
+      // as it arrived (ADR-0007), and this is the wire proving it reaches the animation
+      // as a card with no face.
+      const theirs = flights.filter((f) => f.playerId !== host.getSnapshot().view!.you.id);
+      assert.ok(theirs.length > 0, "a chain of bot moves was watched");
+      for (const flight of theirs) {
+        if (flight.drawSource === "deck") {
+          assert.equal(flight.drawnCard, null, "a bot's deck draw is nobody else's to see");
+        } else {
+          assert.ok(flight.drawnCard, "a card off the pile was face up before it was taken");
+        }
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("has nothing to animate when the seat is claimed back", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+
+      // A move has to have happened for the returning position to carry one at all.
+      takeATurn(host, host.getSnapshot().view!);
+      await waitForSnapshot(
+        host,
+        "the chain to come back round",
+        (s) => s.view !== null && !s.busy && s.view.lastMove !== null,
+      );
+
+      server.drop(host, true);
+      await waitForSnapshot(host, "the drop", (s) => !s.connected);
+
+      const back = await waitForSnapshot(host, "the seat", (s) => s.connected && !s.resuming);
+      assert.ok(back.view!.lastMove, "the table has a move standing behind it");
+      assert.equal(back.flight, null, "but nobody was there to watch it happen");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not carry a move into the next thing published", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+
+      takeATurn(host, host.getSnapshot().view!);
+      const resting = await waitForSnapshot(
+        host,
+        "our next turn",
+        (s) =>
+          s.view !== null &&
+          !s.busy &&
+          s.view.phase === "playing" &&
+          s.view.currentTurnPlayerId === s.view.you.id,
+      );
+
+      // A card in flight belongs to the publication that announced the move and to no
+      // other, so anything published after it — here, a tap choosing a card — has none.
+      host.toggleCard(resting.view!.you.hand[0]!.id);
+      assert.equal(host.getSnapshot().flight, null, "a tap is not a move to animate");
     } finally {
       await server.close();
     }

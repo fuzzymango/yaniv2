@@ -106,6 +106,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `main.tsx` | The entrypoint. Opens the socket, hands over the seat store and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
 | `session.ts` | The session core: owns the socket and the seat's credential, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
+| `flight.ts` | `flightFrom` — the position on the screen and the one arriving in, and either the move between them (`CardFlight`: mover, discarded cards, draw source, drawn card where the viewer may know it) or nothing. Pure and total, `turn.ts`'s counterpart on the way in; the one seam the card flight is tested at |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). Generic over the opponent, so the live table and the round-end reveal zone their own payloads. `revealSeats` is the round end's own: the viewer's row out for the bottom of the screen, the rest zoned in the order the round scored them |
 | `fan.ts` | The geometry of a hand held at a seat, in two shapes. Arced during play: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Cascaded once it is revealed: `cascadeOffset`, `cascadeFootprint`, `ZONE_CASCADE` (down the sides, across the top) and the `CARD_INDEX_STRIP`/`CASCADE_STEP` pair that keeps a covered card readable. Distances in card widths, so the CSS scales it |
@@ -379,8 +380,7 @@ stand up a real server on an ephemeral port (`listen(0)`) without duplicating ha
 or racing for a fixed port — `test/socketServer.test.ts` drives real `socket.io-client`
 connections rather than a stub, since this layer's whole job *is* its wire behaviour. The
 same reasoning shapes how those tests verify: server-side facts are observed through the
-socket, never by asking `RoomManager`. Disconnect cleanup, for instance, is proven by a
-subsequent join being rejected with `ROOM_NOT_FOUND` — the way a real client would find out.
+socket, never by asking `RoomManager`.
 
 ### Broadcasting: one send per socket, one broadcast per move
 
@@ -468,13 +468,13 @@ is testability: the session core is driven under `node:test` against a real sock
 with no browser, no jsdom and no React test dependencies. Components are not tested at all,
 a consequence of that split rather than a gap — behaviour worth testing on its own belongs
 in the session core, or in one of the pure modules beside it (`turn.ts`, `seating.ts`,
-`fan.ts`, `settings.ts`), which is where every layout rule with an answer lives.
+`fan.ts`, `flight.ts`, `settings.ts`), which is where every layout rule with an answer lives.
 
 Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` compares by
 identity, so a mutated object would leave React rendering a position that has already
 moved on.
 
-Six fields, and each answers a different question:
+Seven fields, and each answers a different question:
 
 - **`view`** — the position, or `null`. Null *is* the main menu: the one screen that is
   not a function of `view.phase`, because before a room exists there is nothing for the
@@ -498,6 +498,12 @@ Six fields, and each answers a different question:
   filtering: a card id is the same string in every round of a match (the deck is rebuilt,
   not shuffled on), so a choice carried across a deal would come back chosen over whatever
   card inherited its id.
+- **`flight`** — the move the position was reached by, when there is one worth watching
+  happen, and null otherwise. The **one-shot**: `publish` clears it unless the publication
+  being made is the one drawing that move, so a tap, a refusal or a reconnect never flies a
+  card again. Decided in `show`, the one place holding the outgoing position and the arriving
+  one at once, and decided by asking `flight.ts` — nothing here re-derives it. See "Card
+  flight" in `CONTEXT.md` for what counts as one.
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room
 settles on the **ack**: entry has been broadcast before it is acked, and a departing
@@ -523,34 +529,31 @@ first arrival goes straight through, and anything landing in the beat behind it 
 per `PACE_MS` (700ms)** — a move of the player's own is a lone arrival and so never delayed,
 which is why the rule is "first one free" rather than "one every beat". The queue is
 phase-blind, and a round a bot's Yaniv ends is *why*: the scored position is the last link of
-the chain, and pacing only `playing` would skip past the move that ended it. The accepted
-cost is set out in full in `pacing.ts`.
+the chain. The accepted cost is set out in full in `pacing.ts`.
 
 Two things fall out of the queue. **The watermark counts arrivals, not drawings** — a
 queued position carries the `version` it *landed* on, or one already in flight when a move
 went out could pass for an answer to it. And **a room that has gone takes its queue with
 it**: `roomClosed` and a successful `exitToMenu` both `reset` the pacer, or the next beat
-would draw a table the player has left back over the main menu. The clock is injected, so
-the queue is driven a beat at a time under `node:test`.
+would draw a table the player has left back over the main menu.
 
 **A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
-`null`, `commitTurn` returns, and no error is published — the screen should not have
-offered a target that lands there, and a player who found a dead one has asked for nothing
-and been refused nothing. `callYaniv` is the same shape via `isLegalCall`. **What is legal
-about the cards** is the whole of what the client applies ahead of the server (ADR-0002,
-and "The turn is two taps" above); turn order and everything else the server owns are
-offered, sent, and answered with a `GameError`.
+`null`, `commitTurn` returns, and no error is published — the screen should not have offered
+a target that lands there, and a player who found a dead one has asked for nothing and been
+refused nothing. `callYaniv` is the same shape via `isLegalCall`. **What is legal about the
+cards** is the whole of what the client applies ahead of the server (ADR-0002, and "The turn
+is two taps" above); everything else the server owns is offered, sent, and answered with a
+`GameError`.
 
-**Leaving is the one action answered by the ack alone.** Everything else is confirmed by
-the broadcast behind it, but the server stops publishing to a connection that has left, so
-`exitToMenu` clears the view itself. The client is never told which of the two outcomes it
-got — a freed seat or a closed room — and does not need to be; either way it is out. That
-is the server's decision (see "Leaving a room without dropping the connection").
+**Leaving is the one action answered by the ack alone.** Everything else is confirmed by the
+broadcast behind it, but the server stops publishing to a connection that has left, so
+`exitToMenu` clears the view itself. Which of the two outcomes it got — a freed seat or a
+closed room — the client is never told and does not need to be; either way it is out.
 
 **A rejection that lands after the room has gone is swallowed, not shown.** Two players
-leaving at once is the case: the host's exit closes the room and drops everyone's session,
-so a guest's in-flight action acks `PLAYER_NOT_FOUND` about a room that no longer exists.
-They are already on the menu being told why, and a red error blaming them on top is what "a
+leaving at once is the case: the host's exit closes the room and drops everyone's session, so
+a guest's in-flight action acks `PLAYER_NOT_FOUND` about a room that no longer exists. They
+are already on the menu being told why, and a red error blaming them on top is what "a
 refused action costs the player nothing" rules out — so an error is dropped whenever `view`
 is already null.
 
@@ -660,11 +663,9 @@ Split, `shared/src` importing a Node builtin is a typecheck error.
 Not oversights — deferred on purpose, in this order of likely next work:
 
 - **What a mid-round seat does while its player is gone.** Reconnect itself is built and
-  whole — the server holds the seat (#64), the session core claims it back (#65), the page
-  keeps the credential and covers the wait (#66) — so a reload costs a round trip. Nothing
-  pauses, times out, bot-plays or frees a seat whose player never comes back: the table
-  waits on them as on a slow player, and `Player` has no `connected` field for a screen to
-  say so with. The next thing to decide here.
+  whole, so a reload costs a round trip. Nothing pauses, times out, bot-plays or frees a seat
+  whose player never comes back: the table waits on them as on a slow player, and `Player`
+  has no `connected` field for a screen to say so with. The next thing to decide here.
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
   spot, so anyone who has not joined by then is playing the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four
@@ -675,10 +676,9 @@ Not oversights — deferred on purpose, in this order of likely next work:
   ever matters. A room nobody resumes and no host closes leaks until then: no idle sweep.
 - **Slapdown against a bot.** Both clients offer it, but bots neither slap down for
   themselves nor can be raced by a human, `playBotTurns` running in the same tick — both
-  deliberate per ADR-0005: a human needs another human behind them.
+  deliberate per ADR-0005.
 - **Disambiguating a joker that extends a run.** The browser sends the selection in tap
-  order, so tap order decides where the joker sits (`docs/rules.md` §4) — invisible on the
-  screen, and a deliberate wart: a step asking which end they meant is deferred.
+  order, so tap order decides where the joker sits (`docs/rules.md` §4) — a deliberate wart.
 
 ## Running things
 

@@ -87,6 +87,25 @@ discard pile, since it was face up there a moment earlier, and the mover's alone
 came off the deck, since it is a card of a hidden hand now. See
 [ADR-0007](docs/adr/0007-last-move-on-the-wire.md).
 
+## Card flight
+
+One move as something to *watch*: the cards leaving a hand for the discard pile, and the card
+coming back the other way from wherever it was drawn (issue #69). A flight belongs to the
+move that produced a position, not to the position — it is over in well under the beat the
+next move waits out, and a table showing the same position a second later is showing nothing
+in flight at all.
+
+Which is why the client treats it as an **event** rather than table state: it is decided once,
+as a position reaches the screen (`flightFrom` in `client/src/flight.ts`, published as
+`SessionSnapshot.flight`), and gone from everything published after it. A position nobody
+watched arrive has no flight — a page that has just opened, a seat claimed back, a fresh deal
+— and neither has a broadcast that left the **last move** where it was, which is what a
+slapdown and a Yaniv call both do.
+
+The drawn card **may have no face**: `flight.ts` passes the server's redaction through
+untouched, so a card off the deck flies as a back for everyone but the drawer. Nothing on the
+client re-derives what a viewer may see.
+
 ## Slapdown and the slapdown window
 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it
