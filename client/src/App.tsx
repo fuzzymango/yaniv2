@@ -5,15 +5,17 @@
  * all — no room exists, so there is nothing for the server to have sent — and every
  * other screen is a function of the view it renders. See docs/adr/0004.
  *
- * Two screens are not a function of the view, and both are asked about before the phase
- * is: a lost connection, which makes every control on every other screen a lie, and then
- * the main menu.
+ * Three screens are not a function of the view, and all three are asked about before the
+ * phase is: a lost connection, which makes every control on every other screen a lie; a
+ * seat being claimed back, which is what an empty screen means before it means the menu;
+ * and then the main menu itself.
  */
 
 import { Disconnected } from "./Disconnected.tsx";
 import { GameEnd } from "./GameEnd.tsx";
 import { Lobby } from "./Lobby.tsx";
 import { MainMenu } from "./MainMenu.tsx";
+import { Resuming } from "./Resuming.tsx";
 import { Room } from "./Room.tsx";
 import { RoundEnd } from "./RoundEnd.tsx";
 import { Table } from "./Table.tsx";
@@ -21,7 +23,7 @@ import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
 
 export function App({ session }: { session: Session }) {
-  const { view, error, notice, busy, connected, selection } = useSession(session);
+  const { view, error, notice, busy, connected, resuming, selection } = useSession(session);
 
   /*
    * Before anything else, and whatever position was last drawn: with no socket there is
@@ -32,6 +34,16 @@ export function App({ session }: { session: Session }) {
   if (!connected) return <Disconnected />;
 
   if (view === null) {
+    /*
+     * A page that opened on a stored seat has no position yet and is not at the main menu
+     * either — it is waiting on the answer to a claim it has already sent. So the claim is
+     * asked about here, inside the branch it would otherwise be mistaken for, and nowhere
+     * else: a connection that comes back mid-match claims its seat with the last position
+     * still on the screen, and putting a spinner over that would throw away the very thing
+     * being asked for.
+     */
+    if (resuming) return <Resuming />;
+
     return (
       <MainMenu
         error={error}
@@ -57,6 +69,7 @@ export function App({ session }: { session: Session }) {
         onStart={session.startGame}
         onUpdateSettings={session.updateSettings}
         onExit={session.exitToMenu}
+        onCloseRoom={session.closeRoom}
       />
     );
   }
@@ -72,6 +85,7 @@ export function App({ session }: { session: Session }) {
         onCommitTurn={session.commitTurn}
         onCallYaniv={session.callYaniv}
         onSlapDown={session.slapDown}
+        onCloseRoom={session.closeRoom}
       />
     );
   }
@@ -89,6 +103,7 @@ export function App({ session }: { session: Session }) {
         busy={busy}
         onPlayAgain={session.playAgain}
         onExit={session.exitToMenu}
+        onCloseRoom={session.closeRoom}
       />
     );
   }
@@ -107,6 +122,7 @@ export function App({ session }: { session: Session }) {
         error={error}
         busy={busy}
         onNextRound={session.startNextRound}
+        onCloseRoom={session.closeRoom}
       />
     );
   }

@@ -12,6 +12,12 @@ export type GameErrorCode =
   /** This connection already represents a seated player. Transport-only. */
   | "ALREADY_IN_ROOM"
   | "PLAYER_NOT_FOUND"
+  /**
+   * A seat that cannot be resumed: the room holds no such player, or the token presented
+   * is not that seat's. One code for both on purpose — telling them apart would turn a
+   * room code into a way of fishing for the seats behind it.
+   */
+  | "INVALID_RESUME_TOKEN"
   | "NOT_HOST"
   | "NOT_ENOUGH_PLAYERS"
   // room settings

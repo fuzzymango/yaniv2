@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { callYaniv, removePlayer, startGame } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
-import { ids, makeState, unwrap } from "./helpers.ts";
+import { RESUME_TOKEN_MARK, ids, makeState, unwrap } from "./helpers.ts";
 
 const scenario = () =>
   makeState({
@@ -115,6 +115,47 @@ describe("serializeStateForPlayer", () => {
     ]) {
       if (visible.has(card.id)) continue;
       assert.ok(!wire.includes(card.id), `serialized view leaked ${card.id}`);
+    }
+  });
+
+  /**
+   * A resume token is a credential for a seat, so it is a secret of the same class as a
+   * hidden hand — and a worse one to lose, since a leaked token is another player's
+   * whole seat rather than a peek at their cards. Every phase is checked because a
+   * `roundEnd` view opens up hands, and a serializer that reached for `state.players`
+   * to do it would carry the tokens along.
+   */
+  it("never puts a resume token in any view, in any phase", () => {
+    const lobby = makeState({ phase: "lobby" });
+    const playing = scenario();
+    const roundEnd = unwrap(
+      callYaniv(
+        makeState({
+          hands: { p1: ["hearts-A", "hearts-2"], p2: ["spades-K", "spades-Q"] },
+        }),
+        "p1",
+      ),
+    );
+    // The same call, against a hand that busts p2 past the score limit and ends the match.
+    const gameEnd = unwrap(
+      callYaniv(
+        makeState({
+          players: [{ id: "p1" }, { id: "p2", score: 95 }],
+          hands: { p1: ["hearts-A"], p2: ["spades-K", "clubs-K"] },
+        }),
+        "p1",
+      ),
+    );
+    assert.equal(gameEnd.phase, "gameEnd");
+
+    for (const state of [lobby, playing, roundEnd, gameEnd]) {
+      for (const viewer of state.players) {
+        const wire = JSON.stringify(serializeStateForPlayer(state, viewer.id));
+        assert.ok(
+          !wire.includes(RESUME_TOKEN_MARK),
+          `${state.phase} leaked a resume token to ${viewer.id}`,
+        );
+      }
     }
   });
 

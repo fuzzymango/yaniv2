@@ -1249,6 +1249,21 @@ describe("playAgain", () => {
     );
   });
 
+  /**
+   * The one transition that rebuilds every `Player` object rather than patching one, so
+   * the one most able to drop a field on the way past. A seat carried into another match
+   * is the same seat, and its resume token is what says so.
+   */
+  it("carries every seat's resume token into the new match", () => {
+    const finished = finishedMatch();
+    const again = unwrap(playAgain(finished, "p1", rng()));
+
+    assert.deepEqual(
+      again.players.map((p) => p.resumeToken),
+      finished.players.map((p) => p.resumeToken),
+    );
+  });
+
   it("picks the opening player at random, not always the host", () => {
     const starters = new Set<string>();
     for (let seed = 0; seed < 100; seed++) {

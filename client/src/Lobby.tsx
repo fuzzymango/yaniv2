@@ -16,6 +16,7 @@ import type { GameError, PlayerGameView, RoomSettings } from "@yaniv/shared";
 import { effectiveBotCount } from "@yaniv/shared";
 import { SettingsEditor } from "./SettingsEditor.tsx";
 import { SettingsPanel, SettingsValues } from "./SettingsValues.tsx";
+import { WayOut } from "./WayOut.tsx";
 import { bySeat } from "./seating.ts";
 
 interface LobbyProps {
@@ -25,6 +26,8 @@ interface LobbyProps {
   onStart: () => void;
   onUpdateSettings: (settings: RoomSettings) => void;
   onExit: () => void;
+  /** End the room. The host's way out of this screen — see `WayOut.tsx`. */
+  onCloseRoom: () => void;
 }
 
 export function Lobby({
@@ -34,6 +37,7 @@ export function Lobby({
   onStart,
   onUpdateSettings,
   onExit,
+  onCloseRoom,
 }: LobbyProps) {
   const isHost = view.hostId === view.you.id;
 
@@ -121,13 +125,8 @@ export function Lobby({
           <p className="hint">The host starts the match.</p>
         )}
 
-        {/*
-          Promises neither outcome, because the caller does not choose it: a guest frees
-          their own seat and the room plays on, the host closes it. See CONTEXT.md.
-        */}
-        <button className="button" type="button" onClick={onExit} disabled={busy}>
-          Leave the room
-        </button>
+        {/* Closing it for the host, leaving it for everybody else — see `WayOut.tsx`. */}
+        <WayOut isHost={isHost} busy={busy} onExit={onExit} onCloseRoom={onCloseRoom} />
       </div>
 
       {error && (

@@ -17,6 +17,7 @@
 import type { GameError, PlayerGameView } from "@yaniv/shared";
 import { standings } from "@yaniv/shared";
 import { SettingsDialog } from "./SettingsDialog.tsx";
+import { WayOut } from "./WayOut.tsx";
 
 interface GameEndProps {
   view: PlayerGameView;
@@ -24,6 +25,8 @@ interface GameEndProps {
   busy: boolean;
   onPlayAgain: () => void;
   onExit: () => void;
+  /** End the room. The host's way out of this screen — see `WayOut.tsx`. */
+  onCloseRoom: () => void;
 }
 
 /** How a seat that has been given up is marked, the same word the terminal harness uses. */
@@ -35,7 +38,14 @@ function spokenList(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-export function GameEnd({ view, error, busy, onPlayAgain, onExit }: GameEndProps) {
+export function GameEnd({
+  view,
+  error,
+  busy,
+  onPlayAgain,
+  onExit,
+  onCloseRoom,
+}: GameEndProps) {
   const isHost = view.hostId === view.you.id;
   const placings = standings(view);
   const winnerIds = view.winnerIds ?? [];
@@ -69,8 +79,12 @@ export function GameEnd({ view, error, busy, onPlayAgain, onExit }: GameEndProps
       {/*
         Still the settings of the match just played, and still worth a look — a run of
         rounds that ended sooner than anybody expected is answered by the score it ended at.
+        Alone in the bar here: closing the room is in the row of controls below, which this
+        screen has and the table does not.
       */}
-      <SettingsDialog settings={view.settings} />
+      <div className="topbar">
+        <SettingsDialog settings={view.settings} />
+      </div>
 
       <header className="final__header">
         <p className="code__label">Final standings</p>
@@ -116,14 +130,8 @@ export function GameEnd({ view, error, busy, onPlayAgain, onExit }: GameEndProps
           <p className="hint">The host deals another match.</p>
         )}
 
-        {/*
-          Promises neither outcome, because the caller does not choose it: a guest frees
-          their own seat and the standings stay up for whoever remains, the host closes the
-          room. The same words as the lobby's, because leaving means the same thing here.
-        */}
-        <button className="button" type="button" onClick={onExit} disabled={busy}>
-          Leave the room
-        </button>
+        {/* The lobby's two ways out, meaning the same thing here — see `WayOut.tsx`. */}
+        <WayOut isHost={isHost} busy={busy} onExit={onExit} onCloseRoom={onCloseRoom} />
       </div>
 
       {error && (

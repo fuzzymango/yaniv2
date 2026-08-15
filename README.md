@@ -85,10 +85,17 @@ turned face up and spread out to be read, with what the round cost them against 
 total on their own label — plus who called and whether they were Assafed across the top. The
 host deals the next round from there.
 
-Closing or reloading the tab mid-match asks you to confirm first, because a dropped
-connection ends the room for everyone in it — there is no reconnecting to a match yet. If
-the connection does go, the screen says so rather than leaving you tapping at a dead table,
-and you land back at the main menu once it comes back.
+Reloading the tab, or backgrounding it and coming back, costs you nothing: the server holds
+your seat through a dropped connection, and the page claims it back with a credential it
+keeps in `localStorage` — a spinner while it asks, and then the same lobby, hand or
+scoreboard you left. If the connection goes, the screen says so rather than leaving you
+tapping at a dead table, and sits you back down when it returns. Only if the room itself has
+gone are you sent to the main menu, and told why.
+
+The **host** can close the room from any screen — an icon beside the settings during a
+match, and the way out of the lobby and a finished match — which ends it for everybody and
+is the only thing that does. It asks first. Everyone else has "leave the room", which frees
+their own seat and leaves the table playing.
 
 **Play in the terminal (`play`).** A real socket client, so it needs a server running.
 Start the server first:
@@ -154,8 +161,9 @@ menu, free to create or join another room. It works the same way from the lobby 
 finished match, and what it costs the rest of the table depends on who typed it — a guest
 frees only their own seat and the others carry on without them, while the host leaving
 closes the room for everyone, who are told why and returned to their own main menu.
-Mid-match there is still no graceful exit; `q` or Ctrl-D disconnects, which ends the room
-for everyone in it.
+Mid-match there is still no graceful exit; `q` or Ctrl-D just drops the connection, which
+now leaves the room standing with your seat held open — the harness cannot resume it, and
+has no host control to close the room either.
 
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot
@@ -207,12 +215,12 @@ automatically as part of the build phase.
 
 ## Not yet built
 
-Disconnect/reconnect handling (dropping a connection currently ends the room for everyone)
-and persistence (rooms are in-memory, so a restart or redeploy drops games in progress). A
-match plays end to end in the browser now: create or join, set the room up, deal, take turns,
-watch a paced run of bot turns, call Yaniv, and finish on the standings with another match
-one tap away; a
-dropped connection says so on screen rather than leaving you tapping at a dead table. Because
-reconnect isn't built yet, a backgrounded mobile tab still drops the socket and ends the
-match for everyone at the table — fine solo against bots, not yet safe to invite others to
+Persistence (rooms are in-memory, so a restart or redeploy drops games in progress), and any
+policy for a seat whose player never comes back. A match plays end to end in the browser now:
+create or join, set the room up, deal, take turns, watch a paced run of bot turns, call
+Yaniv, and finish on the standings with another match one tap away. Reconnect is whole — a
+drop leaves the room and the seat alone, and the page presents the seat's token and picks up
+where it left off, whether the socket came back or the whole tab did — and the host can end a
+room outright from any phase. What is missing is what a table does about a player who is
+simply gone: nothing pauses, nothing times out, and nobody is told anyone has dropped
 (`docs/adr/0004`).

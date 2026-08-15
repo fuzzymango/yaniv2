@@ -58,6 +58,7 @@ export type {
   DrawAction,
   TurnAction,
   Ack,
+  ResumeRequest,
   ClientToServerEvents,
   ServerToClientEvents,
 } from "./events.ts";

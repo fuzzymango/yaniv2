@@ -22,6 +22,7 @@ import { handValue } from "@yaniv/shared";
 import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
 import { OpponentSeat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
+import { CloseRoomIcon } from "./WayOut.tsx";
 import { ZONES, bySeat, seatZones } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
@@ -38,6 +39,8 @@ interface TableProps {
   onCallYaniv: () => void;
   /** The tap on the pile that sheds the just-drawn card, while a window is open. */
   onSlapDown: () => void;
+  /** End the room. Offered to the host alone — see `WayOut.tsx`. */
+  onCloseRoom: () => void;
 }
 
 export function Table({
@@ -49,8 +52,10 @@ export function Table({
   onCommitTurn,
   onCallYaniv,
   onSlapDown,
+  onCloseRoom,
 }: TableProps) {
   const yourTurn = view.currentTurnPlayerId === view.you.id;
+  const isHost = view.hostId === view.you.id;
 
   /**
    * Whether a draw target does anything. The selection is the whole of it: a tap that
@@ -86,11 +91,15 @@ export function Table({
   return (
     <main className="screen table">
       {/*
-        The room's locked settings, one tap away and nowhere on the table itself: what a
-        Yaniv may be called on is worth being able to check, and worth nothing at all in
-        front of a player who is looking at their hand.
+        The corner every in-match screen carries. The room's locked settings, one tap away
+        and nowhere on the table itself — what a Yaniv may be called on is worth being able
+        to check, and worth nothing at all in front of a player who is looking at their
+        hand — and, for the host, the only thing that ends a room mid-round.
       */}
-      <SettingsDialog settings={view.settings} />
+      <div className="topbar">
+        {isHost && <CloseRoomIcon busy={busy} onClose={onCloseRoom} />}
+        <SettingsDialog settings={view.settings} />
+      </div>
 
       {/*
         Everybody else, seated round three sides of the felt with the viewer holding the

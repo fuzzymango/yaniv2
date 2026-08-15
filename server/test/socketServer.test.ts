@@ -13,7 +13,12 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import type { GameError, PlayerGameView, RoomSettings } from "@yaniv/shared";
+import type {
+  GameError,
+  PlayerGameView,
+  ResumeRequest,
+  RoomSettings,
+} from "@yaniv/shared";
 import {
   HAND_SIZE,
   MAX_PLAYERS,
@@ -27,6 +32,7 @@ import { createDeck } from "../src/deck.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { createSocketServer } from "../src/socketServer.ts";
+import { RESUME_TOKEN_MARK, markedResumeTokens } from "./helpers.ts";
 
 /** The ack shape every request/response event replies with. Mirrors `Ack<T>`. */
 type AckResult<T> = { ok: true; value: T } | { ok: false; error: GameError };
@@ -56,11 +62,15 @@ async function startServer(
   botCount = MAX_PLAYERS - 1,
 ): Promise<Harness> {
   const httpServer = createServer();
+  // Every seat this server issues holds a marked token, so a leak test can grep a payload
+  // for a string it knows is a credential.
+  const newResumeToken = markedResumeTokens();
   const rooms =
     seed === undefined
-      ? new RoomManager({ defaultSettings: { botCount } })
+      ? new RoomManager({ newResumeToken, defaultSettings: { botCount } })
       : new RoomManager({
           rng: mulberry32(seed),
+          newResumeToken,
           newRoomRng: () => mulberry32(seed + 1),
           defaultSettings: { botCount },
         });
@@ -183,6 +193,19 @@ function watch(client: ClientSocket): Watcher {
   };
 }
 
+/**
+ * A resume token is a seat's credential, so it is a secret of the same class as a hidden
+ * hand — worse to lose, since it is the seat itself rather than a look at the cards. No
+ * broadcast view carries one, in any phase, to any player, including the one it belongs
+ * to: a token reaches its owner through an ack of their own or not at all.
+ */
+function assertNoResumeToken(view: PlayerGameView, where: string): void {
+  assert.ok(
+    !JSON.stringify(view).includes(RESUME_TOKEN_MARK),
+    `a resume token reached ${where}`,
+  );
+}
+
 /** Unwrap a rejection, failing the test if the call unexpectedly succeeded. */
 function expectError<T>(result: AckResult<T>): GameError {
   if (result.ok) assert.fail("expected a rejection, got success");
@@ -294,6 +317,44 @@ describe("joinRoom", () => {
     const result = await ask(latecomer, "joinRoom", roomCode, "Tony");
 
     assert.equal(expectError(result).code, "ROOM_FULL");
+  });
+});
+
+/**
+ * The rest of a token's life is covered where the payloads are: the round-by-round
+ * broadcasts and every revealed phase are checked in "playing a match" below.
+ */
+describe("resume tokens", () => {
+  it("reach the seat they belong to, in its own ack and nowhere else", async () => {
+    const host = await server.connect();
+    const hostViews = watch(host);
+    const created = expectOk(
+      await ask<{ roomCode: string; playerId: string; resumeToken: string }>(
+        host,
+        "createRoom",
+        "Ada",
+      ),
+    );
+    const guest = await server.connect();
+    const guestViews = watch(guest);
+    const joined = expectOk(
+      await ask<{ playerId: string; resumeToken: string }>(
+        guest,
+        "joinRoom",
+        created.roomCode,
+        "Grace",
+      ),
+    );
+
+    // The ack of the event that seated them is the one place a token is handed over,
+    // and each seat gets its own — a shared one would be a key to the whole table.
+    assert.ok(created.resumeToken.length > 0, "the host was issued a token");
+    assert.notEqual(joined.resumeToken, created.resumeToken);
+
+    await guestViews.until((v) => v.opponents.length === 1, "the guest's lobby");
+    for (const view of [...hostViews.seen, ...guestViews.seen]) {
+      assertNoResumeToken(view, "a lobby view");
+    }
   });
 });
 
@@ -798,6 +859,9 @@ describe("playing a match", () => {
 
   /** A finished round shows every hand, what each hand cost, and the new totals. */
   function assertRoundIsSettled(view: PlayerGameView): void {
+    // Revealing every hand is the one thing this phase opens up. Reaching for the roster
+    // to do it would bring the tokens along with the cards.
+    assertNoResumeToken(view, `a ${view.phase} view`);
     const result = view.roundResult;
     assert.ok(result, "a finished round reports its result");
     assert.equal(result.players.length, MAX_PLAYERS);
@@ -833,7 +897,7 @@ describe("playing a match", () => {
    * goes down the wire — including the burst of broadcasts a run of bot turns produces,
    * which is the path most likely to reach for state directly and skip the serializer.
    */
-  it("never puts another player's cards or the draw pile on the wire", async () => {
+  it("never puts another player's cards, the draw pile or a token on the wire", async () => {
     const { client, watcher, view } = await sitDown();
     const me = view.you.id;
     const everyCardId = createDeck().map((card) => card.id);
@@ -849,6 +913,7 @@ describe("playing a match", () => {
     assert.ok(watcher.seen.length > 1, "a run of bot turns was published");
 
     for (const published of watcher.seen) {
+      assertNoResumeToken(published, "a broadcast mid-round");
       // Hands are revealed to everyone at roundEnd, where the rules require it.
       if (published.phase !== "playing") continue;
 
@@ -1526,32 +1591,351 @@ describe("slapping down", () => {
   });
 });
 
-describe("disconnect", () => {
-  /**
-   * Poll a room code with real join attempts until one is rejected.
-   *
-   * A client-side disconnect is processed by the server asynchronously, so there is no
-   * instant the test can synchronously observe. Polling through the public interface is
-   * also exactly how a real client would discover the room is gone.
-   */
-  async function joinUntilRejected(roomCode: string): Promise<GameError> {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const probe = await server.connect();
-      const result = await ask(probe, "joinRoom", roomCode, `Probe${attempt}`);
-      if (!result.ok) return result.error;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    assert.fail("the room kept accepting joins");
+/**
+ * Coming back to a seat after the connection holding it has gone.
+ *
+ * Every phase is exercised, because a resume is only worth having if it works from the
+ * one the player happened to drop in — and the four differ in what a view even contains.
+ * The table is driven into each of them by playing it, on a seeded server, rather than
+ * by reaching behind the wire for a state to hand out.
+ */
+describe("resumeSeat", () => {
+  let table: Harness;
+
+  before(async () => {
+    table = await startServer(4242);
+  });
+  after(async () => {
+    await table.close();
+  });
+
+  /** A seat and the credential for it: everything a client needs to come back. */
+  interface Held {
+    client: ClientSocket;
+    watcher: Watcher;
+    roomCode: string;
+    playerId: string;
+    resumeToken: string;
   }
 
-  it("removes the room, so its code stops resolving", async () => {
+  async function seated(name = "Ada"): Promise<Held> {
+    const client = await table.connect();
+    const watcher = watch(client);
+    const created = expectOk(
+      await ask<{ roomCode: string; playerId: string; resumeToken: string }>(
+        client,
+        "createRoom",
+        name,
+      ),
+    );
+    return { client, watcher, ...created };
+  }
+
+  /** What a resuming client sends, so a test can spread it and bend one field. */
+  function credentials(seat: Held): ResumeRequest {
+    return {
+      roomCode: seat.roomCode,
+      playerId: seat.playerId,
+      resumeToken: seat.resumeToken,
+    };
+  }
+
+  function resume(client: ClientSocket, request: ResumeRequest) {
+    return ask<{ view: PlayerGameView }>(client, "resumeSeat", request);
+  }
+
+  /**
+   * Play a solo host's table forward until it stands in `target`, acting with the same
+   * judgement the server gives its bots. The lobby is not reachable this way and does
+   * not need to be — it is where every table already is.
+   */
+  async function playTo(
+    seat: Held,
+    target: "playing" | "roundEnd" | "gameEnd",
+  ): Promise<PlayerGameView> {
+    const settled = (view: PlayerGameView) =>
+      view.phase !== "lobby" &&
+      (view.phase !== "playing" || view.currentTurnPlayerId === seat.playerId);
+
+    seat.watcher.reset();
+    expectOk(await ask(seat.client, "startGame"));
+
+    for (let step = 0; step < 500; step++) {
+      const current = await seat.watcher.until(settled, "the player to be needed");
+      if (current.phase === target) return current;
+
+      seat.watcher.reset();
+      if (current.phase === "roundEnd") {
+        expectOk(await ask(seat.client, "startNextRound"));
+        continue;
+      }
+      assert.notEqual(current.phase, "gameEnd", `the match ended before ${target}`);
+
+      const decision = decideTurn(current);
+      if (decision.type === "yaniv") {
+        expectOk(await ask(seat.client, "callYaniv"));
+      } else {
+        expectOk(await ask(seat.client, "takeTurn", decision.action));
+      }
+    }
+    assert.fail(`the table never reached ${target}`);
+  }
+
+  async function driveTo(
+    seat: Held,
+    phase: "lobby" | "playing" | "roundEnd" | "gameEnd",
+  ): Promise<PlayerGameView> {
+    if (phase !== "lobby") return playTo(seat, phase);
+    return seat.watcher.until((view) => view.phase === "lobby", "the lobby");
+  }
+
+  for (const phase of ["lobby", "playing", "roundEnd", "gameEnd"] as const) {
+    it(`survives a drop at ${phase} and hands the position straight back`, async () => {
+      const seat = await seated();
+      const before = await driveTo(seat, phase);
+
+      seat.client.disconnect();
+
+      const returning = await table.connect();
+      const { view } = expectOk(await resume(returning, credentials(seat)));
+
+      assert.equal(view.phase, phase);
+      assert.equal(view.you.id, seat.playerId, "the same seat, not a new one");
+      assert.deepEqual(view, before, "exactly the position the drop interrupted");
+    });
+  }
+
+  it("seats the returning connection for real, not just for one ack", async () => {
+    const seat = await seated();
+    const before = await playTo(seat, "playing");
+    seat.client.disconnect();
+
+    const returning = await table.connect();
+    const watcher = watch(returning);
+    expectOk(await resume(returning, credentials(seat)));
+
+    // A turn taken and broadcast back is the whole of being seated: the connection is
+    // recognised as the player, and it is in the room the position is published to.
+    expectOk(
+      await ask(returning, "takeTurn", {
+        discardCardIds: [before.you.hand[0]!.id],
+        draw: { source: "deck" },
+      }),
+    );
+    const played = await watcher.until(
+      (view) => view.phase === "playing" && view.you.hand.length === before.you.hand.length,
+      "the turn to be published back",
+    );
+    assertNoResumeToken(played, "a resumed connection's view");
+  });
+
+  /*
+   * A seat is a credential, so the ways of failing to present one are worth pinning
+   * down individually — and none of them may cost the room anything.
+   */
+
+  it("rejects a token that is not the seat's, leaving the seat resumable", async () => {
+    const seat = await seated();
+    await driveTo(seat, "lobby");
+    seat.client.disconnect();
+    const returning = await table.connect();
+
+    const wrong = await resume(returning, {
+      ...credentials(seat),
+      resumeToken: "not-the-token",
+    });
+
+    assert.equal(expectError(wrong).code, "INVALID_RESUME_TOKEN");
+    expectOk(await resume(returning, credentials(seat)));
+  });
+
+  it("rejects a player the room has never seated", async () => {
+    const seat = await seated();
+    const returning = await table.connect();
+
+    const result = await resume(returning, {
+      ...credentials(seat),
+      playerId: "nobody",
+    });
+
+    // The same code a wrong token gets: which half was wrong is not a client's business,
+    // or a room code would be enough to go fishing for the seats behind it.
+    assert.equal(expectError(result).code, "INVALID_RESUME_TOKEN");
+  });
+
+  it("rejects a room that is not there", async () => {
+    const seat = await seated();
+    const returning = await table.connect();
+
+    const result = await resume(returning, { ...credentials(seat), roomCode: "ZZZZ" });
+
+    assert.equal(expectError(result).code, "ROOM_NOT_FOUND");
+  });
+
+  it("rejects a resume from a connection that is already in a room", async () => {
+    const seat = await seated();
+    const other = await seated("Grace");
+
+    const result = await resume(other.client, credentials(seat));
+
+    assert.equal(expectError(result).code, "ALREADY_IN_ROOM");
+  });
+
+  /**
+   * One live connection per seat. A second device is not co-presence: the newer
+   * connection takes the seat and the older one is put down, so two tabs can never
+   * disagree about a table both think they are sitting at.
+   */
+  it("puts down the connection that was still holding the seat", async () => {
+    const seat = await seated();
+    await driveTo(seat, "lobby");
+    const dropped = nextEvent<string>(seat.client, "disconnect");
+
+    const taker = await table.connect();
+    const { view } = expectOk(await resume(taker, credentials(seat)));
+
+    assert.equal(view.phase, "lobby");
+    await dropped;
+  });
+});
+
+/**
+ * Ending a room on purpose. The host is the only one who can, and unlike `exitToMenu`
+ * they can do it from anywhere — a table nobody wants to keep playing is a table nobody
+ * wants to keep playing, mid-round or not.
+ */
+describe("closeRoom", () => {
+  interface Pair {
+    host: ClientSocket;
+    guest: ClientSocket;
+    roomCode: string;
+    guestSeat: { playerId: string; resumeToken: string };
+  }
+
+  async function lobbyOfTwo(): Promise<Pair> {
     const host = await server.connect();
-    const { roomCode } = expectOk(
+    const created = expectOk(
+      await ask<{ roomCode: string; playerId: string; resumeToken: string }>(
+        host,
+        "createRoom",
+        "Ada",
+      ),
+    );
+    const guest = await server.connect();
+    const joined = expectOk(
+      await ask<{ playerId: string; resumeToken: string }>(
+        guest,
+        "joinRoom",
+        created.roomCode,
+        "Grace",
+      ),
+    );
+    return { host, guest, roomCode: created.roomCode, guestSeat: joined };
+  }
+
+  it("tells everyone else why, and puts the room past joining or resuming", async () => {
+    const { host, guest, roomCode, guestSeat } = await lobbyOfTwo();
+    const closed = nextEvent<string>(guest, "roomClosed");
+
+    expectOk(await ask(host, "closeRoom"));
+
+    assert.match(await closed, /host/, "the reason names who ended it");
+    const probe = await server.connect();
+    assert.equal(
+      expectError(await ask(probe, "joinRoom", roomCode, "Alan")).code,
+      "ROOM_NOT_FOUND",
+    );
+    const returning = await server.connect();
+    assert.equal(
+      expectError(
+        await ask(returning, "resumeSeat", { roomCode, ...guestSeat }),
+      ).code,
+      "ROOM_NOT_FOUND",
+    );
+  });
+
+  it("turns every connection it closed on loose", async () => {
+    const { host, guest } = await lobbyOfTwo();
+
+    expectOk(await ask(host, "closeRoom"));
+
+    // Neither is still bound to a room that no longer exists — the closer included,
+    // who is never sent the `roomClosed` they caused.
+    for (const client of [host, guest]) {
+      expectOk(await ask(client, "createRoom", "Somewhere else"));
+    }
+  });
+
+  it("is refused to anyone but the host, leaving the room standing", async () => {
+    const { guest, roomCode } = await lobbyOfTwo();
+
+    const result = await ask(guest, "closeRoom");
+
+    assert.equal(expectError(result).code, "NOT_HOST");
+    const probe = await server.connect();
+    expectOk(await ask(probe, "joinRoom", roomCode, "Alan"));
+  });
+
+  it("closes a room mid-round, where exitToMenu will not", async () => {
+    const { host, guest, roomCode } = await lobbyOfTwo();
+    expectOk(await ask(host, "startGame"));
+    assert.equal(expectError(await ask(host, "exitToMenu")).code, "WRONG_PHASE");
+    const closed = nextEvent<string>(guest, "roomClosed");
+
+    expectOk(await ask(host, "closeRoom"));
+
+    await closed;
+    const probe = await server.connect();
+    assert.equal(
+      expectError(await ask(probe, "joinRoom", roomCode, "Alan")).code,
+      "ROOM_NOT_FOUND",
+    );
+  });
+
+  it("rejects a close from a connection that is not in a room", async () => {
+    const stranger = await server.connect();
+
+    const result = await ask(stranger, "closeRoom");
+
+    assert.equal(expectError(result).code, "PLAYER_NOT_FOUND");
+  });
+});
+
+describe("disconnect", () => {
+  /**
+   * A dropped connection now costs the room nothing: the seat is held, and the player
+   * behind it comes back through `resumeSeat`. Only the host closing the room ends one.
+   *
+   * The server processes a disconnect asynchronously, so there is no instant at which
+   * "nothing happened" can be observed once and for all — the room is probed repeatedly
+   * instead, and a teardown landing late would still be caught by one of the attempts.
+   *
+   * The probe is a resume with a deliberately wrong token, because it is the one question
+   * whose answer turns on the room existing and which costs the room nothing to ask. Four
+   * joins would have filled four of its six seats, and the fifth probe would have read a
+   * full table as a teardown.
+   */
+  it("leaves the room standing, so its code keeps resolving", async () => {
+    const host = await server.connect();
+    const { roomCode, playerId } = expectOk(
       await ask<{ roomCode: string; playerId: string }>(host, "createRoom", "Ada"),
     );
 
     host.disconnect();
 
-    assert.equal((await joinUntilRejected(roomCode)).code, "ROOM_NOT_FOUND");
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const probe = await server.connect();
+      const result = await ask(probe, "resumeSeat", {
+        roomCode,
+        playerId,
+        resumeToken: "not-the-token",
+      });
+      assert.equal(
+        expectError(result).code,
+        "INVALID_RESUME_TOKEN",
+        "the room answered, so it is still there",
+      );
+    }
   });
 });

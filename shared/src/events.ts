@@ -18,13 +18,48 @@ export type Ack<T> = (
   result: { ok: true; value: T } | { ok: false; error: GameError },
 ) => void;
 
+/**
+ * What a returning client presents to be let back into a seat it already holds.
+ *
+ * All three parts are needed and none of them is trusted: the room and the player name
+ * the seat, and the token is the only thing proving the caller is entitled to it — a
+ * player id alone is public enough to appear in everyone else's view.
+ */
+export interface ResumeRequest {
+  roomCode: string;
+  playerId: string;
+  resumeToken: string;
+}
+
 export interface ClientToServerEvents {
-  createRoom: (playerName: string, ack: Ack<{ roomCode: string; playerId: string }>) => void;
+  /**
+   * The ack of the event that seats a player is the one place their resume token is
+   * handed over — never a broadcast, never another player's view. See CONTEXT.md.
+   */
+  createRoom: (
+    playerName: string,
+    ack: Ack<{ roomCode: string; playerId: string; resumeToken: string }>,
+  ) => void;
   joinRoom: (
     roomCode: string,
     playerName: string,
-    ack: Ack<{ playerId: string }>,
+    ack: Ack<{ playerId: string; resumeToken: string }>,
   ) => void;
+  /**
+   * Bind this connection to a seat that already exists, and hand back the position it
+   * stands in. Distinct from `joinRoom`, which seats somebody new: this one takes no
+   * name, admits nobody, and works in every phase.
+   *
+   * The view comes back in the ack rather than as a broadcast because it is the answer
+   * to this call and to nobody else's — a resume is invisible to the rest of the table,
+   * which is told nothing about who is or is not connected. The token is not sent back:
+   * the caller just presented it, and a credential belongs on the wire once.
+   *
+   * A seat holds one live connection. If another is still bound to it, that one is
+   * disconnected as this one takes over. Refused with `INVALID_RESUME_TOKEN` if the seat
+   * or the token is wrong, and `ROOM_NOT_FOUND` if the room has gone.
+   */
+  resumeSeat: (request: ResumeRequest, ack: Ack<{ view: PlayerGameView }>) => void;
   /**
    * Host only, lobby only: replace the room's settings wholesale. docs/adr/0006.
    *
@@ -57,6 +92,15 @@ export interface ClientToServerEvents {
    * the host closes the room. See CONTEXT.md.
    */
   exitToMenu: (ack: Ack<null>) => void;
+  /**
+   * Host only: end the room for everyone, from any phase. The one way a room is closed
+   * other than by the game's own rules — a dropped connection no longer does it.
+   *
+   * Unlike `exitToMenu` this is not gated on the phase: a table that has stopped going
+   * anywhere mid-round is exactly the one a host needs to be able to end. Everyone else
+   * hears `roomClosed`; the closer hears their own ack instead. `NOT_HOST` otherwise.
+   */
+  closeRoom: (ack: Ack<null>) => void;
 }
 
 export interface ServerToClientEvents {

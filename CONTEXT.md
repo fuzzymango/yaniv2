@@ -31,8 +31,11 @@ Two distinct concepts, easy to conflate because both sit "before the game":
 
 **Exit to main menu** is the action that leaves a room and returns to the main menu. It
 is available in the lobby and at `gameEnd` only — not mid-match (`playing`/`roundEnd`),
-where the only way to leave today is still a hard disconnect that ends the room for
-everyone. It is asymmetric by who invokes it, the same way in both phases:
+where a seat cannot be given up part-way through a hand. **Close room** is the host's
+counterpart and the exception: available in every phase, it ends the room for everyone at
+once, and it is the only thing that ends one early — a disconnect leaves the room and the
+seat exactly as they were. Exiting is asymmetric by who invokes it, the same way in both
+phases:
 
 - A **non-host** player exiting is removed from `players` entirely — their seat is freed,
   not held or bot-replaced. The room lives on for whoever remains: the lobby for the rest
@@ -125,6 +128,29 @@ asking for more bots than there is room for (`6 - <human count>`) isn't refused 
 read back down to what fits, recomputed wherever it's read rather than stored clamped.
 This is why a room can never reject a join over a stale setting: the number simply means
 less than the host asked for, the same way an empty seat has always just gone to a bot.
+
+## Resume token
+
+The secret that proves a connection is entitled to a **seat**. One per seat, issued from a
+CSPRNG the moment the seat is created (`createRoom`, `joinRoom`, bot seating) and fixed for
+the life of the room — never rotated, never reissued, so it names one seat for as long as
+that seat exists.
+
+Deliberately *not* called a session: "session" is already double-booked, for the socket's
+own `socket.data.session` and for the client's session core (`client/src/session.ts`).
+A resume token is neither — it is a credential, and outlives any connection holding it.
+
+It is a secret of the same class as a hidden hand, and a worse one to lose: a leaked hand
+is a look at someone's cards, a leaked token is their whole seat. So it lives in
+`GameState` and never in a `PlayerGameView`, in any phase, to any player — including the
+one it belongs to. It reaches its owner in exactly one place: the ack of the event that
+seated them.
+
+**Resume seat** is what they present it back over — `resumeSeat({ roomCode, playerId,
+resumeToken })` — binding a new connection to a seat that already exists, in any phase, and
+answering with the position that seat stands in. Distinct from joining, which admits
+somebody new. A seat holds one live connection, so a resume puts down whatever socket was
+still holding it.
 
 ## Play again
 

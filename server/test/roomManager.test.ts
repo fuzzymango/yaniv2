@@ -10,9 +10,11 @@ import { expectErr, makeState, unwrap } from "./helpers.ts";
 
 function manager(): RoomManager {
   let n = 0;
+  let tokens = 0;
   return new RoomManager({
     rng: mulberry32(2024),
     newPlayerId: () => `player-${++n}`,
+    newResumeToken: () => `token-${++tokens}`,
     newRoomRng: () => mulberry32(7),
   });
 }
@@ -103,6 +105,74 @@ describe("joinRoom", () => {
     const rooms = manager();
     const { roomCode } = unwrap(rooms.createRoom("Ada"));
     expectErr(rooms.joinRoom(roomCode, ""), "INVALID_NAME");
+  });
+});
+
+describe("resume tokens", () => {
+  it("issues the host one when the room is created", () => {
+    const { state, playerId } = unwrap(manager().createRoom("Ada"));
+
+    const host = state.players.find((p) => p.id === playerId)!;
+    assert.equal(host.resumeToken, "token-1");
+  });
+
+  it("issues each joining player their own", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const { state } = unwrap(rooms.joinRoom(roomCode, "Grace"));
+
+    const tokens = state.players.map((p) => p.resumeToken);
+    assert.deepEqual(tokens, ["token-1", "token-2"]);
+  });
+
+  it("issues one to every bot seat too, so no seat is uncredentialed", () => {
+    const rooms = manager();
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1", name: "Ada" }],
+      settings: { botCount: MAX_PLAYERS - 1 },
+    });
+
+    const tokens = rooms
+      .seatBots(lobby)
+      .players.filter((p) => p.isBot)
+      .map((p) => p.resumeToken);
+
+    assert.equal(tokens.length, MAX_PLAYERS - 1);
+    assert.equal(new Set(tokens).size, tokens.length, `not all distinct: ${tokens}`);
+  });
+
+  /**
+   * The generator is injected in every other test here. This one is about the default:
+   * a token is a credential, so guessing one must not be a way into someone's seat.
+   */
+  it("defaults to a long, unguessable value, distinct for every seat", () => {
+    const rooms = new RoomManager();
+    const tokens = new Set<string>();
+
+    for (let i = 0; i < 200; i++) {
+      const { roomCode, state } = unwrap(rooms.createRoom("Ada"));
+      const guest = unwrap(rooms.joinRoom(roomCode, "Grace")).state.players[1]!;
+      for (const token of [state.players[0]!.resumeToken, guest.resumeToken]) {
+        assert.ok(token.length >= 32, `too short to be a secret: ${token}`);
+        tokens.add(token);
+      }
+    }
+
+    assert.equal(tokens.size, 400, "two seats were issued the same token");
+  });
+
+  /** Whole-match fixity is proven over every transition in `integration.test.ts`. */
+  it("leaves the seats already taken holding the token they were issued", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    unwrap(rooms.joinRoom(roomCode, "Grace"));
+    unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
+
+    assert.deepEqual(
+      rooms.getState(roomCode)!.players.map((p) => p.resumeToken),
+      ["token-1", "token-2"],
+    );
   });
 });
 

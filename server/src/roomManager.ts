@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   HAND_SIZE,
   MAX_PLAYERS,
@@ -15,6 +15,14 @@ import type { ActionResult, GameState, GameStateLobby, Player } from "./state.ts
 const MAX_NAME_LENGTH = 20;
 const MAX_CODE_ATTEMPTS = 100;
 
+/**
+ * Bytes behind a resume token. Unlike a room code — short enough to read aloud, and
+ * guarded by nothing more than being live — a token is a credential for one seat, so it
+ * is sized to be unguessable rather than typeable, and drawn from a CSPRNG rather than
+ * the room's `Rng`, which is seeded in tests and reproducible on purpose.
+ */
+const RESUME_TOKEN_BYTES = 32;
+
 interface Room {
   state: GameState;
   /** Per-room rng, so one room's shuffles are reproducible independently. */
@@ -26,6 +34,12 @@ export interface RoomManagerOptions {
   rng?: Rng;
   /** Override for deterministic tests. Defaults to `crypto.randomUUID`. */
   newPlayerId?: () => string;
+  /**
+   * Override for deterministic tests, the same way `newPlayerId` is — a test that wants
+   * to prove a token never reaches a client has to be able to name the string it is
+   * looking for. Defaults to a CSPRNG.
+   */
+  newResumeToken?: () => string;
   /** Override to give each room a seeded rng in tests. */
   newRoomRng?: () => Rng;
   /**
@@ -52,14 +66,33 @@ export class RoomManager {
   private readonly rooms = new Map<string, Room>();
   private readonly rng: Rng;
   private readonly newPlayerId: () => string;
+  private readonly newResumeToken: () => string;
   private readonly newRoomRng: () => Rng;
   private readonly defaultSettings: Partial<RoomSettings>;
 
   constructor(options: RoomManagerOptions = {}) {
     this.rng = options.rng ?? systemRng;
     this.newPlayerId = options.newPlayerId ?? (() => randomUUID());
+    this.newResumeToken =
+      options.newResumeToken ??
+      (() => randomBytes(RESUME_TOKEN_BYTES).toString("base64url"));
     this.newRoomRng = options.newRoomRng ?? (() => this.rng);
     this.defaultSettings = options.defaultSettings ?? {};
+  }
+
+  /**
+   * A fresh seat, credentialed. The one place a `Player` is built, so an id or a resume
+   * token cannot be left off one of the three ways a seat comes into existence — the
+   * same reason both fields are required on `Player` in the first place.
+   */
+  private newSeat(name: string, isBot: boolean): Player {
+    return {
+      id: this.newPlayerId(),
+      name,
+      score: 0,
+      isBot,
+      resumeToken: this.newResumeToken(),
+    };
   }
 
   private generateRoomCode(): string {
@@ -74,16 +107,28 @@ export class RoomManager {
     throw new Error("Unable to allocate an unused room code");
   }
 
+  /**
+   * A newly seated player, as the transport needs them: who they are, the credential
+   * that lets them come back to the seat, and the room they are now in.
+   *
+   * The token is handed back from here rather than dug out of `state` by the caller,
+   * so the one place it is issued is also the one place it is given away.
+   */
   createRoom(
     hostName: string,
-  ): Result<{ roomCode: string; playerId: string; state: GameState }> {
+  ): Result<{
+    roomCode: string;
+    playerId: string;
+    resumeToken: string;
+    state: GameState;
+  }> {
     const name = normalizeName(hostName);
     if (name === null) {
       return err("INVALID_NAME", `Name must be 1-${MAX_NAME_LENGTH} characters`);
     }
 
     const roomCode = this.generateRoomCode();
-    const host: Player = { id: this.newPlayerId(), name, score: 0, isBot: false };
+    const host = this.newSeat(name, false);
 
     const state: GameStateLobby = {
       roomCode,
@@ -106,13 +151,18 @@ export class RoomManager {
     };
 
     this.rooms.set(roomCode, { state, rng: this.newRoomRng() });
-    return ok({ roomCode, playerId: host.id, state });
+    return ok({
+      roomCode,
+      playerId: host.id,
+      resumeToken: host.resumeToken,
+      state,
+    });
   }
 
   joinRoom(
     roomCode: string,
     playerName: string,
-  ): Result<{ playerId: string; state: GameState }> {
+  ): Result<{ playerId: string; resumeToken: string; state: GameState }> {
     const room = this.rooms.get(roomCode);
     if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
 
@@ -127,17 +177,24 @@ export class RoomManager {
       return err("ROOM_FULL", `Room is full (${MAX_PLAYERS} players)`);
     }
 
-    const player: Player = { id: this.newPlayerId(), name, score: 0, isBot: false };
+    const player = this.newSeat(name, false);
     room.state = { ...room.state, players: [...room.state.players, player] };
-    return ok({ playerId: player.id, state: room.state });
+    return ok({
+      playerId: player.id,
+      resumeToken: player.resumeToken,
+      state: room.state,
+    });
   }
 
   /**
    * `state` with up to `settings.botCount` bots seated in empty chairs, each issued a
-   * player id exactly the way a human join is. `effectiveBotCount` reevaluates that
-   * setting against the room's current human count rather than trusting a stored value
-   * that may since have gone stale (docs/adr/0006) — a room's `botCount` defaults to
-   * zero, so a freshly created room seats none until a host raises it.
+   * player id and a resume token exactly the way a human join is — nothing reconnects on
+   * a bot's behalf, but a seat without a token is not a seat.
+   *
+   * `effectiveBotCount` reevaluates that setting against the room's current human count
+   * rather than trusting a stored value that may since have gone stale (docs/adr/0006) —
+   * a room's `botCount` defaults to zero, so a freshly created room seats none until a
+   * host raises it.
    *
    * Pure: nothing is stored. Callers fold it into a transition passed to `apply`, so a
    * start that is then rejected discards the seating along with everything else, rather
@@ -153,12 +210,7 @@ export class RoomManager {
       // Safe to index directly: a table holds at most MAX_PLAYERS seats and its creator
       // is human, so BOT_NAMES has a name for every seat a bot can occupy.
       const taken = players.filter((p) => p.isBot).length;
-      players.push({
-        id: this.newPlayerId(),
-        name: BOT_NAMES[taken]!,
-        score: 0,
-        isBot: true,
-      });
+      players.push(this.newSeat(BOT_NAMES[taken]!, true));
     }
     return { ...state, players };
   }
