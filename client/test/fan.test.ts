@@ -160,13 +160,16 @@ describe("fanOverhang", () => {
     assert.equal(fanOverhang(0), 0);
   });
 
-  it("leaves the edge nearest the felt on screen, and pushes most of the rest off", () => {
+  it("leaves most of the fan on screen, and still pushes a real part of it off", () => {
     for (let n = 1; n <= 12; n++) {
       // The fan's depth, which a seat turned on its side wears as its width.
       const depth = fanFootprint(n, "top").height;
       const shown = depth - fanOverhang(n);
-      assert.ok(shown > 0, `${n} cards: nothing left on screen`);
-      assert.ok(shown < depth / 2, `${n} cards: ${shown} of ${depth} still on screen`);
+      // More than half showing — a fan cut back to its tips read as too little of a hand
+      // to watch (issue #58) — but never the whole of it, or five seats' worth would not
+      // fit round a phone's felt at all.
+      assert.ok(shown > depth / 2, `${n} cards: only ${shown} of ${depth} on screen`);
+      assert.ok(shown < depth * 0.75, `${n} cards: ${shown} of ${depth} on screen`);
     }
   });
 

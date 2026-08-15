@@ -17,32 +17,26 @@ This section bullet points specific behavior patterns that you should follow whe
 ## Where the rules live
 
 **`docs/rules.md` is the single source of truth for gameplay.** Every rule maps to at least
-one test; if code and `rules.md` disagree, `rules.md` is right and the code has a bug.
-
-`docs/backend-archetechture.md` is the original design sketch — **stale** in several places
-(see "Deviations from the original sketch" below), kept for history, not authority.
-
-If you're adding or changing a rule: update `docs/rules.md` first, then the code, then tests.
-Don't let a rule exist only in code.
+one test; if code and `rules.md` disagree, `rules.md` is right and the code has a bug. Adding
+or changing a rule goes `docs/rules.md` first, then the code, then tests — never let a rule
+exist only in code. `docs/backend-archetechture.md` is the original design sketch, **stale**
+in several places, kept for history only: if it describes something you cannot find, it is
+one of the deviations listed at the top of that file, and every one has its reasoning below.
 
 ## Code structure
 
 ```
-shared/
-  src/      Card/view/error types, the Socket.io event contract, and the rulebook
-            (rules.ts + the rule constants). Pure and dependency-free.
-  test/     node:test suites for the logic that lives here.
-server/
-  src/      The engine: deck, pure state transitions, serialization, rooms, bots.
-  scripts/  play.ts (bots-only, in process) + playSocket.ts & cli/ (human, over a
-            socket). Not shipped.
-  test/     node:test suites, one file per src/ module plus integration.test.ts.
-            socketServer.test.ts uses real socket.io-client connections.
-client/
-  src/      The browser client: the framework-free session core, plus one React
-            component per screen. Vite + React.
-  test/     node:test suites driving the session core over a real socket server.
+shared/src   Card/view/error types, the socket contract, and the rulebook. Dependency-free.
+server/src   The engine: deck, pure state transitions, serialization, rooms, bots.
+server/scripts  play.ts (bots-only, in process) + playSocket.ts & cli/ (human, over a
+                socket). Not shipped.
+client/src   The browser client: the framework-free session core, plus one React component
+             per screen. Vite + React.
 ```
+
+Every workspace has a `test/` of `node:test` suites beside its `src/`: one file per module,
+plus the server's `integration.test.ts` fuzzer, and `socketServer.test.ts` and the client's
+suites driving real `socket.io-client` connections against a real server.
 
 ### `shared/src/`
 
@@ -95,16 +89,13 @@ answers "does the wire work?".
 
 - **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
   their own terminals, over a **real socket connection** to a separately running server
-  (`npm run serve` first). Bare `--name` opens an interactive main menu rather than
-  silently creating a room; flags and inputs are tabulated in `README.md`. Composition
-  only, like `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`.
-  - **`cli/render.ts`** (view → frame, plus the view-less main menu; it draws the
-    `standings` shared computes, departed players and all) and **`cli/commands.ts`** (typed
-    line + view → a `Command`) are pure and total: bad input returns `invalid`, never throws.
-  - **`cli/session.ts`** — the driver. Owns the socket, holds the loop, takes its input
-    and output injected so tests can drive it. **It imports nothing from `src/` except
-    types** — no `RoomManager`, no `GameState`. The moment it does, it stops being a
-    test of the transport and becomes a second copy of the server.
+  (`npm run serve` first); flags are tabulated in `README.md`. Composition only, like
+  `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`. `cli/render.ts` (view →
+  frame, plus the view-less main menu) and `cli/commands.ts` (typed line + view → a
+  `Command`) are pure and total — bad input returns `invalid`, never throws. `cli/session.ts`
+  drives the loop, with its input and output injected so tests can drive it, and **imports
+  nothing from `src/` except types**: the moment it reaches for `RoomManager` or `GameState`
+  it stops being a test of the transport and becomes a second copy of the server.
 - **`play.ts`** — `npm run demo`. Bots only, in process, no transport: drives
   `RoomManager` and the pure transitions directly. Accepts `--seed <n>` and `--players <n>`,
   and a whole match is reproducible from the seed alone — which is what makes it the tool
@@ -440,24 +431,36 @@ off that pile out of turn is a move the server would refuse anyway. It is also t
 question in that module the rulebook cannot answer — a window is about a card off a pile
 the server never sends, so `slapdownEligible` *is* the answer.
 
-### The table is seated, and most of every seat is off the screen
+### The table is seated, and part of every seat is off the screen
 
 Opponents are drawn round three sides of the felt (`seatZones`), each a fan of face-down
 backs — one per card they are actually holding — under an upright label, in place of a row
 of text. The fan is the point: a hand shrinking is something to watch rather than a number
-to notice. Three decisions hold it up, all in `fan.ts` and following the prototype's
-variant D verdict (issue #56) rather than re-deriving it:
+to notice. Five decisions hold it up, all in `fan.ts` and `styles.css`, following the
+prototype's variant D verdict (issue #56) rather than re-deriving it:
 
 - **The fan turns and the label never does.** Rotating the cards says whose side of the
   table they are on; a name turned with them is read sideways by the only person looking.
 - **A seat reserves the box its arc needs** (`fanFootprint`, off the angles the cards are
   drawn at), because a transform costs no layout space and the tips would otherwise be
   drawn across the label below — the rough edge the prototype left behind.
-- **Two thirds of every fan is pushed off its own edge** (`fanOverhang`): five full fans do
-  not fit round a phone's felt, and shrinking them to fit is what made the prototype's
-  small variant cramped. The band is out of the column's flow and pinned to the screen, or
-  "off the edge" would mean off the edge of the padding. One layout at every size: the
-  cards scale, by height as well as width since a doubled zone stacks up one edge.
+- **About 37% of every fan is pushed off its own edge** (`FAN_HIDDEN`, `fanOverhang`): five
+  full fans do not fit round a phone's felt, and shrinking them to fit is what made the
+  prototype's small variant cramped — while cutting each back to its tips, the first attempt,
+  read as too little of a hand to watch (issue #58). Enough hidden to fit six on a phone and
+  no more, flat at every hand size and viewport: six on a narrow one sit close, verified
+  clear, and deliberately not scaled per count or width. The band is out of the column's
+  flow and pinned to the screen, or "off the edge" would mean off the edge of the padding.
+  One layout at every size: the cards scale, by height as well as width since a doubled
+  zone stacks up one edge.
+- **Only the label is ringed on turn**, not the seat's box — which is mostly the space
+  reserved for an arc turned inside it and hung off the edge, so a ring there reads as a
+  box near a player rather than round them.
+- **The table's settings icon is pinned out of flow too** (`.table > .topbar`): `.table`
+  centres its column on a wide screen and the seats band does not move with it, so an icon
+  left in the column drifts to mid-screen while the band stays at the top. Scoped to the
+  table — `RoundEnd`/`GameEnd` have no band to be centred out from under, and keep theirs
+  in the column.
 
 ### Settings are edited in one place and shown in another
 
@@ -669,11 +672,6 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **The deck and the discard where the seats now leave them.** Issue #59 stacks and pins
   them above the hand; until it lands they float in the middle and overlap a seat's label.
 
-## Deviations from the original sketch
-
-If `docs/backend-archetechture.md` describes something you cannot find, it is one of the
-deviations listed at the top of that file — every one of them has its reasoning above.
-
 ## Running things
 
 ```sh
@@ -692,7 +690,7 @@ npm run build                             # builds the client into client/dist, 
 Both the browser client and the CLI harness take **two terminals**, because each is a real
 client of a separately running server: `npm run serve` in one, and `npm run dev` (which
 proxies `/socket.io` to port 3000, keeping the client same-origin with no CORS) or
-`npm run play -- --name <name>` in the other. `play`'s flags are tabulated in `README.md`.
+`npm run play -- --name <name>` in the other.
 
 ## Agent skills
 

@@ -67,8 +67,8 @@ export function Seat({ zone, name, isTurn = false, detail, children }: SeatProps
  *
  * The element's own box is the footprint the fan actually occupies (`fanFootprint`), which
  * a transform otherwise costs nothing in layout, and it is pushed out past its edge of the
- * screen by exactly `fanOverhang`. What is left on screen is the third of the fan nearest
- * the felt.
+ * screen by exactly `fanOverhang`. What is left on screen is most of the fan — the part
+ * nearest the felt.
  */
 export function CardFan({ zone, count }: { zone: Zone; count: number }) {
   const box = fanFootprint(count, zone);

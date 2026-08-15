@@ -605,6 +605,27 @@ body {
 }
 
 /*
+ * The settings icon, pinned to the corner of the table itself rather than riding the top
+ * of the column.
+ *
+ * On a wide screen `.table` centres its column vertically (below), and a column shorter
+ * than the viewport therefore carries the icon down into the middle of the screen with it
+ * — while the seats band, out of that flow, stays at the true top. An icon adrift among
+ * the cards is the result. Out of flow like the band, it is in the corner at every width.
+ *
+ * Above the band (`z-index`), because the band is drawn after it and would otherwise take
+ * the corner. Scoped to the table: the scored round and the finished match carry the same
+ * icon in the same column and have no overlay to be centred out from under, so theirs is
+ * where it has always been.
+ */
+.table > .topbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+}
+
+/*
  * Everybody else, seated round three sides of the felt.
  *
  * The band the seats are dealt into. Taken out of the column's flow and pinned to the top
@@ -701,11 +722,13 @@ body {
 }
 
 /*
- * Whose turn it is: the seat entire, cards and name together, because that is what a
- * player is looking for when they ask who is playing. The same ring the text row it
- * replaces used to carry.
+ * Whose turn it is: the label alone, not the seat entire. A ring round the seat's whole
+ * box is mostly ringing the reserved space around a fan that is turned inside it and hung
+ * off the edge of the screen, so it reads as a box drawn near a player rather than round
+ * them. The label is the one part of a seat that is upright, on screen whole, and the same
+ * shape in every zone. The same ring the text row it replaces used to carry.
  */
-.table-seat--turn {
+.table-seat--turn .table-seat__label {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 

@@ -35,16 +35,20 @@ export const FAN_MAX_SPREAD_DEG = 70;
 export const FAN_RADIUS = 0.6;
 
 /**
- * How much of a fan is pushed off its screen edge, leaving roughly the inner third — the
- * part nearest the felt — on screen.
+ * What fraction of a fan is pushed off its screen edge — so a bit over a third of it is
+ * hidden, and the rest, the part nearest the felt, is on screen.
  *
  * Five seats' worth of full fans do not fit round a phone's felt, and shrinking them to
  * make them fit is what made the prototype's small variant read as cramped (issue #56).
- * A hand held at a real table is half-hidden by whoever is holding it, so the tips are
- * what a player sees of it anyway, and the count they carry is said in words on the label
- * regardless.
+ * A hand held at a real table is part-hidden by whoever is holding it, so a player never
+ * sees all of it anyway, and the count it carries is said in words on the label regardless.
+ *
+ * The fraction is flat, at every hand size and every viewport: cutting a fan back to its
+ * tips left too little of a hand to watch (issue #58), and the cost of the wider fan is
+ * that six players on a narrow phone sit close — verified clear, but not by much, and
+ * deliberately not engineered around with per-count or per-width scaling.
  */
-export const FAN_HIDDEN = 2 / 3;
+export const FAN_HIDDEN = 0.37;
 
 /** How tall a card is, from the `aspect-ratio: 5 / 7` the stylesheet draws it at. */
 export const CARD_HEIGHT = 7 / 5;

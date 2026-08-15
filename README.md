@@ -58,8 +58,8 @@ icon in the top corner of every in-match screen, which opens them read-only for 
 
 Everyone else sits round the table, their hand fanned face down at their seat — one card
 per card they are actually holding, so a hand shrinking is something you watch rather than
-a number you notice — with their name, count and score on a label beside it, and the seat
-of whoever is playing ringed in yellow.
+a number you notice — with their name, count and score on a label beside it, and that label
+ringed in yellow while it is their turn.
 
 A turn is two taps and no button: tap cards in your hand
 to choose them (chosen cards are outlined in yellow, tapped again to unchoose), then tap
