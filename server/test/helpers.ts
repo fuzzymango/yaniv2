@@ -19,6 +19,23 @@ const DEFAULT_SETTINGS: RoomSettings = {
 
 const BY_ID = new Map(createDeck().map((c) => [c.id, c]));
 
+/**
+ * Prefix every resume token a test hands out shares. A token is a credential, so the
+ * assertion worth making is that no substring of one reaches a client — this is what a
+ * leak test greps a serialized payload for.
+ */
+export const RESUME_TOKEN_MARK = "resume-token-for-";
+
+/**
+ * A `newResumeToken` for a `RoomManager` under test: real seats, marked tokens. The real
+ * generator is a CSPRNG whose output no test could name, so a suite proving a token never
+ * reaches a client issues its own recognizable ones instead.
+ */
+export function markedResumeTokens(): () => string {
+  let issued = 0;
+  return () => `${RESUME_TOKEN_MARK}${++issued}`;
+}
+
 /** Look up a real card by id, so tests never hand-build inconsistent cards. */
 export function card(id: string): Card {
   const found = BY_ID.get(id);
@@ -53,6 +70,9 @@ export function makeState(options: StateOptions = {}): GameState {
     name: p.name ?? `Player ${i + 1}`,
     score: p.score ?? 0,
     isBot: p.isBot ?? false,
+    // Derived from the id rather than random, so a leak test can name the exact string
+    // it expects never to see. `RESUME_TOKEN_MARK` is what identifies one on the wire.
+    resumeToken: `${RESUME_TOKEN_MARK}${p.id}`,
   }));
   const turnOrder = players.map((p) => p.id);
   const phase = options.phase ?? "playing";

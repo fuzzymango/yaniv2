@@ -53,18 +53,38 @@ function chooseDiscard(hand: readonly Card[]): Card[] {
   });
 }
 
+/**
+ * A resume token is issued once, at the seat's creation, and is never rotated. Checked
+ * on every state a match passes through rather than only at the end, so a transition
+ * that reissued one and a later one that put it back would still be caught.
+ */
+function assertTokensHeld(state: GameState, issued: Map<string, string>): void {
+  for (const player of state.players) {
+    assert.equal(
+      player.resumeToken,
+      issued.get(player.id),
+      `${player.name}'s resume token was regenerated`,
+    );
+  }
+}
+
 /** Play a whole match with seeded randomness, checking invariants at every turn. */
 function playMatch(seed: number): { final: GameState; turns: number } {
   let playerCounter = 0;
+  let tokenCounter = 0;
   const rooms = new RoomManager({
     rng: mulberry32(seed),
     newPlayerId: () => `p${++playerCounter}`,
+    newResumeToken: () => `resume-${++tokenCounter}`,
     newRoomRng: () => mulberry32(seed + 1),
   });
 
   const { roomCode } = unwrap(rooms.createRoom("Ada"));
   unwrap(rooms.joinRoom(roomCode, "Grace"));
   unwrap(rooms.joinRoom(roomCode, "Alan"));
+  const issued = new Map(
+    rooms.getState(roomCode)!.players.map((p) => [p.id, p.resumeToken]),
+  );
   unwrap(rooms.apply(roomCode, (s, rng) => startGame(s, s.hostId, rng)));
 
   const coin = mulberry32(seed + 2);
@@ -72,6 +92,7 @@ function playMatch(seed: number): { final: GameState; turns: number } {
 
   for (let step = 0; step < 20000; step++) {
     const state = rooms.getState(roomCode)!;
+    assertTokensHeld(state, issued);
 
     if (state.phase === "gameEnd") return { final: state, turns };
     if (state.phase === "roundEnd") {

@@ -89,8 +89,7 @@ not redundant: `play.ts` answers "do the rules and the bot behave?", `playSocket
   plus the view-less main menu) and `commands.ts` (typed line + view → a `Command`) are pure
   and total — bad input returns `invalid`, never throws. `session.ts` drives the loop, its
   input and output injected so tests can, and **imports nothing from `src/` except types**:
-  reaching for `RoomManager` or `GameState` makes it a second copy of the server rather than
-  a test of the transport.
+  reaching for `RoomManager` or `GameState` makes it a second server, not a transport test.
 - **`play.ts`** — `npm run demo`. Bots only, in process, no transport: drives `RoomManager`
   and the pure transitions directly. Accepts `--seed <n>` and `--players <n>`, and a whole
   match is reproducible from the seed alone — which makes it the tool for judging bot play.
@@ -287,6 +286,14 @@ A connection binds **once**. A second `createRoom`/`joinRoom` on an already-boun
 rejected with `ALREADY_IN_ROOM` (the one error code that exists purely because there is a
 transport). Silently rebinding would orphan the first player — seated in a room with no
 connection able to act for them, and unrecoverable while reconnect is out of scope.
+
+Beside the id, every seat is issued a **`Player.resumeToken`** at creation
+(`createRoom`/`joinRoom`/bot seating): a CSPRNG secret behind an injectable
+`newResumeToken`, exactly as `newPlayerId` is, fixed for the life of the room — hence
+`updatePlayer` cannot patch it, and no transition may reissue one (asserted over every
+state a match passes through). It is what reconnect will authenticate with, and **nothing
+consumes it yet**, so it reaches no client at all: treat it as a hidden hand is treated —
+never in a view, in any phase, mutation-tested at the serializer and the wire.
 
 ### Room lifecycle
 
@@ -638,9 +645,8 @@ type-only imports. `tsconfig.base.json` enforces this via `erasableSyntaxOnly`.
 
 All three workspaces have a `test` script, run by the root `npm test` via
 `--workspaces --if-present`. Each uses an explicit glob (`node --test "test/**/*.test.ts"`)
-rather than bare `node --test`, which also picks up `test/helpers.ts` and any stray `.d.ts`
-files `tsc --build` emits into `dist/test/` — making test counts depend on whether a
-typecheck had run.
+rather than bare `node --test`, which also picks up `test/helpers.ts` and the `.d.ts` files
+`tsc --build` emits into `dist/test/` — making test counts depend on a typecheck having run.
 
 **`shared`'s tests are a separate tsconfig project** (`shared/tsconfig.test.json`),
 unlike the server's, which includes `test/` in the one project. The suites need
@@ -652,10 +658,10 @@ Split, `shared/src` importing a Node builtin is a typecheck error.
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **Reconnect.** A dropped connection ends its room, full stop (see "Room lifecycle").
-  `Player` has no `connected` field at all — deliberately absent rather than half-built.
-  Expect a lobby-phase case (easy: drop the player, promote host if needed) and a mid-round
-  case (harder, and undecided — pausing on their turn vs. a timer vs. removal are all live).
+- **Reconnect.** Underway (issue #62); only the credential has landed, so a dropped
+  connection still ends its room, full stop (see "Room lifecycle" and "Player identity").
+  `Player` has no `connected` field — deliberately absent rather than half-built. Still
+  open: what a mid-round seat does while its player is gone (pause vs. timer vs. removal).
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
   spot, so anyone who has not joined by then is playing the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four
@@ -677,22 +683,16 @@ Not oversights — deferred on purpose, in this order of likely next work:
 ## Running things
 
 ```sh
-npm install
 npm test                                  # all workspaces, node:test
 npm run typecheck                         # tsc --build across the monorepo
-npm run serve --workspace=@yaniv/server   # start the socket server (PORT, default 3000)
-npm run demo --workspace=@yaniv/server    # watch bots play a full match, in process
-npm run dev                               # the browser client on :5173, socket proxied
-npm run build                             # builds the client into client/dist, for `serve` to host
+npm run serve --workspace=@yaniv/server   # the socket server (PORT, default 3000)
+npm run demo --workspace=@yaniv/server    # bots play a full match in process (--seed, --players)
 ```
 
-`demo` accepts `-- --seed <n> --players <n>`. Deployed on Railway as one service — see
-"Deployment happened ahead of reconnect" above and `docs/adr/0003`.
-
-Both the browser client and the CLI harness take **two terminals**, because each is a real
-client of a separately running server: `npm run serve` in one, and `npm run dev` (which
-proxies `/socket.io` to port 3000, keeping the client same-origin with no CORS) or
-`npm run play -- --name <name>` in the other.
+Every command and flag is tabulated in `README.md`. One thing to know before reading it:
+the browser client (`npm run dev`) and the CLI harness (`npm run play`) are each real
+clients of a **separately running server**, so both take a second terminal running
+`npm run serve`. Deployment is one Railway service serving both halves (`docs/adr/0003`).
 
 ## Agent skills
 

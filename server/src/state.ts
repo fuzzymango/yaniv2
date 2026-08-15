@@ -13,6 +13,17 @@ export interface Player {
   name: string;
   score: number;
   /**
+   * The secret that proves a fresh connection is entitled to this seat. Issued from a
+   * CSPRNG when the seat is created and fixed for the life of the room — never rotated,
+   * never regenerated, which is why `updatePlayer` below cannot patch it.
+   *
+   * A credential, so it is a secret of the same class as a hidden hand and kept the same
+   * way: `serializeStateForPlayer` never places it in any view, in any phase. Bots hold
+   * one too — nothing reconnects on their behalf, but a required field is what makes an
+   * uncredentialed seat unrepresentable, exactly as `isBot` does for control.
+   */
+  resumeToken: string;
+  /**
    * Whether the server plays this seat itself. Required rather than optional so a seat
    * can never be ambiguously controlled — every construction has to say which it is.
    *
@@ -143,11 +154,15 @@ export function getPlayer(state: GameState, playerId: string): Player | undefine
   return state.players.find((p) => p.id === playerId);
 }
 
-/** Returns a new players array with one player's fields patched. */
+/**
+ * Returns a new players array with one player's fields patched. Neither the id nor the
+ * resume token is patchable: both are issued once, at the seat's creation, and a
+ * transition that could rewrite either would be a seat quietly becoming a different one.
+ */
 export function updatePlayer(
   players: Player[],
   playerId: string,
-  patch: Partial<Omit<Player, "id">>,
+  patch: Partial<Omit<Player, "id" | "resumeToken">>,
 ): Player[] {
   return players.map((p) => (p.id === playerId ? { ...p, ...patch } : p));
 }

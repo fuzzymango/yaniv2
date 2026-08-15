@@ -27,6 +27,7 @@ import { createDeck } from "../src/deck.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { createSocketServer } from "../src/socketServer.ts";
+import { RESUME_TOKEN_MARK, markedResumeTokens } from "./helpers.ts";
 
 /** The ack shape every request/response event replies with. Mirrors `Ack<T>`. */
 type AckResult<T> = { ok: true; value: T } | { ok: false; error: GameError };
@@ -56,11 +57,15 @@ async function startServer(
   botCount = MAX_PLAYERS - 1,
 ): Promise<Harness> {
   const httpServer = createServer();
+  // Every seat this server issues holds a marked token, so a leak test can grep a payload
+  // for a string it knows is a credential.
+  const newResumeToken = markedResumeTokens();
   const rooms =
     seed === undefined
-      ? new RoomManager({ defaultSettings: { botCount } })
+      ? new RoomManager({ newResumeToken, defaultSettings: { botCount } })
       : new RoomManager({
           rng: mulberry32(seed),
+          newResumeToken,
           newRoomRng: () => mulberry32(seed + 1),
           defaultSettings: { botCount },
         });
@@ -183,6 +188,19 @@ function watch(client: ClientSocket): Watcher {
   };
 }
 
+/**
+ * A resume token is a seat's credential, so it is a secret of the same class as a hidden
+ * hand — worse to lose, since it is the seat itself rather than a look at the cards. No
+ * broadcast view carries one, in any phase, to any player, including the one it belongs
+ * to: a token reaches its owner through an ack of their own or not at all.
+ */
+function assertNoResumeToken(view: PlayerGameView, where: string): void {
+  assert.ok(
+    !JSON.stringify(view).includes(RESUME_TOKEN_MARK),
+    `a resume token reached ${where}`,
+  );
+}
+
 /** Unwrap a rejection, failing the test if the call unexpectedly succeeded. */
 function expectError<T>(result: AckResult<T>): GameError {
   if (result.ok) assert.fail("expected a rejection, got success");
@@ -294,6 +312,37 @@ describe("joinRoom", () => {
     const result = await ask(latecomer, "joinRoom", roomCode, "Tony");
 
     assert.equal(expectError(result).code, "ROOM_FULL");
+  });
+});
+
+/**
+ * The rest of a token's life is covered where the payloads are: the round-by-round
+ * broadcasts and every revealed phase are checked in "playing a match" below.
+ */
+describe("resume tokens", () => {
+  it("stay off the lobby, for the seat's own connection and everyone else's", async () => {
+    const host = await server.connect();
+    const hostViews = watch(host);
+    const created = expectOk(
+      await ask<{ roomCode: string; playerId: string }>(host, "createRoom", "Ada"),
+    );
+    const guest = await server.connect();
+    const guestViews = watch(guest);
+    const joined = expectOk(
+      await ask<{ playerId: string }>(guest, "joinRoom", created.roomCode, "Grace"),
+    );
+
+    // Nothing hands a token out yet — no client event consumes one.
+    for (const ack of [created, joined]) {
+      assert.ok(
+        !JSON.stringify(ack).includes(RESUME_TOKEN_MARK),
+        "an ack carried a resume token",
+      );
+    }
+    await guestViews.until((v) => v.opponents.length === 1, "the guest's lobby");
+    for (const view of [...hostViews.seen, ...guestViews.seen]) {
+      assertNoResumeToken(view, "a lobby view");
+    }
   });
 });
 
@@ -798,6 +847,9 @@ describe("playing a match", () => {
 
   /** A finished round shows every hand, what each hand cost, and the new totals. */
   function assertRoundIsSettled(view: PlayerGameView): void {
+    // Revealing every hand is the one thing this phase opens up. Reaching for the roster
+    // to do it would bring the tokens along with the cards.
+    assertNoResumeToken(view, `a ${view.phase} view`);
     const result = view.roundResult;
     assert.ok(result, "a finished round reports its result");
     assert.equal(result.players.length, MAX_PLAYERS);
@@ -833,7 +885,7 @@ describe("playing a match", () => {
    * goes down the wire — including the burst of broadcasts a run of bot turns produces,
    * which is the path most likely to reach for state directly and skip the serializer.
    */
-  it("never puts another player's cards or the draw pile on the wire", async () => {
+  it("never puts another player's cards, the draw pile or a token on the wire", async () => {
     const { client, watcher, view } = await sitDown();
     const me = view.you.id;
     const everyCardId = createDeck().map((card) => card.id);
@@ -849,6 +901,7 @@ describe("playing a match", () => {
     assert.ok(watcher.seen.length > 1, "a run of bot turns was published");
 
     for (const published of watcher.seen) {
+      assertNoResumeToken(published, "a broadcast mid-round");
       // Hands are revealed to everyone at roundEnd, where the rules require it.
       if (published.phase !== "playing") continue;
 
