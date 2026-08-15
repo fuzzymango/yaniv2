@@ -13,8 +13,10 @@
  * from a tap that did not register. Everything the server owns is left to the server:
  * playing out of turn is offered, sent, and answered with `NOT_YOUR_TURN`.
  *
- * Nothing here is stateful. The selection lives in the session core, because it has to
- * survive views arriving underneath it.
+ * Nothing about the *game* is stateful here. The selection lives in the session core,
+ * because it has to survive views arriving underneath it. The one piece of state on this
+ * screen is the flight (`useCardFlight`), which is a picture of a move already played and
+ * decides nothing — see `CardsInFlight.tsx`.
  */
 
 import type { GameError, PlayerGameView } from "@yaniv/shared";
@@ -100,10 +102,16 @@ export function Table({
   const { rootRef, landing, ghosts, settle } = useCardFlight(flight, view.you.id);
 
   /**
-   * Whether the pile as a whole is still being landed on. Everything on it is the discard
-   * that has just been played, so a slapdown window opening on the viewer's own move opens
-   * over cards that have not arrived yet — and that pile is one control rather than a card
-   * each, so it waits as one thing.
+   * A place on the pile whose card is still in the air. Said once here and worn by whatever
+   * encloses the card — the control keeps its box, its ring and its flash, and only the face
+   * inside it waits (`.landing .card` in `styles.css`).
+   */
+  const landingClass = (cardId: string): string => (landing.has(cardId) ? "landing" : "");
+
+  /**
+   * The pile as a whole, for the one control that is the whole pile. Everything on it is the
+   * discard that has just been played, so a slapdown window — which opens on the viewer's own
+   * move — opens over cards that have not arrived yet.
    */
   const pileLanding = view.lastDiscard.some((card) => landing.has(card.id));
 
@@ -114,203 +122,207 @@ export function Table({
   );
 
   return (
-    <main className="screen table" ref={rootRef}>
-      {/*
-        The corner every in-match screen carries. The room's locked settings, one tap away
-        and nowhere on the table itself — what a Yaniv may be called on is worth being able
-        to check, and worth nothing at all in front of a player who is looking at their
-        hand — and, for the host, the only thing that ends a room mid-round.
-      */}
-      <div className="topbar">
-        {isHost && <CloseRoomIcon busy={busy} onClose={onCloseRoom} />}
-        <SettingsDialog settings={view.settings} />
-      </div>
-
-      {/*
-        Everybody else, seated round three sides of the felt with the viewer holding the
-        fourth. Each seat is their hand as it actually stands — one face-down card per card
-        they are holding — so a hand shrinking or growing is something to see rather than a
-        number to notice.
-
-        Which side anyone is on is `seatZones`, off the seating order the server sends, so
-        the table reads the same way round on everybody's screen.
-      */}
-      <div className="table__seats">
-        {ZONES.map((zone) => (
-          <SeatZone zone={zone} key={zone}>
-            {zones[zone].map((opponent) => (
-              <OpponentSeat
-                zone={zone}
-                opponent={opponent}
-                isTurn={opponent.id === view.currentTurnPlayerId}
-                key={opponent.id}
-              />
-            ))}
-          </SeatZone>
-        ))}
-      </div>
-
-      <section className="felt">
+    <>
+      <main className="screen table" ref={rootRef}>
         {/*
-          The deck. Its count is the honest one the server sends — a count and nothing
-          more, because the draw pile's contents never leave the server.
+          The corner every in-match screen carries. The room's locked settings, one tap away
+          and nowhere on the table itself — what a Yaniv may be called on is worth being able
+          to check, and worth nothing at all in front of a player who is looking at their
+          hand — and, for the host, the only thing that ends a room mid-round.
+        */}
+        <div className="topbar">
+          {isHost && <CloseRoomIcon busy={busy} onClose={onCloseRoom} />}
+          <SettingsDialog settings={view.settings} />
+        </div>
+
+        {/*
+          Everybody else, seated round three sides of the felt with the viewer holding the
+          fourth. Each seat is their hand as it actually stands — one face-down card per card
+          they are holding — so a hand shrinking or growing is something to see rather than a
+          number to notice.
+
+          Which side anyone is on is `seatZones`, off the seating order the server sends, so
+          the table reads the same way round on everybody's screen.
+        */}
+        <div className="table__seats">
+          {ZONES.map((zone) => (
+            <SeatZone zone={zone} key={zone}>
+              {zones[zone].map((opponent) => (
+                <OpponentSeat
+                  zone={zone}
+                  opponent={opponent}
+                  isTurn={opponent.id === view.currentTurnPlayerId}
+                  key={opponent.id}
+                />
+              ))}
+            </SeatZone>
+          ))}
+        </div>
+
+        <section className="felt">
+          {/*
+            The deck. Its count is the honest one the server sends — a count and nothing
+            more, because the draw pile's contents never leave the server.
+          */}
+          <button
+            className="pick pick--deck"
+            type="button"
+            aria-label={`Draw from the deck, ${view.drawPileCount} cards left`}
+            disabled={!canDraw}
+            onClick={() => onCommitTurn({ kind: "deck" })}
+          >
+            <span className="card card--back" />
+            <span className="pick__count">{view.drawPileCount}</span>
+          </button>
+
+          {slapdownTarget ? (
+            /*
+              The whole pile as one target, flashing, for as long as the window lasts. It
+              is one control rather than a card each because there is only one card it
+              could be about — a player draws one card a turn, so the server already knows
+              which — and because a pile that offered both meanings at once would make a
+              tap a guess.
+
+              Locked on `busy` the moment it is tapped rather than on the ack, so a thumb
+              that lands twice sends once. Correctness does not rest on that: a second slap
+              is refused by the server for free.
+            */
+            <button
+              // Still live and still flashing while the cards it is about arrive: only the
+              // faces inside it wait (`.landing .card`), never the control.
+              className={`slapdown ${pileLanding ? "landing" : ""}`}
+              type="button"
+              aria-label="Slap down the card you just drew"
+              disabled={busy}
+              onClick={onSlapDown}
+            >
+              {view.lastDiscard.map((card) => (
+                <PlayingCard card={card} key={card.id} />
+              ))}
+            </button>
+          ) : (
+            /*
+              The last discard, laid out as it lies. Which of it may be taken comes from the
+              rulebook, not from counting to the ends here — so whatever is not on offer is
+              rendered without a control at all and dimmed, rather than as buttons that
+              quietly do nothing.
+            */
+            <ul className="discard">
+              {view.lastDiscard.map((card) =>
+                takeable.has(card.id) ? (
+                  // A card still in the air leaves its place empty rather than sitting in it
+                  // twice — the face only, so the draw target underneath it stays a control.
+                  <li className={landingClass(card.id)} key={card.id}>
+                    <button
+                      className="pick"
+                      type="button"
+                      aria-label={`Take the ${cardLabel(card)}`}
+                      disabled={!canDraw}
+                      onClick={() => onCommitTurn({ kind: "discard", cardId: card.id })}
+                    >
+                      <PlayingCard card={card} />
+                    </button>
+                  </li>
+                ) : (
+                  // Deliberately not a `.pick`: there is no control here at all, so there is
+                  // nothing to give it a pointer cursor or a focus stop either.
+                  <li className={`discard__out ${landingClass(card.id)}`} key={card.id}>
+                    <PlayingCard card={card} />
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
+        </section>
+
+        {/*
+          A window says what it is in words as well as in the flashing, because it is the
+          one thing on this screen that is not a rule about the cards in front of the
+          player: nothing they can see explains why the pile has started asking for a tap.
+          It goes above whose turn it is, which is true at the same time and matters less
+          for as long as the window lasts.
+        */}
+        <p
+          className={`turn ${yourTurn ? "turn--yours" : ""} ${slapdownTarget ? "turn--slap" : ""}`}
+          role="status"
+        >
+          {slapdownTarget
+            ? "Slapdown! Tap the pile to send the card you just drew straight back"
+            : yourTurn
+              ? "Your turn — tap cards, then the deck or a face-up card"
+              : `${onTurn?.name ?? "Somebody"} is playing`}
+        </p>
+
+        {/*
+          The call that replaces a turn rather than taking one, so it is a button where
+          nothing else on this screen is one — there is no set to choose and nothing to draw.
+
+          Always on the screen and inert until the hand is low enough, rather than appearing
+          when it becomes legal: a control that materialises under a thumb already on its way
+          down is one nobody meant to press, and a permanent one also tells a player what
+          they are playing towards.
         */}
         <button
-          className="pick pick--deck"
+          className={`button call ${canCall ? "call--live" : ""}`}
           type="button"
-          aria-label={`Draw from the deck, ${view.drawPileCount} cards left`}
-          disabled={!canDraw}
-          onClick={() => onCommitTurn({ kind: "deck" })}
+          disabled={!canCall}
+          onClick={onCallYaniv}
         >
-          <span className="card card--back" />
-          <span className="pick__count">{view.drawPileCount}</span>
+          Yaniv!
         </button>
 
-        {slapdownTarget ? (
-          /*
-            The whole pile as one target, flashing, for as long as the window lasts. It
-            is one control rather than a card each because there is only one card it
-            could be about — a player draws one card a turn, so the server already knows
-            which — and because a pile that offered both meanings at once would make a
-            tap a guess.
-
-            Locked on `busy` the moment it is tapped rather than on the ack, so a thumb
-            that lands twice sends once. Correctness does not rest on that: a second slap
-            is refused by the server for free.
-          */
-          <button
-            className={`slapdown ${pileLanding ? "landing" : ""}`}
-            type="button"
-            aria-label="Slap down the card you just drew"
-            disabled={busy}
-            onClick={onSlapDown}
-          >
-            {view.lastDiscard.map((card) => (
-              <PlayingCard card={card} key={card.id} />
-            ))}
-          </button>
-        ) : (
-          /*
-            The last discard, laid out as it lies. Which of it may be taken comes from the
-            rulebook, not from counting to the ends here — so whatever is not on offer is
-            rendered without a control at all and dimmed, rather than as buttons that
-            quietly do nothing.
-          */
-          <ul className="discard">
-            {view.lastDiscard.map((card) =>
-              takeable.has(card.id) ? (
-                // A card still in the air leaves its place empty rather than sitting in it
-                // twice — see `landing` in `CardsInFlight.tsx`.
-                <li className={landing.has(card.id) ? "landing" : ""} key={card.id}>
-                  <button
-                    className="pick"
-                    type="button"
-                    aria-label={`Take the ${cardLabel(card)}`}
-                    disabled={!canDraw}
-                    onClick={() => onCommitTurn({ kind: "discard", cardId: card.id })}
-                  >
-                    <PlayingCard card={card} />
-                  </button>
-                </li>
-              ) : (
-                // Deliberately not a `.pick`: there is no control here at all, so there is
-                // nothing to give it a pointer cursor or a focus stop either.
-                <li
-                  className={`discard__out ${landing.has(card.id) ? "landing" : ""}`}
-                  key={card.id}
+        {/*
+          In the order the server sorted them and in no other: sorting again here would
+          rearrange a hand under a player's finger between one move and the next. See
+          "Hand display order is presentation only" in CLAUDE.md.
+        */}
+        <ul className="hand">
+          {view.you.hand.map((card) => {
+            const chosen = selection.includes(card.id);
+            return (
+              <li key={card.id}>
+                <button
+                  className={`pick ${chosen ? "pick--chosen" : ""}`}
+                  type="button"
+                  aria-label={cardLabel(card)}
+                  aria-pressed={chosen}
+                  disabled={busy}
+                  onClick={() => onToggleCard(card.id)}
                 >
                   <PlayingCard card={card} />
-                </li>
-              ),
-            )}
-          </ul>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <footer className="you">
+          <span className="player__name">{view.you.name}</span>
+          {/*
+            The number the Yaniv control turns on, so it is worth a player knowing without
+            adding their own hand up — and it is what says how far off a call still is.
+          */}
+          <span className="you__value">{handValue(view.you.hand)} in hand</span>
+          <span className="player__score">{view.you.score} pts</span>
+        </footer>
+
+        {error && (
+          <p className="notice notice--error" role="alert">
+            {error.message}
+          </p>
         )}
-      </section>
+
+      </main>
 
       {/*
-        A window says what it is in words as well as in the flashing, because it is the
-        one thing on this screen that is not a rule about the cards in front of the
-        player: nothing they can see explains why the pile has started asking for a tap.
-        It goes above whose turn it is, which is true at the same time and matters less
-        for as long as the window lasts.
-      */}
-      <p
-        className={`turn ${yourTurn ? "turn--yours" : ""} ${slapdownTarget ? "turn--slap" : ""}`}
-        role="status"
-      >
-        {slapdownTarget
-          ? "Slapdown! Tap the pile to send the card you just drew straight back"
-          : yourTurn
-            ? "Your turn — tap cards, then the deck or a face-up card"
-            : `${onTurn?.name ?? "Somebody"} is playing`}
-      </p>
-
-      {/*
-        The call that replaces a turn rather than taking one, so it is a button where
-        nothing else on this screen is one — there is no set to choose and nothing to draw.
-
-        Always on the screen and inert until the hand is low enough, rather than appearing
-        when it becomes legal: a control that materialises under a thumb already on its way
-        down is one nobody meant to press, and a permanent one also tells a player what
-        they are playing towards.
-      */}
-      <button
-        className={`button call ${canCall ? "call--live" : ""}`}
-        type="button"
-        disabled={!canCall}
-        onClick={onCallYaniv}
-      >
-        Yaniv!
-      </button>
-
-      {/*
-        In the order the server sorted them and in no other: sorting again here would
-        rearrange a hand under a player's finger between one move and the next. See
-        "Hand display order is presentation only" in CLAUDE.md.
-      */}
-      <ul className="hand">
-        {view.you.hand.map((card) => {
-          const chosen = selection.includes(card.id);
-          return (
-            <li key={card.id}>
-              <button
-                className={`pick ${chosen ? "pick--chosen" : ""}`}
-                type="button"
-                aria-label={cardLabel(card)}
-                aria-pressed={chosen}
-                disabled={busy}
-                onClick={() => onToggleCard(card.id)}
-              >
-                <PlayingCard card={card} />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-
-      <footer className="you">
-        <span className="player__name">{view.you.name}</span>
-        {/*
-          The number the Yaniv control turns on, so it is worth a player knowing without
-          adding their own hand up — and it is what says how far off a call still is.
-        */}
-        <span className="you__value">{handValue(view.you.hand)} in hand</span>
-        <span className="player__score">{view.you.score} pts</span>
-      </footer>
-
-      {error && (
-        <p className="notice notice--error" role="alert">
-          {error.message}
-        </p>
-      )}
-
-      {/*
-        Last, and over everything: the cards of the move that produced this position, drawn
-        crossing the table on their way to the places left empty for them above. Nothing on
-        the screen is arranged around it — it is fixed to the viewport, inert to every tap,
-        and gone a third of a beat later.
+        Over the screen and deliberately outside it: the cards of the move that produced this
+        position, drawn crossing the table on their way to the places left empty for them
+        above. It is fixed to the viewport and inert to every tap, so it is part of no layout
+        — and a ghost is a copy of a card, carrying the same id, so a layer *inside* the
+        measured screen would answer for the card it copies. See `measure` in
+        `CardsInFlight.tsx`.
       */}
       <CardsInFlight ghosts={ghosts} onSettled={settle} />
-    </main>
+    </>
   );
 }

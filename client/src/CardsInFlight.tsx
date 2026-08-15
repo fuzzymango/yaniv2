@@ -14,7 +14,8 @@
  *      started from is still on hand once the position it ended at has been drawn;
  *   2. a move arrives, and the cards it discarded are measured where they have landed;
  *   3. a ghost is drawn at each landing place, moved back to where that card was, and let
- *      go — while the real card underneath waits, invisible, for its ghost to arrive.
+ *      go — while the real card underneath waits, its face hidden and its control live,
+ *      for its ghost to arrive.
  *
  * Purely decorative, and that is a constraint rather than a description: nothing here locks
  * a control, delays an intent or holds up a position. A player who taps through a flight
@@ -76,7 +77,14 @@ export interface Ghost {
 const wantsStillness = (): boolean =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/** Every card currently on the screen, by id, boxed where it is drawn. */
+/**
+ * Every card currently on the screen, by id, boxed where it is drawn.
+ *
+ * The root it is given must hold the table and **not** the ghosts: a ghost is a copy of a
+ * card and carries the same id, so a layer inside this root would answer for the card it
+ * copies — with a box taken mid-flight, part way through a transform. `Table.tsx` draws the
+ * layer as a sibling of the screen for that reason.
+ */
 function measure(root: HTMLElement | null): Map<string, Box> {
   const boxes = new Map<string, Box>();
   if (root === null) return boxes;
@@ -103,13 +111,16 @@ const ghostsFor = (
     return from === undefined || to === undefined ? [] : [{ card, from, to }];
   });
 
-export interface Flying {
+export interface InFlight {
   /** The screen the cards are measured within — every `[data-card-id]` inside it. */
   readonly rootRef: RefObject<HTMLElement | null>;
   /**
    * The cards whose place should be left empty because they have not arrived yet. Drawing
    * both the card and its ghost would show the same card twice, one of them sitting still
    * at the end of the other's journey.
+   *
+   * A place, not a control: whatever encloses one of these cards keeps working throughout,
+   * because a flight may not cost a player a move (`.landing .card` in `styles.css`).
    */
   readonly landing: ReadonlySet<string>;
   /** Handed straight to `<CardsInFlight>`, which is the only thing that can read them. */
@@ -129,7 +140,7 @@ export interface Flying {
  * cards start from are their seat rather than a hand, which is the next ticket's problem
  * (issue #69) and not a reason for this one to fly the wrong card off the wrong edge.
  */
-export function useCardFlight(flight: CardFlight | null, viewerId: string): Flying {
+export function useCardFlight(flight: CardFlight | null, viewerId: string): InFlight {
   const rootRef = useRef<HTMLElement>(null);
   /** Where every card was at the last render — the "first" of FLIP. */
   const boxes = useRef<Map<string, Box>>(new Map());
@@ -178,6 +189,9 @@ export function useCardFlight(flight: CardFlight | null, viewerId: string): Flyi
  * of them reading the same stylesheet rule.
  */
 const ghostStyle = (ghost: Ghost): CSSProperties =>
+  // Cast because `CSSProperties` has no room for a custom property, and `--card-w` is how a
+  // card is sized everywhere in this client (`styles.css`) — the alternative is a second way
+  // of sizing one, for the ghost alone.
   ({
     left: `${ghost.to.left}px`,
     top: `${ghost.to.top}px`,
@@ -208,19 +222,19 @@ export function CardsInFlight({
   ghosts: readonly Ghost[];
   onSettled: () => void;
 }) {
-  const layer = useRef<HTMLDivElement>(null);
+  /**
+   * The element each ghost is drawn as, by card id — the same name the ghosts are keyed by,
+   * rather than a second identity by position in a list. Refs are attached during the
+   * commit, so every ghost rendered below is in here before the effect runs.
+   */
+  const drawn = useRef(new Map<string, HTMLElement>());
 
   useLayoutEffect(() => {
-    const element = layer.current;
-    if (element === null) return;
-
-    // Ghost and element are matched by position, which is the order they were rendered in
-    // just above; a card that somehow has no element of its own simply does not fly.
-    const animations = ghosts.flatMap((ghost, index) => {
-      const child = element.children[index];
-      if (child === undefined) return [];
+    const animations = ghosts.flatMap((ghost) => {
+      const element = drawn.current.get(ghost.card.id);
+      if (element === undefined) return [];
       return [
-        child.animate([{ transform: startOf(ghost) }, { transform: "none" }], {
+        element.animate([{ transform: startOf(ghost) }, { transform: "none" }], {
           duration: FLIGHT_MS,
           easing: EASING,
           // Held at the end rather than handed back to the inline transform below, which is
@@ -230,6 +244,7 @@ export function CardsInFlight({
         }),
       ];
     });
+    if (animations.length === 0) return;
 
     // A cancelled animation rejects, which is what the cleanup below does to every flight
     // still in the air when the screen moves on — nothing left to settle, and nothing to
@@ -244,9 +259,17 @@ export function CardsInFlight({
   if (ghosts.length === 0) return null;
 
   return (
-    <div className="flight" ref={layer} aria-hidden="true">
+    <div className="flight" aria-hidden="true">
       {ghosts.map((ghost) => (
-        <span className="flight__card" style={ghostStyle(ghost)} key={ghost.card.id}>
+        <span
+          className="flight__card"
+          style={ghostStyle(ghost)}
+          ref={(element) => {
+            if (element === null) drawn.current.delete(ghost.card.id);
+            else drawn.current.set(ghost.card.id, element);
+          }}
+          key={ghost.card.id}
+        >
           <PlayingCard card={ghost.card} />
         </span>
       ))}

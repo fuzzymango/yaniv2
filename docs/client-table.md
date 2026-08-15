@@ -79,8 +79,10 @@ rendered element. Five decisions, none of them about the rules of anything:
   outlive the animation, which is why the ghost is placed there and moved back rather than
   the other way round.
 - **The ghost flies and the real card waits.** A card in the air leaves its landing place
-  empty (`.landing`, `visibility` so the row is already laid out as it will settle), or the
-  same card would be drawn twice — once sitting at the end of the other's journey.
+  empty (`.landing .card`, `visibility` so the row is already laid out as it will settle), or
+  the same card would be drawn twice — once sitting at the end of the other's journey. The
+  *face* waits and never the control around it: the slapdown window opens on the viewer's own
+  discard, so a hidden button would be an untappable window for the length of every flight.
 - **`FLIGHT_MS` is nobody's sibling but `PACE_MS`'s.** 300ms against a 700ms beat: how long
   a card takes to cross and how long a position stays are separate questions, tied only by
   the flight having to be over inside the beat, with room to read the settled table.

@@ -129,7 +129,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `Modal.tsx` | The panel the settings and the close-room question are both asked behind — shared for the half nobody can see: announced as a dialog, and dismissed by backdrop, control and Escape |
 | `Resuming.tsx` | A seat being claimed back — the third screen with no view behind it, drawn where the main menu otherwise would be so a reload never flashes it |
 | `Disconnected.tsx` | No socket — the screen above every other. One screen for a connection that went and one that never arrived, since neither leaves anything to tap |
-| `PlayingCard.tsx` | One card, drawn in CSS. Presentational only — it does not know what a card means where it sits |
+| `PlayingCard.tsx` | One card, drawn in CSS, and named in the markup (`data-card-id`, which is how `CardsInFlight.tsx` finds a card to measure). Presentational only — it does not know what a card means where it sits |
 | `Room.tsx` | The fallback for a `roundEnd` with no result behind it — a position the wire type allows and the server does not produce |
 | `styles.css` | Mobile-first. Cards are drawn in CSS — no image assets |
 
