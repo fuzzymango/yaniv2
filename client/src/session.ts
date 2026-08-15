@@ -156,9 +156,13 @@ export interface SessionSnapshot {
    * A one-shot: it is set by the publication that draws the position it belongs to and is
    * gone from the next one, whatever that next one is about. That is what makes it an event
    * to play rather than a fact about the table — a card is in flight for as long as the
-   * animation takes and not for as long as the position stands, and a screen that
-   * re-rendered for some other reason must not fly it again. `flight.ts` decides what is in
-   * it; nothing here or downstream re-decides.
+   * animation takes and not for as long as the position stands, so a tap or a refusal
+   * arriving behind it does not put the same cards up again.
+   *
+   * What it does *not* do is count renders: a component that re-renders off the snapshot it
+   * already has reads the same flight, and it is the one flight either way. Playing each
+   * exactly once is the animating layer's own job, and the object's identity is what it has
+   * to tell them apart by. `flight.ts` decides what is in it; nothing here re-decides.
    */
   readonly flight: CardFlight | null;
 }

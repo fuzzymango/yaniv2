@@ -23,6 +23,10 @@ import type { Card, DrawSource, LastMoveView, PlayerGameView } from "@yaniv/shar
  * deck, seen by anybody but the drawer), and that is exactly the question a renderer asks
  * to decide whether the card in flight is drawn face up or as a back. See "Last move" in
  * CONTEXT.md and ADR-0007.
+ *
+ * `drawSource` is the wire's word for which pile — `shared`'s, and not `turn.ts`'s
+ * same-named type, which is a *tap* on one and may not be a legal draw at all. A move that
+ * has resolved was legal by definition, so this end of it has nothing to qualify.
  */
 export interface CardFlight {
   readonly playerId: string;
@@ -45,8 +49,7 @@ export interface CardFlight {
  * before this one belongs to somebody else; two consecutive facts cannot agree on the
  * mover unless they are the same fact.
  */
-const sameMove = (a: LastMoveView | null, b: LastMoveView): boolean =>
-  a !== null &&
+const sameMove = (a: LastMoveView, b: LastMoveView): boolean =>
   a.playerId === b.playerId &&
   a.drawSource === b.drawSource &&
   (a.drawnCard?.id ?? null) === (b.drawnCard?.id ?? null);
@@ -74,7 +77,7 @@ export function flightFrom(
   // A move happens within one round. Across a deal the cards on the screen are replaced
   // wholesale, and none of what changed is anybody's turn.
   if (shown.roundNumber !== arriving.roundNumber) return null;
-  if (sameMove(shown.lastMove, move)) return null;
+  if (shown.lastMove !== null && sameMove(shown.lastMove, move)) return null;
 
   return {
     playerId: move.playerId,

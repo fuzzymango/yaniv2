@@ -54,6 +54,19 @@ describe("flightFrom", () => {
     );
   });
 
+  it("names the one card a single-card pile could have offered", () => {
+    const before = position({ lastDiscard: cards("hearts-6") });
+    const after = position({
+      lastDiscard: cards("spades-9"),
+      lastMove: { playerId: "p2", drawSource: "discard", drawnCard: card("hearts-6") },
+    });
+
+    // Nothing is inferred even where there is only one thing it could be: the field the
+    // server sent is the answer in every case, so there is no second way of arriving at it
+    // to disagree with the first.
+    assert.deepEqual(flightFrom(before, after)?.drawnCard, card("hearts-6"));
+  });
+
   it("names the card taken off the pile rather than working it out", () => {
     // Both ends of a run are pickup-eligible and what is left of it reaches the client as
     // a count, so which end went is not recoverable by comparing the two positions — the
