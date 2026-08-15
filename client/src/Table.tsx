@@ -20,8 +20,9 @@
 import type { GameError, PlayerGameView } from "@yaniv/shared";
 import { handValue } from "@yaniv/shared";
 import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
+import { OpponentSeat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
-import { bySeat } from "./seating.ts";
+import { ZONES, bySeat, seatZones } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
 
@@ -76,7 +77,7 @@ export function Table({
    */
   const slapdownTarget = isSlapdownTarget(view.you);
 
-  const opponents = [...view.opponents].sort(bySeat(view));
+  const zones = seatZones([...view.opponents].sort(bySeat(view)));
 
   const onTurn = [view.you, ...view.opponents].find(
     (p) => p.id === view.currentTurnPlayerId,
@@ -91,18 +92,29 @@ export function Table({
       */}
       <SettingsDialog settings={view.settings} />
 
-      <ul className="players">
-        {opponents.map((opponent) => (
-          <li
-            className={`player ${opponent.id === view.currentTurnPlayerId ? "player--turn" : ""}`}
-            key={opponent.id}
-          >
-            <span className="player__name">{opponent.name}</span>
-            <span className="player__cards">{opponent.handSize} cards</span>
-            <span className="player__score">{opponent.score} pts</span>
-          </li>
+      {/*
+        Everybody else, seated round three sides of the felt with the viewer holding the
+        fourth. Each seat is their hand as it actually stands — one face-down card per card
+        they are holding — so a hand shrinking or growing is something to see rather than a
+        number to notice.
+
+        Which side anyone is on is `seatZones`, off the seating order the server sends, so
+        the table reads the same way round on everybody's screen.
+      */}
+      <div className="table__seats">
+        {ZONES.map((zone) => (
+          <SeatZone zone={zone} key={zone}>
+            {zones[zone].map((opponent) => (
+              <OpponentSeat
+                zone={zone}
+                opponent={opponent}
+                isTurn={opponent.id === view.currentTurnPlayerId}
+                key={opponent.id}
+              />
+            ))}
+          </SeatZone>
         ))}
-      </ul>
+      </div>
 
       <section className="felt">
         {/*

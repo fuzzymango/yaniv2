@@ -588,25 +588,281 @@ body {
 /*
  * Pinned to the viewport, like the lobby: the hand has to sit at the bottom where a thumb
  * is, and a page that grew with a long discard would push it off the screen.
+ *
+ * The `justify-content` is doing work and is the one screen-level rule with no desktop
+ * counterpart: it overrides the centring `.screen` takes on at 48rem, so the table alone
+ * stays stretched down a monitor. Centring it would carry the hand and the felt up the
+ * screen while the seats stayed where they are — they are pinned to the viewport, not
+ * carried in the column (`.table__seats`) — leaving the table adrift from the players
+ * sitting round it, and a band of unused felt under the hand. It had that rule until the
+ * restack pinned the felt to the hand (issue #59) and the two stopped agreeing.
  */
 .table {
   --card-w: min(3.5rem, 15vw);
 
+  position: relative;
   justify-content: flex-start;
   height: 100dvh;
   gap: 0.75rem;
+  /*
+   * A seat's fan is deliberately drawn off the edge of the table (see `.table__seats`),
+   * and this is the edge: on a phone it is the viewport, and on anything wider it is the
+   * capped column, so the same layout cuts off in the same place at every width.
+   */
+  overflow: hidden;
 }
 
-.players {
+/*
+ * The settings icon, pinned to the corner of the table itself rather than riding the top
+ * of the column.
+ *
+ * The band covers the top of the screen (`.table__seats`), which is where the column's
+ * first row would otherwise sit — so the icon belongs to the table's own corner, at the
+ * screen's edge like a seat is, rather than inset by the padding that keeps the column's
+ * text off it. Out of flow like the band, it is in the same corner at every width.
+ *
+ * Above both of the things drawn over the table (`z-index`): the band, which is drawn after
+ * it, and the felt, whose own box reaches up into this corner even though nothing is drawn
+ * there — an icon under it would go dead in the overlap. Scoped to the table: the scored
+ * round and the finished match have no band over their column, so theirs stays in it.
+ */
+.table > .topbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+}
+
+/*
+ * Everybody else, seated round three sides of the felt.
+ *
+ * The band the seats are dealt into. Taken out of the column's flow and pinned to the top
+ * of the screen itself, edges included: a player sits at the *edge* of the table, and the
+ * padding that keeps the column's text off that edge is a rule about text. Out of flow is
+ * also what lets a fan hang off the top of the screen at all — in the column it would
+ * start below the settings icon, and "off the edge" would mean off the edge of nothing.
+ *
+ * The top of the screen rather than all of it, because the bottom is the local player's:
+ * the hand, and the felt they play it onto. Nothing here is tappable, so it passes taps
+ * through to whatever the felt puts under it.
+ *
+ * Cards here are smaller than the ones on the felt and in the hand, and that is the whole
+ * of the size difference between a hand being played and five being watched: these are
+ * never tapped, and at full size a table of six leaves no middle to play in.
+ */
+.table__seats {
+  /*
+   * 0.78 of a card on the felt, which is where the prototype's variant D landed (issue
+   * #56) — smaller than that read as cramped at a table of six. The `vh` term is here and
+   * nowhere else cards are sized: a doubled zone stacks two seats up one edge, so on a
+   * short screen it is the height that runs out first. Scaling down is the answer at every
+   * size rather than reflowing — the table is the same table on a phone as on a monitor.
+   */
+  --card-w: calc(min(3.5rem, 15vw, 7.5vh) * 0.78);
+
+  position: absolute;
+  inset: 0 0 auto;
+  /*
+   * Deep enough for a doubled zone — two whole seats, stacked — to sit inside it without
+   * the first one's fan being cut off by the top of the screen, at every size the cards
+   * scale to. Any deeper and the seats sit down among the hand rather than around it.
+   */
+  height: 56%;
+  pointer-events: none;
+}
+
+/*
+ * A side of the table. Two seats' worth at most (`seatZones`), and a doubled one grows
+ * along its own edge rather than shrinking to fit: a seat that shrank when a fifth player
+ * joined would say something about the table that isn't true.
+ *
+ * The shape of a side is here; *where* the sides are is left to whichever screen is laying
+ * them out. The live table pins its own to the edges of a band it takes off the top of the
+ * screen, and the scored round flows its into a grid it can scroll — two different rooms
+ * to fit five hands into, and only one of them has a felt in the middle.
+ */
+.table-zone {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.table-zone--left,
+.table-zone--right {
+  flex-direction: column;
+}
+
+.table-zone--top {
+  flex-direction: row;
+}
+
+/* The table's own sides, each pinned against its edge of the band. */
+.table__seats .table-zone {
+  position: absolute;
+}
+
+.table__seats .table-zone--left {
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+}
+
+.table__seats .table-zone--right {
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.table__seats .table-zone--top {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/*
+ * One player's place: their cards, and their name under them. The label is a child rather
+ * than an overlay, so the fan's own reserved height is what holds the two apart — see
+ * `fanFootprint`, which is sized off the same angles the cards are drawn at.
+ */
+.table-seat {
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border-radius: 0.5rem;
 }
 
-.player,
+/* Each seat's label hugs its own edge of the screen, where the seat is. */
+.table-seat--left {
+  align-items: flex-start;
+}
+
+.table-seat--right {
+  align-items: flex-end;
+}
+
+.table-seat--top {
+  align-items: center;
+}
+
+/*
+ * Whose turn it is: the label alone, not the seat entire. A ring round the seat's whole
+ * box is mostly ringing the reserved space around a fan that is turned inside it and hung
+ * off the edge of the screen, so it reads as a box drawn near a player rather than round
+ * them. The label is the one part of a seat that is upright, on screen whole, and the same
+ * shape in every zone. The same ring the text row it replaces used to carry.
+ */
+.table-seat--turn .table-seat__label {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/*
+ * The fan. Its size comes from `fanFootprint` and its push off the edge from
+ * `fanOverhang`, both inline, both in card widths — nothing about the arc is written
+ * twice, here or there.
+ */
+.table-seat__fan {
+  position: relative;
+}
+
+/*
+ * Every card hangs off the fan's hinge, which is the point the margins put its bottom
+ * edge's centre on and the origin it turns about. Where that hinge sits in the box is the
+ * only thing that differs by zone, because the rotation is already in the transform.
+ *
+ * The 1.4 is the card's own shape (`aspect-ratio: 5 / 7` above), which is what `fan.ts`
+ * measures the box with too — one number, in one unit, on both sides.
+ */
+.table-seat__card {
+  position: absolute;
+  margin-top: calc(var(--card-w) * -1.4);
+  margin-left: calc(var(--card-w) * -0.5);
+  transform-origin: 50% 100%;
+}
+
+.table-seat__fan--left .table-seat__card {
+  top: 50%;
+  left: 0;
+}
+
+.table-seat__fan--right .table-seat__card {
+  top: 50%;
+  left: 100%;
+}
+
+.table-seat__fan--top .table-seat__card {
+  top: 0;
+  left: 50%;
+}
+
+/*
+ * The other shape a hand takes at a seat: revealed, face up and cascaded along one axis
+ * (`CascadeReveal`, issue #60). Its box comes from `cascadeFootprint` and each card's place
+ * from `cascadeOffset`, both inline and both in card widths — the same arrangement the arc
+ * has, so nothing about either shape is written twice.
+ */
+.cascade {
+  position: relative;
+}
+
+.cascade__card {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/*
+ * A cascaded card wears its rank and suit on the edge the cascade advances *away* from,
+ * which is the strip the next card leaves showing.
+ *
+ * A card's face carries them in the middle (`.card`), which is right for a card being
+ * looked at whole and useless under another one: a hand of seven would be six blank cards
+ * and one readable face. Real cards carry a corner index for exactly this reason, and it
+ * is why a fanned hand can be read at all. How much room the pair needs is `CARD_INDEX_STRIP` in
+ * `fan.ts`, and `CASCADE_STEP` is chosen to clear it.
+ */
+.cascade__card .card {
+  padding: calc(var(--card-w) * 0.05);
+}
+
+/* Down the side seats: the index across the top, in a row, so its strip stays shallow. */
+.cascade--vertical .card {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: calc(var(--card-w) * 0.06);
+}
+
+/* Across the top seat: the index down the left edge, stacked, so its strip stays narrow. */
+.cascade--horizontal .card {
+  align-items: flex-start;
+}
+
+/*
+ * Upright in every zone, and never rotated with the cards above it. Small: five of these
+ * are on the screen at a full table, and none of them is what anybody is playing.
+ */
+.table-seat__label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  max-width: 7.5rem;
+  margin: 0;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  font-size: 0.7rem;
+}
+
+.table-seat__name {
+  /* A line of its own, so a long name pushes the numbers down rather than sideways. */
+  flex: 0 0 100%;
+  /* Names are bounded server-side but not narrow; the counts keep their place. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
 .you {
   display: flex;
   align-items: center;
@@ -638,27 +894,38 @@ body {
   font-weight: 700;
 }
 
-/* Whose turn it is, on the seat itself as well as in words below the table. */
-.player--turn {
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
 /*
- * The deck and the discard, floating in whatever height is left between the opponents
- * and the hand.
+ * The deck above the discard, and the pair pushed down against the hand rather than
+ * centred in the height above it.
  *
- * It wraps, and that is the whole answer to sizing: a card is `--tap` wide or wider on
- * every screen, which for a five-card discard beside the deck is more than a 320px phone
- * has across — so on the rare hand that produces one, the discard drops to its own line
- * rather than every card on the table shrinking under a finger to accommodate it.
+ * Both halves of that are the same fix (issue #59). The seats are out of the column's
+ * flow and take a band off the top of the screen (`.table__seats`), so a felt centred in
+ * "whatever is left" is centred in a space the seats are still sitting in — it floats up
+ * into their labels on a tall screen and is squeezed by them on a short one. Pinned to the
+ * bottom of that space it is a fixed distance above the hand at every height instead, and
+ * the two stop competing for the same room by construction. Stacking is what makes the
+ * pinned position fit: side by side, the deck plus a five-card discard is wider than a
+ * 320px phone, and a column has the width for both at full size.
+ *
+ * Card size is deliberately untouched (issue #59): the deck and the discard's ends are
+ * primary tap targets, and reclaiming height by shrinking them would put a finger back
+ * over two cards at once.
+ *
+ * Lifted over the seats' band, which is positioned and drawn after it and so would take
+ * every crossing by default. There is one left — six seated round a short screen, where a
+ * wide discard reaches a doubled zone's lower label — and what happens where they meet is
+ * a choice: a label over a card dims a tap target and makes it look out of play, while a
+ * card over the tail of a name is two things overlapping on a table, which is what they
+ * are. Nothing is drawn in the rest of this box, so lifting it hides nothing else.
  */
 .felt {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex: 1;
-  flex-wrap: wrap;
-  align-content: center;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 0.5rem;
   min-height: 0;
 }
@@ -776,8 +1043,10 @@ body {
 }
 
 /*
- * The hand: bigger than the table's cards, because these are the ones a player picks out
- * one at a time.
+ * The local player's own hand, at the bottom of the screen: bigger than the table's cards,
+ * because on the table they are the ones a player picks out one at a time. The scored round
+ * borrows the row for the same hand revealed, at its own size and with no controls in it
+ * (`.round__you .hand`) — one hand laid out flat is one hand laid out flat, played or not.
  */
 .hand {
   --card-w: min(3.75rem, 16vw);
@@ -798,10 +1067,19 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * Whose move it is, in words. Two lines' worth of room whether or not two are used: the
+ * felt above is pinned to the top of this line, so a message that wraps on one turn and not
+ * on the next would walk the deck and the discard up and down the screen between moves —
+ * and standing still is the whole of what pinning them was for. Two lines is as tall as it
+ * gets, the longest of the three messages still wrapping to two on a 320px phone.
+ */
 .turn {
+  min-height: 2.6em;
   margin: 0;
   color: var(--ink-dim);
   font-size: 0.95rem;
+  line-height: 1.3;
   text-align: center;
 }
 
@@ -858,32 +1136,18 @@ body {
   }
 }
 
-/*
- * A desktop has height to spare, so the table sits in the middle of it rather than being
- * stretched down it.
- */
-@media (min-width: 48rem) {
-  .table {
-    justify-content: center;
-  }
-
-  .felt {
-    flex: 0 1 auto;
-    padding: 2rem 0;
-  }
-}
-
 /* --- a scored round --- */
 
 /*
- * Six hands laid out at once, so the cards are the smallest they get anywhere: they are
- * read here, not tapped. Pinned to the viewport like the lobby and the table, with the
- * rows taking the leftover height, so the control to deal the next round stays at the
- * bottom where a thumb is however many players are being scored.
+ * Pinned to the viewport like the lobby and the table, with the seats taking the leftover
+ * height and scrolling inside it, so the control to deal the next round stays at the bottom
+ * where a thumb is however many players are being scored.
+ *
+ * No `--card-w` of its own: the seats and the viewer's own hand are drawn at two different
+ * sizes on this screen (five hands read across the table, and one read close up), and a
+ * screen-level default would only ever be the wrong one of the two.
  */
 .round {
-  --card-w: min(2.25rem, 10vw);
-
   justify-content: flex-start;
   height: 100dvh;
   gap: 0.75rem;
@@ -910,32 +1174,91 @@ body {
   color: var(--accent);
 }
 
-.results {
+/*
+ * The table the round was just played at, with everybody still in their seat.
+ *
+ * The one thing here that is not the live table's own band (`.table__seats`): the sides are
+ * *flowed* rather than pinned to the edges of a fixed box. There is no felt in the middle
+ * to keep clear — that is the whole of what a scored round has room for that a live one
+ * does not — and six revealed hands are the tallest thing this client ever draws, so the
+ * seats have to be able to make the box taller and scroll inside it. Pinned sides could do
+ * neither: an absolutely positioned seat contributes no height to scroll through.
+ *
+ * A grid rather than three rows, so the doubled left zone and the single right one sit
+ * either side of the same space instead of stacking down it — and the sides centre
+ * themselves in whatever is left under the top zone, which is where they are on the live
+ * table too. At a table of two that is the difference between an opponent sitting across
+ * the felt and one stranded in a corner of a box sized for six.
+ */
+.round__seats {
+  /*
+   * The smallest cards in the client. Six hands are laid out at once and every one of them
+   * is read rather than tapped, so nothing here needs to be thumb-sized — and the `vh` term
+   * does the same job it does on the live table, where a doubled zone stacks up one edge.
+   */
+  --card-w: min(2rem, 8vw, 4.5vh);
+
   flex: 1;
   /* As on the lobby's seats: a flex item will not shrink below its content without this. */
   min-height: 0;
-  margin: 0;
-  padding: 0;
   overflow-y: auto;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.result {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  padding: 0.5rem 0.625rem;
-  border-radius: 0.5rem;
-  background: var(--surface);
-}
-
-.result__line {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  /*
+   * The sides share one row that takes whatever the top zone leaves. `1fr` still grows
+   * past that when six revealed hands need more, since a row never shrinks below its own
+   * content — which is what leaves the box something to scroll.
+   */
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "top top top"
+    "left . right";
   align-items: center;
   gap: 0.5rem;
+}
+
+.round__seats .table-zone--left {
+  grid-area: left;
+  justify-self: start;
+}
+
+.round__seats .table-zone--right {
+  grid-area: right;
+  justify-self: end;
+}
+
+.round__seats .table-zone--top {
+  grid-area: top;
+  justify-self: center;
+}
+
+/*
+ * A round's labels carry twice what a live seat's does — the marks, the delta and the hand
+ * value on top of a name and a score — so they are given the room rather than wrapping into
+ * a column of their own. Height is what this screen is short of, and a label is as wide as
+ * the seat it sits under: the `vw` cap is what keeps two of them side by side in the top
+ * zone on a narrow phone, where the fixed width alone would not.
+ */
+.round__seats .table-seat__label {
+  max-width: min(10rem, 44vw);
+}
+
+/*
+ * The viewer's own hand, at the bottom where they were holding it. Flat rather than
+ * cascaded and bigger than a seat's: it has the width of the screen to itself, so there is
+ * nothing for a cascade to save, and it is the hand its owner most wants to look at.
+ */
+.round__you {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.round__you .hand {
+  --card-w: min(2.75rem, 12vw);
+
+  flex-wrap: wrap;
+  padding-top: 0;
 }
 
 /* What this round cost them, kept apart from the total it made. */
@@ -945,25 +1268,20 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.result__hand {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.result__cards {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .result__value {
   color: var(--ink-dim);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A seat's label is smaller than the row at the bottom, and the numbers riding on it have
+ * to come down with it or they crowd the name off its own line.
+ */
+.table-seat__label .result__delta,
+.table-seat__label .result__value,
+.table-seat__label .player__score {
+  font-size: 0.7rem;
 }
 
 .round__actions {
@@ -972,13 +1290,13 @@ body {
   gap: 0.75rem;
 }
 
-/* A desktop has height to spare, so the scoreboard sits in it rather than stretching. */
+/* A desktop has height to spare, so the table sits in it rather than stretching down. */
 @media (min-width: 48rem) {
   .round {
     justify-content: center;
   }
 
-  .results {
+  .round__seats {
     flex: 0 1 auto;
   }
 }
