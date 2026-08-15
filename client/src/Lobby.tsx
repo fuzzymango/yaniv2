@@ -14,9 +14,9 @@
 
 import type { GameError, PlayerGameView, RoomSettings } from "@yaniv/shared";
 import { effectiveBotCount } from "@yaniv/shared";
-import { CloseRoom } from "./CloseRoom.tsx";
 import { SettingsEditor } from "./SettingsEditor.tsx";
 import { SettingsPanel, SettingsValues } from "./SettingsValues.tsx";
+import { WayOut } from "./WayOut.tsx";
 import { bySeat } from "./seating.ts";
 
 interface LobbyProps {
@@ -26,7 +26,7 @@ interface LobbyProps {
   onStart: () => void;
   onUpdateSettings: (settings: RoomSettings) => void;
   onExit: () => void;
-  /** End the room. The host's way out of this screen — see `CloseRoom.tsx`. */
+  /** End the room. The host's way out of this screen — see `WayOut.tsx`. */
   onCloseRoom: () => void;
 }
 
@@ -125,20 +125,8 @@ export function Lobby({
           <p className="hint">The host starts the match.</p>
         )}
 
-        {/*
-          The way out, and it is a different thing for the two of them: a guest frees their
-          own seat and the room plays on, while the host's leaving has always taken the
-          room with it (see CONTEXT.md). So the host is offered that as what it is, asking
-          first — the same control the in-match screens carry as an icon, since there is no
-          row of controls to put one in there.
-        */}
-        {isHost ? (
-          <CloseRoom variant="button" busy={busy} onClose={onCloseRoom} />
-        ) : (
-          <button className="button" type="button" onClick={onExit} disabled={busy}>
-            Leave the room
-          </button>
-        )}
+        {/* Closing it for the host, leaving it for everybody else — see `WayOut.tsx`. */}
+        <WayOut isHost={isHost} busy={busy} onExit={onExit} onCloseRoom={onCloseRoom} />
       </div>
 
       {error && (

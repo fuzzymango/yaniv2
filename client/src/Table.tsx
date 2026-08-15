@@ -19,10 +19,10 @@
 
 import type { GameError, PlayerGameView } from "@yaniv/shared";
 import { handValue } from "@yaniv/shared";
-import { CloseRoom } from "./CloseRoom.tsx";
 import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
 import { OpponentSeat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
+import { CloseRoomIcon } from "./WayOut.tsx";
 import { ZONES, bySeat, seatZones } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
@@ -39,7 +39,7 @@ interface TableProps {
   onCallYaniv: () => void;
   /** The tap on the pile that sheds the just-drawn card, while a window is open. */
   onSlapDown: () => void;
-  /** End the room. Offered to the host alone — see `CloseRoom.tsx`. */
+  /** End the room. Offered to the host alone — see `WayOut.tsx`. */
   onCloseRoom: () => void;
 }
 
@@ -97,7 +97,7 @@ export function Table({
         hand — and, for the host, the only thing that ends a room mid-round.
       */}
       <div className="topbar">
-        {isHost && <CloseRoom variant="icon" busy={busy} onClose={onCloseRoom} />}
+        {isHost && <CloseRoomIcon busy={busy} onClose={onCloseRoom} />}
         <SettingsDialog settings={view.settings} />
       </div>
 

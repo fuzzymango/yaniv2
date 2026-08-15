@@ -16,8 +16,8 @@
 
 import type { GameError, PlayerGameView } from "@yaniv/shared";
 import { standings } from "@yaniv/shared";
-import { CloseRoom } from "./CloseRoom.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
+import { WayOut } from "./WayOut.tsx";
 
 interface GameEndProps {
   view: PlayerGameView;
@@ -25,7 +25,7 @@ interface GameEndProps {
   busy: boolean;
   onPlayAgain: () => void;
   onExit: () => void;
-  /** End the room. The host's way out of this screen — see `CloseRoom.tsx`. */
+  /** End the room. The host's way out of this screen — see `WayOut.tsx`. */
   onCloseRoom: () => void;
 }
 
@@ -130,21 +130,8 @@ export function GameEnd({
           <p className="hint">The host deals another match.</p>
         )}
 
-        {/*
-          The way out, which is a different thing for the two of them and says so. A guest
-          frees their own seat and the standings stay up for whoever remains; the host's
-          leaving has always closed the room, so it is offered as what it is — asking
-          first, like the icon does on the screens with no row of controls to put this in.
-
-          The words are the lobby's, because both mean the same thing there as here.
-        */}
-        {isHost ? (
-          <CloseRoom variant="button" busy={busy} onClose={onCloseRoom} />
-        ) : (
-          <button className="button" type="button" onClick={onExit} disabled={busy}>
-            Leave the room
-          </button>
-        )}
+        {/* The lobby's two ways out, meaning the same thing here — see `WayOut.tsx`. */}
+        <WayOut isHost={isHost} busy={busy} onExit={onExit} onCloseRoom={onCloseRoom} />
       </div>
 
       {error && (

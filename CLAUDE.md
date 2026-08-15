@@ -122,7 +122,8 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `SettingsEditor.tsx` | The host's four controls, in the lobby and nowhere else. Offers exactly what `isValidSettings` accepts, and sends the whole object per change |
 | `SettingsValues.tsx` | The four values as text — the lobby for everyone but the host, and the in-match modal for everyone — plus the box (`SettingsPanel`) and title both lobby listings share |
 | `SettingsDialog.tsx` | The settings icon every in-match screen carries, and the modal behind it. The only place a setting is shown once the match is running. The bar it sits in belongs to the screen, since the host has a second icon in it |
-| `CloseRoom.tsx` | The host's way of ending a room, drawn as a topbar icon where there is no row of controls and as a button where there is. The one control in this client that asks before it acts |
+| `WayOut.tsx` | How a player gets out of a room: `CloseRoomIcon` for the host beside the settings, and `WayOut` — closing for the host, leaving for everyone else — where a screen has a row of controls. The one control in this client that asks before it acts |
+| `Modal.tsx` | The panel the settings and the close-room question are both asked behind — shared for the half nobody can see: announced as a dialog, and dismissed by backdrop, control and Escape |
 | `Resuming.tsx` | A seat being claimed back — the third screen with no view behind it, drawn where the main menu otherwise would be so a reload never flashes it |
 | `Disconnected.tsx` | No socket — the screen above every other. One screen for a connection that went and one that never arrived, since neither leaves anything to tap |
 | `PlayingCard.tsx` | One card, drawn in CSS. Presentational only — it does not know what a card means where it sits |
@@ -564,8 +565,7 @@ emptying by itself. The CLI needs those nudges only because its frames scroll ap
 
 **The client never enforces a rule the server owns.** Showing the start control — and the
 close-room control, on every screen a room has — to the host alone is a courtesy so a guest
-is not hunting for a button that was never theirs; the rule is `NOT_HOST`, and the server is
-what says it. Refusing an empty name locally is the
+is not hunting for a button that was never theirs; the rule is `NOT_HOST`, and the server says it. Refusing an empty name locally is the
 one exception, and only because the server enforces the same rule — it is the client
 declining to offer a move it knows will be refused, not a rule of its own.
 
@@ -583,9 +583,10 @@ page that cannot write anything down behaves exactly as the client did before it
 The credential is written down at the two ways in and nowhere else, since the ack of a
 seating event is the only place a token is ever sent; `joinRoom`'s names the seat but not
 the room, so the room is completed from what was sent — upper-cased as the server matched
-it, not as it was typed. It is forgotten in exactly three cases: the player's own
-`exitToMenu`, an incoming `roomClosed`, and a claim the server refuses. **A dropped
-connection is pointedly not one of them** — that is what it is kept for.
+it, not as it was typed. It is forgotten in exactly four cases: the player's own
+`exitToMenu`, the host's own `closeRoom`, an incoming `roomClosed`, and a claim the server
+refuses — four ways of learning there is no seat there any more. **A dropped connection is
+pointedly not one of them** — that is what it is kept for.
 
 A claim goes out on session creation (a stored seat, i.e. a cold boot) and on every
 reconnect, and **nothing is emitted into a socket that is down**: socket.io would buffer it,
@@ -628,11 +629,10 @@ buffered into a socket that has reached nothing is the same dead screen. Only th
 run of failed retries is news.
 
 **Nothing argues about the tab closing.** A `beforeunload` warning guarded a live round
-until issue #66, and went with it: it existed because a reload cost the player their place
-in a hand, and a reload now costs a round trip and a spinner. It would also be worse than
-nothing on a phone, since a page carrying that listener is held out of the back/forward
-cache — which is exactly how a backgrounded tab comes back without reloading at all. A
-player who cannot be resumed at all (storage off, or full) loses their place in silence.
+until issue #66 and went with it: a reload cost the player their place in a hand and now
+costs a round trip, and a page carrying that listener is held out of the back/forward cache
+— which is how a backgrounded tab comes back without reloading at all. The accepted cost is
+that a player who cannot be resumed (storage off, or full) loses their place in silence.
 
 ### Tooling
 

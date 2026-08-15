@@ -27,11 +27,11 @@ import type {
   PlayerRoundResultView,
   RoundResultView,
 } from "@yaniv/shared";
-import { CloseRoom } from "./CloseRoom.tsx";
-import { ZONE_CASCADE } from "./fan.ts";
 import { PlayingCard } from "./PlayingCard.tsx";
 import { CascadeReveal, Seat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
+import { CloseRoomIcon } from "./WayOut.tsx";
+import { ZONE_CASCADE } from "./fan.ts";
 import { ZONES, revealSeats } from "./seating.ts";
 
 interface RoundEndProps {
@@ -41,7 +41,7 @@ interface RoundEndProps {
   error: GameError | null;
   busy: boolean;
   onNextRound: () => void;
-  /** End the room. Offered to the host alone — see `CloseRoom.tsx`. */
+  /** End the room. Offered to the host alone — see `WayOut.tsx`. */
   onCloseRoom: () => void;
 }
 
@@ -116,7 +116,7 @@ export function RoundEnd({
     <main className="screen round">
       {/* The same corner on every in-match screen, so it is always in the same place. */}
       <div className="topbar">
-        {isHost && <CloseRoom variant="icon" busy={busy} onClose={onCloseRoom} />}
+        {isHost && <CloseRoomIcon busy={busy} onClose={onCloseRoom} />}
         <SettingsDialog settings={view.settings} />
       </div>
 

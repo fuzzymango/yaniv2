@@ -388,9 +388,10 @@ export function createSession(
   };
 
   /**
-   * Not seated any more. Exactly three things reach here: the player giving the seat up,
-   * the room closing under them, and a claim the server refuses. A dropped connection is
-   * pointedly not one of them — that is the case the seat is kept *for*.
+   * Not seated any more. Exactly four things reach here: the player giving the seat up, a
+   * host closing the room themselves, the room closing under them, and a claim the server
+   * refuses. A dropped connection is pointedly not one of them — that is the case the seat
+   * is kept *for*.
    */
   const forget = (): void => {
     seat = null;
