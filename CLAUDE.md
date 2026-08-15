@@ -436,8 +436,9 @@ the server never sends, so `slapdownEligible` *is* the answer.
 Opponents are drawn round three sides of the felt (`seatZones`), each a fan of face-down
 backs — one per card they are actually holding — under an upright label, in place of a row
 of text. The fan is the point: a hand shrinking is something to watch rather than a number
-to notice. Five decisions hold it up, all in `fan.ts` and `styles.css`, following the
-prototype's variant D verdict (issue #56) rather than re-deriving it:
+to notice. Six decisions hold it up, all in `fan.ts` and `styles.css` — five of them the
+prototype's variant D verdict (issue #56) rather than a re-derivation, and a sixth about
+what the felt had to do to make room for the lot:
 
 - **The fan turns and the label never does.** Rotating the cards says whose side of the
   table they are on; a name turned with them is read sideways by the only person looking.
@@ -445,22 +446,27 @@ prototype's variant D verdict (issue #56) rather than re-deriving it:
   drawn at), because a transform costs no layout space and the tips would otherwise be
   drawn across the label below — the rough edge the prototype left behind.
 - **About 37% of every fan is pushed off its own edge** (`FAN_HIDDEN`, `fanOverhang`): five
-  full fans do not fit round a phone's felt, and shrinking them to fit is what made the
-  prototype's small variant cramped — while cutting each back to its tips, the first attempt,
-  read as too little of a hand to watch (issue #58). Enough hidden to fit six on a phone and
-  no more, flat at every hand size and viewport: six on a narrow one sit close, verified
-  clear, and deliberately not scaled per count or width. The band is out of the column's
-  flow and pinned to the screen, or "off the edge" would mean off the edge of the padding.
-  One layout at every size: the cards scale, by height as well as width since a doubled
-  zone stacks up one edge.
+  full fans do not fit round a phone's felt, shrinking them to fit read as cramped, and
+  cutting each back to its tips left too little of a hand to watch (issue #58). Enough
+  hidden to fit six on a phone and no more, flat at every hand size and viewport rather
+  than scaled per count or width. The band is out of the column's flow and pinned to the
+  screen, or "off the edge" would mean off the edge of the padding; one layout at every
+  size, the cards scaling by height as well as width since a doubled zone stacks up an edge.
 - **Only the label is ringed on turn**, not the seat's box — which is mostly the space
   reserved for an arc turned inside it and hung off the edge, so a ring there reads as a
   box near a player rather than round them.
-- **The table's settings icon is pinned out of flow too** (`.table > .topbar`): `.table`
-  centres its column on a wide screen and the seats band does not move with it, so an icon
-  left in the column drifts to mid-screen while the band stays at the top. Scoped to the
-  table — `RoundEnd`/`GameEnd` have no band to be centred out from under, and keep theirs
-  in the column.
+- **The table's settings icon is pinned out of flow too** (`.table > .topbar`), since the
+  band covers the top of the screen the column's first row would sit in: it belongs to the
+  table's corner, above the band. `RoundEnd`/`GameEnd` have no band and keep theirs in flow.
+- **The felt gave way to the seats** (issue #59, `.felt`): the deck stacks above the discard
+  and the pair is pinned against the hand, not centred in a height the seats are out of the
+  flow of and float up into — and side by side at the card size the ticket keeps, the two of
+  them are wider than a 320px phone. `.turn` reserves two lines for the same reason: the
+  pair sits on it, and a message that wraps on one turn and not the next would walk it up
+  and down between moves. The one crossing left — a wide discard against a doubled zone's
+  label, six on a short screen — goes to the cards, the felt being lifted over the band,
+  since a label over a tap target reads as one out of play. The table's old desktop rule
+  went the same way: centring its column carries the hand and the felt up, the seats do not.
 
 ### Settings are edited in one place and shown in another
 
@@ -647,15 +653,13 @@ Split, `shared/src` importing a Node builtin is a typecheck error.
 Not oversights — deferred on purpose, in this order of likely next work:
 
 - **Reconnect.** A dropped connection ends its room, full stop (see "Room lifecycle").
-  `Player` has no `connected` field at all — deliberately absent rather than
-  half-built. When reconnect lands, expect a lobby-phase case (easy: drop the player,
-  promote host if needed) and a mid-round case (harder: currently undecided — pausing
-  on their turn vs. a timer vs. removal are all live options).
+  `Player` has no `connected` field at all — deliberately absent rather than half-built.
+  Expect a lobby-phase case (easy: drop the player, promote host if needed) and a mid-round
+  case (harder, and undecided — pausing on their turn vs. a timer vs. removal are all live).
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
   spot, so anyone who has not joined by then is playing the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four
-  (docs/adr/0006) and the CLI has no control that does, so a room created from `play` plays
-  with the defaults unless a browser host changes them.
+  (docs/adr/0006) and the CLI has none, so a room created from `play` plays the defaults.
 - **Persistence.** Rooms are in-memory only, so a redeploy drops every match in progress —
   same as a restart, and the reason splitting client and server into two services (giving
   up same-origin, ADR-0003) would be the fix if that cost ever matters.
@@ -664,13 +668,11 @@ Not oversights — deferred on purpose, in this order of likely next work:
   it. Deploying first went ahead anyway (Railway, one service, ADR-0003), so that gap is
   live: solo play against bots is unaffected, inviting other humans is not yet safe.
 - **Slapdown against a bot.** Both clients offer it, but bots neither slap down for
-  themselves nor can be raced by a human, since `playBotTurns` runs in the same tick. Both
-  deliberate, per ADR-0005 — a human needs another human behind them.
+  themselves nor can be raced by a human, `playBotTurns` running in the same tick — both
+  deliberate, per ADR-0005: a human needs another human behind them.
 - **Disambiguating a joker that extends a run.** The browser sends the selection in tap
   order, so tap order decides where the joker sits (`docs/rules.md` §4) — invisible on the
   screen. A deliberate wart: a step asking which end they meant is deferred.
-- **The deck and the discard where the seats now leave them.** Issue #59 stacks and pins
-  them above the hand; until it lands they float in the middle and overlap a seat's label.
 
 ## Running things
 

@@ -588,6 +588,14 @@ body {
 /*
  * Pinned to the viewport, like the lobby: the hand has to sit at the bottom where a thumb
  * is, and a page that grew with a long discard would push it off the screen.
+ *
+ * The `justify-content` is doing work and is the one screen-level rule with no desktop
+ * counterpart: it overrides the centring `.screen` takes on at 48rem, so the table alone
+ * stays stretched down a monitor. Centring it would carry the hand and the felt up the
+ * screen while the seats stayed where they are — they are pinned to the viewport, not
+ * carried in the column (`.table__seats`) — leaving the table adrift from the players
+ * sitting round it, and a band of unused felt under the hand. It had that rule until the
+ * restack pinned the felt to the hand (issue #59) and the two stopped agreeing.
  */
 .table {
   --card-w: min(3.5rem, 15vw);
@@ -608,21 +616,21 @@ body {
  * The settings icon, pinned to the corner of the table itself rather than riding the top
  * of the column.
  *
- * On a wide screen `.table` centres its column vertically (below), and a column shorter
- * than the viewport therefore carries the icon down into the middle of the screen with it
- * — while the seats band, out of that flow, stays at the true top. An icon adrift among
- * the cards is the result. Out of flow like the band, it is in the corner at every width.
+ * The band covers the top of the screen (`.table__seats`), which is where the column's
+ * first row would otherwise sit — so the icon belongs to the table's own corner, at the
+ * screen's edge like a seat is, rather than inset by the padding that keeps the column's
+ * text off it. Out of flow like the band, it is in the same corner at every width.
  *
- * Above the band (`z-index`), because the band is drawn after it and would otherwise take
- * the corner. Scoped to the table: the scored round and the finished match carry the same
- * icon in the same column and have no overlay to be centred out from under, so theirs is
- * where it has always been.
+ * Above both of the things drawn over the table (`z-index`): the band, which is drawn after
+ * it, and the felt, whose own box reaches up into this corner even though nothing is drawn
+ * there — an icon under it would go dead in the overlap. Scoped to the table: the scored
+ * round and the finished match have no band over their column, so theirs stays in it.
  */
 .table > .topbar {
   position: absolute;
   top: 0;
   right: 0;
-  z-index: 1;
+  z-index: 2;
 }
 
 /*
@@ -830,22 +838,37 @@ body {
 }
 
 /*
- * The deck and the discard, floating in whatever height is left above the hand — which
- * the seats no longer take any of, being out of the column's flow, so they float higher
- * than they did and can meet a seat's label. Issue #59 pins them just above the hand.
+ * The deck above the discard, and the pair pushed down against the hand rather than
+ * centred in the height above it.
  *
- * It wraps, and that is the whole answer to sizing: a card is `--tap` wide or wider on
- * every screen, which for a five-card discard beside the deck is more than a 320px phone
- * has across — so on the rare hand that produces one, the discard drops to its own line
- * rather than every card on the table shrinking under a finger to accommodate it.
+ * Both halves of that are the same fix (issue #59). The seats are out of the column's
+ * flow and take a band off the top of the screen (`.table__seats`), so a felt centred in
+ * "whatever is left" is centred in a space the seats are still sitting in — it floats up
+ * into their labels on a tall screen and is squeezed by them on a short one. Pinned to the
+ * bottom of that space it is a fixed distance above the hand at every height instead, and
+ * the two stop competing for the same room by construction. Stacking is what makes the
+ * pinned position fit: side by side, the deck plus a five-card discard is wider than a
+ * 320px phone, and a column has the width for both at full size.
+ *
+ * Card size is deliberately untouched (issue #59): the deck and the discard's ends are
+ * primary tap targets, and reclaiming height by shrinking them would put a finger back
+ * over two cards at once.
+ *
+ * Lifted over the seats' band, which is positioned and drawn after it and so would take
+ * every crossing by default. There is one left — six seated round a short screen, where a
+ * wide discard reaches a doubled zone's lower label — and what happens where they meet is
+ * a choice: a label over a card dims a tap target and makes it look out of play, while a
+ * card over the tail of a name is two things overlapping on a table, which is what they
+ * are. Nothing is drawn in the rest of this box, so lifting it hides nothing else.
  */
 .felt {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex: 1;
-  flex-wrap: wrap;
-  align-content: center;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   gap: 0.5rem;
   min-height: 0;
 }
@@ -985,10 +1008,19 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * Whose move it is, in words. Two lines' worth of room whether or not two are used: the
+ * felt above is pinned to the top of this line, so a message that wraps on one turn and not
+ * on the next would walk the deck and the discard up and down the screen between moves —
+ * and standing still is the whole of what pinning them was for. Two lines is as tall as it
+ * gets, the longest of the three messages still wrapping to two on a 320px phone.
+ */
 .turn {
+  min-height: 2.6em;
   margin: 0;
   color: var(--ink-dim);
   font-size: 0.95rem;
+  line-height: 1.3;
   text-align: center;
 }
 
@@ -1042,21 +1074,6 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .call--live {
     animation: none;
-  }
-}
-
-/*
- * A desktop has height to spare, so the table sits in the middle of it rather than being
- * stretched down it.
- */
-@media (min-width: 48rem) {
-  .table {
-    justify-content: center;
-  }
-
-  .felt {
-    flex: 0 1 auto;
-    padding: 2rem 0;
   }
 }
 
