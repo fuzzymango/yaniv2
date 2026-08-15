@@ -20,7 +20,7 @@ import {
   takeTurn,
   updateSettings,
 } from "./game.ts";
-import { err } from "./result.ts";
+import { err, ok, type Result } from "./result.ts";
 import type { RoomManager } from "./roomManager.ts";
 import type { Rng } from "./rng.ts";
 import { serializeStateForPlayer } from "./serialize.ts";
@@ -28,9 +28,10 @@ import type { ActionResult, GameState } from "./state.ts";
 import { getPlayer } from "./state.ts";
 
 /**
- * Who a connection is. Set once, when the connection creates or joins a room, and read
- * by every handler thereafter — a client-supplied player id is never trusted, or a socket
- * could act as any player simply by saying so.
+ * Who a connection is. Set once, when the connection creates, joins or resumes a seat in
+ * a room, and read by every handler thereafter — a client-supplied player id is never
+ * trusted, or a socket could act as any player simply by saying so. `resumeSeat` is no
+ * exception: what it trusts is the token presented alongside the id, not the id.
  *
  * Stored as one optional object rather than two optional fields so a half-bound
  * connection (a room without a player, or the reverse) is unrepresentable.
@@ -81,12 +82,24 @@ export function createSocketServer(
     const state = rooms.getState(roomCode);
     if (!state) return;
 
-    for (const socketId of io.sockets.adapter.rooms.get(roomCode) ?? []) {
-      const socket = io.sockets.sockets.get(socketId);
-      const playerId = socket?.data.session?.playerId;
-      if (!socket || !playerId) continue;
-      socket.emit("gameStateUpdate", serializeStateForPlayer(state, playerId));
+    for (const member of membersOf(roomCode)) {
+      const playerId = member.data.session?.playerId;
+      if (!playerId) continue;
+      member.emit("gameStateUpdate", serializeStateForPlayer(state, playerId));
     }
+  }
+
+  /**
+   * Every live connection in a room, as a snapshot.
+   *
+   * Copied out of the adapter's own set rather than walked in place: releasing a member,
+   * or disconnecting one, mutates the very set the walk is reading. Callers that only
+   * read still take the copy, so no walk here has to be checked against what it does.
+   */
+  function membersOf(roomCode: string): YanivSocket[] {
+    return [...(io.sockets.adapter.rooms.get(roomCode) ?? [])]
+      .map((socketId) => io.sockets.sockets.get(socketId))
+      .filter((member): member is YanivSocket => member !== undefined);
   }
 
   /**
@@ -128,10 +141,7 @@ export function createSocketServer(
    * answering. The closer hears it as their own ack instead.
    */
   function closeRoom(roomCode: string, reason: string, closer: YanivSocket): void {
-    // Copied first: `release` mutates the very membership set being walked.
-    for (const socketId of [...(io.sockets.adapter.rooms.get(roomCode) ?? [])]) {
-      const member = io.sockets.sockets.get(socketId);
-      if (!member) continue;
+    for (const member of membersOf(roomCode)) {
       if (member.id !== closer.id) member.emit("roomClosed", reason);
       release(member, roomCode);
     }
@@ -141,6 +151,22 @@ export function createSocketServer(
   io.on("connection", (socket) => {
     const alreadySeated = () =>
       err("ALREADY_IN_ROOM", "This connection is already in a room");
+
+    /**
+     * The caller's session and the room behind it, or the rejection to ack instead.
+     *
+     * Shared by the two handlers that are not `act`-shaped — leaving and closing —
+     * because both need the room itself to decide what to do, rather than a transition
+     * to apply to it.
+     */
+    function currentRoom(): Result<{ session: Session; state: GameState }> {
+      const session = socket.data.session;
+      if (!session) return err("PLAYER_NOT_FOUND", "This connection is not in a room");
+
+      const state = rooms.getState(session.roomCode);
+      if (!state) return err("ROOM_NOT_FOUND", `No room with code ${session.roomCode}`);
+      return ok({ session, state });
+    }
 
     socket.on("createRoom", async (playerName, ack) => {
       if (socket.data.session) {
@@ -156,7 +182,7 @@ export function createSocketServer(
 
       // Destructured deliberately: `createRoom` also hands back the full `GameState`,
       // which must never cross this boundary. See serialize.ts.
-      const { roomCode, playerId } = created.value;
+      const { roomCode, playerId, resumeToken } = created.value;
       socket.data.session = { playerId, roomCode };
 
       // Socket.io's own room concept maps 1:1 onto a game's room code, so broadcasts to
@@ -176,7 +202,7 @@ export function createSocketServer(
        * lobby — the harness does — subscribes before it emits, and gets it.
        */
       broadcastState(roomCode);
-      ack({ ok: true, value: { roomCode, playerId } });
+      ack({ ok: true, value: { roomCode, playerId, resumeToken } });
     });
 
     socket.on("joinRoom", async (roomCode, playerName, ack) => {
@@ -191,7 +217,7 @@ export function createSocketServer(
         return;
       }
 
-      const { playerId, state } = joined.value;
+      const { playerId, resumeToken, state } = joined.value;
       socket.data.session = { playerId, roomCode };
       await socket.join(roomCode);
 
@@ -205,7 +231,59 @@ export function createSocketServer(
       // ack for the same reason as in `createRoom`.
       broadcastState(roomCode);
 
-      ack({ ok: true, value: { playerId } });
+      ack({ ok: true, value: { playerId, resumeToken } });
+    });
+
+    /**
+     * Take back a seat that already exists. The credential is the whole of the check:
+     * a player id is public — it names opponents in every view — so presenting one
+     * proves nothing, and the token is what says this connection is entitled to the
+     * seat behind it.
+     *
+     * A room that has gone is said so plainly, since `joinRoom` already answers that
+     * question for any code and there is nothing left to withhold. What is inside one is
+     * a different matter: a wrong token and a player the room never held share a single
+     * code, or a room code would become a way of fishing for the seats behind it.
+     *
+     * The position goes back in the ack alone. Nothing is broadcast, because nothing
+     * about the table has changed — a resume is invisible to everyone else, who are
+     * never told who is connected in the first place.
+     */
+    socket.on("resumeSeat", async (request, ack) => {
+      if (socket.data.session) {
+        ack(alreadySeated());
+        return;
+      }
+
+      const { roomCode, playerId, resumeToken } = request;
+      const state = rooms.getState(roomCode);
+      if (!state) {
+        ack(err("ROOM_NOT_FOUND", `No room with code ${roomCode}`));
+        return;
+      }
+
+      const player = getPlayer(state, playerId);
+      if (!player || player.resumeToken !== resumeToken) {
+        ack(err("INVALID_RESUME_TOKEN", "That seat cannot be resumed"));
+        return;
+      }
+
+      /*
+       * One live connection per seat, and the newer one wins. A second tab is not
+       * co-presence: two connections acting as one player would each be shown a table
+       * the other could move out from under it. Dropped rather than merely unbound, so
+       * the device it belongs to finds out — an unbound socket would sit there looking
+       * connected and refusing every tap.
+       */
+      for (const member of membersOf(roomCode)) {
+        if (member.id === socket.id) continue;
+        if (member.data.session?.playerId === playerId) member.disconnect();
+      }
+
+      socket.data.session = { playerId, roomCode };
+      await socket.join(roomCode);
+
+      ack({ ok: true, value: { view: serializeStateForPlayer(state, playerId) } });
     });
 
     /**
@@ -313,17 +391,13 @@ export function createSocketServer(
      * for why the two phases this is allowed from behave identically.
      */
     socket.on("exitToMenu", (ack) => {
-      const session = socket.data.session;
-      if (!session) {
-        ack(err("PLAYER_NOT_FOUND", "This connection is not in a room"));
+      const current = currentRoom();
+      if (!current.ok) {
+        ack({ ok: false, error: current.error });
         return;
       }
 
-      const state = rooms.getState(session.roomCode);
-      if (!state) {
-        ack(err("ROOM_NOT_FOUND", `No room with code ${session.roomCode}`));
-        return;
-      }
+      const { session, state } = current.value;
       if (session.playerId === state.hostId) {
         /*
          * The host's leave is put to the same transition as everyone else's — it owns
@@ -363,17 +437,45 @@ export function createSocketServer(
     });
 
     /**
-     * A dropped connection ends the room it belonged to. This is one-directional
-     * cleanup, not reconnect support: with no way for a player to resume a session,
-     * a room whose player is gone can never be played again, so keeping it would only
-     * leak memory. Deliberately unconditional — see the room lifecycle notes in
-     * CLAUDE.md for why reconnect is out of scope.
+     * End the room for everyone, from any phase. The host's alone, and the only thing
+     * that closes a room other than the game's own rules — a dropped connection no
+     * longer does, so without this a table nobody wants to keep playing would have
+     * nothing to end it.
+     *
+     * Not gated on the phase, unlike `exitToMenu`: a seat that has gone quiet mid-round
+     * is exactly the table a host needs to be able to abandon, and there is no hand or
+     * turn order left to protect once the room itself is going. Not `act`-shaped for the
+     * same reason `exitToMenu` is not — "the room must be destroyed" is not a `GameState`
+     * any transition could return.
      */
-    socket.on("disconnect", () => {
-      const session = socket.data.session;
-      if (!session) return;
-      rooms.removeRoom(session.roomCode);
+    socket.on("closeRoom", (ack) => {
+      const current = currentRoom();
+      if (!current.ok) {
+        ack({ ok: false, error: current.error });
+        return;
+      }
+
+      const { session, state } = current.value;
+      if (session.playerId !== state.hostId) {
+        ack(err("NOT_HOST", "Only the host can close the room"));
+        return;
+      }
+
+      closeRoom(session.roomCode, "the host closed the room", socket);
+      ack({ ok: true, value: null });
     });
+
+    /*
+     * There is deliberately no `disconnect` handler. A dropped connection costs the room
+     * nothing: the seat, the player and the room are left exactly as they were, and the
+     * player behind them comes back through `resumeSeat`. Backgrounding a phone's browser
+     * tab drops a socket with no chance to react, and that must not end five other
+     * people's match.
+     *
+     * The cost is a room nobody ever comes back to, and nobody closes, living until the
+     * server restarts — an accepted leak for this pass, of the same shape as rooms being
+     * in memory at all. See CLAUDE.md.
+     */
   });
 
   return io;

@@ -272,9 +272,9 @@ round-end reveal seats off `result.players` rather than `turnOrder`.
 ### Player identity
 
 `Player.id` is a **server-issued stable id**, generated at `RoomManager.createRoom` /
-`joinRoom`, never a socket id: the domain model has zero transport awareness, which is what
-keeps the Socket.io layer thin. (The original sketch used `socket.id` directly; that would
-make reconnect support a retrofit touching every fixture.)
+`joinRoom`, never a socket id: the domain model has zero transport awareness, which keeps
+the Socket.io layer thin — and is what let `resumeSeat` rebind a seat to a second socket
+without touching a fixture, where the original sketch's `socket.id` would have been a retrofit.
 
 The socket layer bridges the two with a **session bound to the connection**: on a successful
 `createRoom`/`joinRoom`, `socket.data.session = { playerId, roomCode }`, and every later
@@ -282,18 +282,19 @@ handler reads identity from there. A client-supplied player id is **never** trus
 socket could otherwise act as any player just by saying so. The session is one optional
 object rather than two optional fields, so a half-bound connection is unrepresentable.
 
-A connection binds **once**. A second `createRoom`/`joinRoom` on an already-bound socket is
-rejected with `ALREADY_IN_ROOM` (the one error code that exists purely because there is a
-transport). Silently rebinding would orphan the first player — seated in a room with no
-connection able to act for them, and unrecoverable while reconnect is out of scope.
+A connection binds **once**. A second `createRoom`/`joinRoom`/`resumeSeat` on an
+already-bound socket is rejected with `ALREADY_IN_ROOM` (the one error code that exists
+purely because there is a transport). Silently rebinding would orphan the first player —
+seated in a room with no connection able to act for them.
 
 Beside the id, every seat is issued a **`Player.resumeToken`** at creation
 (`createRoom`/`joinRoom`/bot seating): a CSPRNG secret behind an injectable
 `newResumeToken`, exactly as `newPlayerId` is, fixed for the life of the room — hence
 `updatePlayer` cannot patch it, and no transition may reissue one (asserted over every
-state a match passes through). It is what reconnect will authenticate with, and **nothing
-consumes it yet**, so it reaches no client at all: treat it as a hidden hand is treated —
-never in a view, in any phase, mutation-tested at the serializer and the wire.
+state a match passes through). It is the credential a seat is resumed with, and is
+treated as a hidden hand is: **never in a view, in any phase**, mutation-tested at the
+serializer and the wire. It reaches its owner in exactly one place — the ack of the event
+that seated them — and `resumeSeat` deliberately does not send it back a second time.
 
 ### Room lifecycle
 
@@ -325,18 +326,27 @@ The socket handler folds it into the `startGame` transition passed to `apply`, s
 that is then rejected (by someone who is not the host, say) discards the seating along with
 everything else, rather than filling a table off the back of a refused call.
 
-**A disconnect removes the room outright**, unconditionally, for whichever connection
-drops. This is one-directional cleanup, not the start of reconnect support: with no way to
-resume a session, a room whose player has gone can never be played again, so keeping it
-only leaks memory. One human dropping out therefore takes everyone else's match down with
-them — known, and belonging with reconnect rather than bolted onto the join flow.
+**A disconnect costs the room nothing** — there is deliberately no `disconnect` handler.
+The seat, the player and the room are left as they were, and whoever dropped comes back
+through **`resumeSeat({ roomCode, playerId, resumeToken })`**: session rebound, room
+rejoined, the current position answered in the ack alone and broadcast to nobody, since
+nothing about the table changed and the rest of it is never told who is connected. The
+token is the whole of the check — a player id is public enough to appear in every
+opponent's view — and a wrong token and an unknown player share `INVALID_RESUME_TOKEN`, or
+a room code would be a way of fishing for the seats behind it. One live connection per
+seat: a resume disconnects whatever socket still held it, so two tabs cannot disagree about
+a table both think they are at.
 
 ### Leaving a room without dropping the connection
 
-`exitToMenu` is the one exit that is not a disconnect, and `playAgain` is the one way out of
-`gameEnd` other than closing the room. Both are allowed only where the table is not mid-round
-— the lobby and `gameEnd` — for the same reason mid-match leaving is out of scope: a hand and
-a turn order the round is still being played against.
+`exitToMenu` gives up a seat for good, and `playAgain` is the one way out of `gameEnd` other
+than closing the room; both are allowed only where the table is not mid-round — the lobby
+and `gameEnd` — for the same reason mid-match leaving is out of scope: a hand and a turn
+order the round is still being played against. **`closeRoom` is the exception, and the
+host's alone**: it works in every phase, because a table gone quiet mid-round is exactly the
+one a host needs to abandon and no hand is left to protect once the room itself is going.
+Everyone else is told `roomClosed`, the closer hears their own ack, `NOT_HOST` answers
+anyone else.
 
 Who invokes `exitToMenu` decides what it costs everyone else, and the caller does not get to
 choose: **a non-host frees only their own seat** (the room plays on for whoever remains, told
@@ -345,14 +355,13 @@ by `playerLeft` and then handed the shrunk roster), while **the host closes the 
 phases, deliberately: "a non-host leaving a finished match ends it, since the match is over
 anyway" was the plausible drift, and one rule for both was chosen.
 
-The split across layers mirrors bot seating. `removePlayer` in `game.ts` is a pure
-transition that filters a player out; "the room must be destroyed" is not a `GameState` it
-could return, so that branch lives in `socketServer.ts`, where rooms and connections are
-owned — which is also why the `exitToMenu` handler is not `act()`-shaped. Leaving also
-**clears `socket.data.session` and calls `socket.leave(roomCode)`**: clearing the session is
-what stops `ALREADY_IN_ROOM` meaning "for the life of this connection", since a sessionless
-socket is indistinguishable from a fresh one, and leaving the Socket.io room keeps it out of
-the next broadcast.
+Neither exit is `act()`-shaped, and the split across layers mirrors bot seating.
+`removePlayer` in `game.ts` is a pure transition that filters a player out; "the room must be
+destroyed" is not a `GameState` it could return, so that branch lives in `socketServer.ts`,
+where rooms and connections are owned. Both **clear `socket.data.session` and call
+`socket.leave(roomCode)`**: clearing the session is what stops `ALREADY_IN_ROOM` meaning "for
+the life of this connection", since a sessionless socket is indistinguishable from a fresh
+one, and leaving the Socket.io room keeps it out of the next broadcast.
 
 **`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a table
 that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS` rather than quietly refilled.
@@ -418,63 +427,15 @@ off that pile out of turn is a move the server would refuse anyway. It is also t
 question in that module the rulebook cannot answer — a window is about a card off a pile
 the server never sends, so `slapdownEligible` *is* the answer.
 
-### The table is seated, and part of every seat is off the screen
+### The table is seated, and the scored round is the same table
 
-Opponents are drawn round three sides of the felt (`seatZones`), each a fan of face-down
-backs — one per card they are actually holding — under an upright label, in place of a row
-of text. The fan is the point: a hand shrinking is something to watch rather than a number
-to notice. Six decisions hold it up, in `fan.ts` and `styles.css` — five the prototype's
-variant D verdict (issue #56) rather than a re-derivation, and a sixth about what the felt
-had to give up to make room for the lot:
-
-- **The fan turns and the label never does.** Rotating the cards says whose side of the
-  table they are on; a name turned with them is read sideways by the only person looking.
-- **A seat reserves the box its arc needs** (`fanFootprint`, off the angles the cards are
-  drawn at), because a transform costs no layout space and the tips would otherwise be
-  drawn across the label below — the rough edge the prototype left behind.
-- **About 37% of every fan is pushed off its own edge** (`FAN_HIDDEN`, `fanOverhang`): five
-  full fans do not fit round a phone's felt, shrinking them to fit read as cramped, and
-  cutting each back to its tips left too little of a hand to watch (issue #58). Enough hidden
-  to fit six on a phone and no more, flat at every hand size and viewport rather than scaled
-  per count or width. The band is out of the column's flow and pinned to the screen, or "off
-  the edge" would mean off the edge of the padding; the cards scale by height as well as
-  width, since a doubled zone stacks up an edge.
-- **Only the label is ringed on turn**, not the seat's box — which is mostly the space
-  reserved for an arc turned inside it and hung off the edge, so a ring there reads as a box
-  near a player rather than round them.
-- **The table's settings icon is pinned out of flow too** (`.table > .topbar`), since the
-  band covers the top of the screen the column's first row would sit in: it belongs to the
-  table's corner, above the band. `RoundEnd`/`GameEnd` have no band and keep theirs in flow.
-- **The felt gave way to the seats** (issue #59, `.felt`): the deck stacks above the discard
-  and the pair is pinned against the hand, not centred in a height the seats are out of the
-  flow of and float up into — and side by side at the card size the ticket keeps, the two of
-  them are wider than a 320px phone. `.turn` reserves two lines for the same reason: the pair
-  sits on it, and a message that wraps on one turn and not the next would walk it up and down
-  between moves. The one crossing left — a wide discard against a doubled zone's label, six
-  on a short screen — goes to the cards, the felt being lifted over the band, since a label
-  over a tap target reads as one out of play. The table's old desktop rule went the same way:
-  centring its column carries the hand and the felt up, the seats do not.
-
-### The scored round is the same table, read rather than watched
-
-`RoundEnd` seats those same three sides — `revealSeats`, off `result.players` and never
-`bySeat`, since a player who has given up their seat is in no `turnOrder` to be sorted
-against — with the viewer's own hand flat along the bottom where they were holding it, and
-the round's numbers riding on each seat's label rather than in a list of their own, so one
-player reads in one place. Three things separate it from live play (issues #56, #60):
-
-- **The arc becomes a straight cascade** (`cascadeOffset`, `cascadeFootprint`), along the
-  zone's own axis (`ZONE_CASCADE`) so a doubled zone does not collide with itself: an arc
-  overlaps faces at an angle, which is what makes checking a call against five hands hard.
-  Nothing rotates either — a rotation says whose hand it is by making it unreadable, a fair
-  trade for a fan of backs and none at all for a hand being added up.
-- **A cascaded card wears its index on the edge the next card leaves showing**
-  (`.cascade--*`, `CARD_INDEX_STRIP`, which `CASCADE_STEP` is chosen to clear). A face carries its
-  rank in the middle, which under another card is blank card — why real cards have corners.
-- **The sides are flowed into a grid, not pinned to a band** (`.round__seats`): no felt to
-  keep clear, and a pinned seat contributes no height for six revealed hands to scroll
-  through, which on a short phone they still must — as the flat list they replace did.
-  `GameEnd` is untouched: `standings` carries no hands, so it stays a plain scoreboard.
+Opponents are drawn round three sides of the felt (`seatZones`): fans of face-down backs
+under upright labels while the round is played, the same seats cascaded face up once it is
+scored, with each player's numbers on their own label. A hand shrinking is something to
+watch, and a scored one something to read — which is why the two shapes differ. Every
+decision behind the geometry, and what the felt gave up to make room for the seats, is in
+`docs/client-table.md` (issues #56, #58, #59, #60); `fan.ts`, `seating.ts` and `Seat.tsx`
+are where it lives.
 
 ### Settings are edited in one place and shown in another
 
@@ -612,13 +573,13 @@ every screen a lie, whatever the last position drawn still shows, so `App` rende
 what is emitted before then, and a page that announced a lost connection for the first
 moment of every load would be crying wolf.
 
-**A drop takes its room with it, and the session says so once there is a screen to say it
-on.** `disconnect` resets the pacer, drops the watermark and releases `busy` — nothing is in
-flight over a socket that is not there — but leaves the view alone, since the disconnected
-screen is over it anyway. The *reconnect* clears it: the socket comes back with an identity
-the server has never heard of, and the room died with the old one (ADR-0004), so the honest
-place for the player is the main menu with a `notice` saying where the table went. A drop at
-the menu costs nothing and says nothing.
+**A drop leaves the player on the disconnected screen, and the session says why once there
+is a screen to say it on.** `disconnect` resets the pacer, drops the watermark and releases
+`busy` — nothing is in flight over a socket that is not there — but leaves the view alone,
+since that screen is over it anyway. The *reconnect* clears it, landing the player on the
+main menu with a `notice`: the socket comes back with an identity the server has never heard
+of. It should now present a `resumeSeat` instead — the client has not caught up (issue #65).
+A drop at the menu costs nothing and says nothing.
 
 **A connection that never arrived is the same screen.** `connect_error` is treated the way
 `disconnect` is, because the two are indistinguishable to whoever is looking at them: taps
@@ -626,11 +587,12 @@ buffered into a socket that has reached nothing is the same dead screen. Only th
 run of failed retries is news.
 
 **The `beforeunload` warning is registered while a round is live and not otherwise**
-(`unload.ts`). A reload drops the socket and so destroys the room for everyone in it, worth
-an argument at `playing` and `roundEnd` and not worth one at the main menu, the lobby or a
-finished match, where a control on the screen already does exactly that. `connected` is part
-of the same question: a dropped connection's room was destroyed when it dropped, so arguing
-over the tab is arguing over a match already lost. It is added and removed rather than left
+(`unload.ts`). A reload drops the socket, and while the browser cannot yet resume a seat
+(issue #65) that costs the player their place in a hand being played — worth an argument at
+`playing` and `roundEnd`, and not worth one at the main menu, the lobby or a finished match,
+where a control on the screen already does exactly that. `connected` is part of the same
+question: a connection already gone has already cost them whatever it was going to cost, so
+arguing over the tab argues over nothing. It is added and removed rather than left
 listening, because a page with a `beforeunload` listener is held out of the back/forward
 cache either way. The target is injected, so `main.tsx` is the only place that hands a
 global over; whether the warning appears at all is the browser's call.
@@ -658,21 +620,21 @@ Split, `shared/src` importing a Node builtin is a typecheck error.
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **Reconnect.** Underway (issue #62); only the credential has landed, so a dropped
-  connection still ends its room, full stop (see "Room lifecycle" and "Player identity").
-  `Player` has no `connected` field — deliberately absent rather than half-built. Still
-  open: what a mid-round seat does while its player is gone (pause vs. timer vs. removal).
+- **Reconnect, on the client.** The server half has landed (issue #64): rooms survive a
+  drop and `resumeSeat` rebinds. The browser still treats a reconnect as a dead room
+  (issue #65), so a backgrounded mobile tab cannot yet come back to its own seat — though
+  it no longer ends anyone else's match, which is the gap deploying ahead of reconnect
+  (ADR-0004) left live. `Player` has no `connected` field, deliberately absent rather than
+  half-built. Still open: what a mid-round seat does while its player is gone.
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
   spot, so anyone who has not joined by then is playing the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four
   (docs/adr/0006) and the CLI has none, so a room created from `play` plays the defaults.
-- **Persistence.** Rooms are in-memory only, so a redeploy drops every match in progress —
-  same as a restart, and the reason splitting client and server into two services (giving
-  up same-origin, ADR-0003) would be the fix if that cost ever matters.
-- **Deployment happened ahead of reconnect.** ADR-0004 orders client, reconnect, deploy,
-  because a backgrounded mobile tab drops its socket and so ends the room for everyone in
-  it. Deploying first went ahead anyway (Railway, one service, ADR-0003), so that gap is
-  live: solo play against bots is unaffected, inviting other humans is not yet safe.
+- **Persistence, and sweeping abandoned rooms.** Rooms are in-memory only, so a redeploy
+  drops every match in progress — same as a restart, and the reason splitting client and
+  server into two services (giving up same-origin, ADR-0003) would be the fix if that cost
+  ever matters. A room nobody resumes and no host closes now leaks until then, on the same
+  accepted terms: no idle sweep is built.
 - **Slapdown against a bot.** Both clients offer it, but bots neither slap down for
   themselves nor can be raced by a human, `playBotTurns` running in the same tick — both
   deliberate per ADR-0005: a human needs another human behind them.

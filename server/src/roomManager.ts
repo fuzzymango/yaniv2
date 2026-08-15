@@ -107,9 +107,21 @@ export class RoomManager {
     throw new Error("Unable to allocate an unused room code");
   }
 
+  /**
+   * A newly seated player, as the transport needs them: who they are, the credential
+   * that lets them come back to the seat, and the room they are now in.
+   *
+   * The token is handed back from here rather than dug out of `state` by the caller,
+   * so the one place it is issued is also the one place it is given away.
+   */
   createRoom(
     hostName: string,
-  ): Result<{ roomCode: string; playerId: string; state: GameState }> {
+  ): Result<{
+    roomCode: string;
+    playerId: string;
+    resumeToken: string;
+    state: GameState;
+  }> {
     const name = normalizeName(hostName);
     if (name === null) {
       return err("INVALID_NAME", `Name must be 1-${MAX_NAME_LENGTH} characters`);
@@ -139,13 +151,18 @@ export class RoomManager {
     };
 
     this.rooms.set(roomCode, { state, rng: this.newRoomRng() });
-    return ok({ roomCode, playerId: host.id, state });
+    return ok({
+      roomCode,
+      playerId: host.id,
+      resumeToken: host.resumeToken,
+      state,
+    });
   }
 
   joinRoom(
     roomCode: string,
     playerName: string,
-  ): Result<{ playerId: string; state: GameState }> {
+  ): Result<{ playerId: string; resumeToken: string; state: GameState }> {
     const room = this.rooms.get(roomCode);
     if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
 
@@ -162,7 +179,11 @@ export class RoomManager {
 
     const player = this.newSeat(name, false);
     room.state = { ...room.state, players: [...room.state.players, player] };
-    return ok({ playerId: player.id, state: room.state });
+    return ok({
+      playerId: player.id,
+      resumeToken: player.resumeToken,
+      state: room.state,
+    });
   }
 
   /**
