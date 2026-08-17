@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type {
   Card,
+  DrawSource,
   GameErrorCode,
   Phase,
   RoomSettings,
@@ -59,6 +60,8 @@ export interface StateOptions {
   roundNumber?: number;
   /** An open slapdown window, named by whose it is and which card id it holds. */
   slapdown?: { playerId: string; cardId: string };
+  /** A move already recorded on the round, named by its drawn card's id. */
+  lastMove?: { playerId: string; drawSource: DrawSource; drawnCardId: string };
   settings?: Partial<RoomSettings>;
 }
 
@@ -104,6 +107,13 @@ export function makeState(options: StateOptions = {}): GameState {
     turnOrder,
     slapdown: options.slapdown
       ? { playerId: options.slapdown.playerId, card: card(options.slapdown.cardId) }
+      : null,
+    lastMove: options.lastMove
+      ? {
+          playerId: options.lastMove.playerId,
+          drawSource: options.lastMove.drawSource,
+          drawnCard: card(options.lastMove.drawnCardId),
+        }
       : null,
   };
 

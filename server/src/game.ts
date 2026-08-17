@@ -56,6 +56,7 @@ function dealRound(
     currentTurnPlayerId: startingPlayerId,
     turnOrder,
     slapdown: null,
+    lastMove: null,
   };
 
   return {
@@ -344,6 +345,10 @@ export function takeTurn(
     slapdown: opensSlapdown(collected.cards, action.draw.source, drawnCard)
       ? { playerId, card: drawnCard }
       : null,
+    // Recorded here and nowhere else: this is the only transition that draws a card, and
+    // the only place the identity of the drawn one is still known. What the serializer
+    // then tells each viewer about it is a separate question.
+    lastMove: { playerId, drawSource: action.draw.source, drawnCard },
   };
 
   return ok({ ...state, round: newRound });

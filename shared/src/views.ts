@@ -32,6 +32,36 @@ export interface OpponentView {
   handSize: number;
 }
 
+/**
+ * Which pile a card was drawn from. Named apart from `DrawAction`, which says the same
+ * thing about a draw being *asked* for and stays a discriminated union so only its
+ * `discard` half carries a card id. `opensSlapdown` keeps its own literals on purpose —
+ * the rulebook owes the wire contract nothing (ADR-0002).
+ */
+export type DrawSource = "deck" | "discard";
+
+/**
+ * The move that just resolved — whose it was, where they drew from, and which card they
+ * took. Sent so a client can show the draw happening: diffing two consecutive views
+ * cannot recover which card was taken whenever more than one was pickup-eligible (a run
+ * exposes both ends, a same-rank set every card), since what is left behind reaches the
+ * client as `buriedCount` and nothing more.
+ *
+ * The discarded half of the move needs no field here: `lastDiscard` already carries
+ * exactly what the mover put down.
+ */
+export interface LastMoveView {
+  playerId: string;
+  drawSource: DrawSource;
+  /**
+   * Null where this viewer is not entitled to know it: a card off the deck is a card of
+   * the mover's hidden hand, so only the mover is told which it was. A card off the pile
+   * was face up a moment before it was taken, so everyone is. `serializeStateForPlayer`
+   * draws that line — the same one `SelfView.slapdownEligible` sits on.
+   */
+  drawnCard: Card | null;
+}
+
 /** One player's revealed result for a finished round. */
 export interface PlayerRoundResultView {
   playerId: string;
@@ -83,6 +113,12 @@ export interface PlayerGameView {
   lastDiscard: Card[];
   /** Face-up but out of play. Count only, to keep payloads small. */
   buriedCount: number;
+  /**
+   * The turn that just resolved, redacted per viewer, or null when no turn has been taken
+   * in this round. Unchanged by a slapdown or a Yaniv call — neither is a draw — so a
+   * client watches it for changes rather than treating every arrival as fresh news.
+   */
+  lastMove: LastMoveView | null;
 
   /** Populated only in `roundEnd` and `gameEnd`, where all hands are revealed. */
   roundResult: RoundResultView | null;

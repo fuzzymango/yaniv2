@@ -23,7 +23,8 @@ import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
 
 export function App({ session }: { session: Session }) {
-  const { view, error, notice, busy, connected, resuming, selection } = useSession(session);
+  const { view, error, notice, busy, connected, resuming, selection, flight } =
+    useSession(session);
 
   /*
    * Before anything else, and whatever position was last drawn: with no socket there is
@@ -81,6 +82,7 @@ export function App({ session }: { session: Session }) {
         selection={selection}
         error={error}
         busy={busy}
+        flight={flight}
         onToggleCard={session.toggleCard}
         onCommitTurn={session.commitTurn}
         onCallYaniv={session.callYaniv}

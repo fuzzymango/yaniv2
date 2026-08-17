@@ -40,12 +40,20 @@ export function cardLabel(card: Card): string {
   return `${RANK_NAME[card.rank] ?? card.rank} of ${card.suit}`;
 }
 
+/**
+ * Every card says which card it is, in the markup as well as on its face.
+ *
+ * The one thing here that is not about drawing a card: it is how the flight layer finds a
+ * card on the screen to measure (`CardsInFlight.tsx`). Still nothing about what the card *means* —
+ * an id is the card's own name, and the same name in a hand, on the pile and in a reveal,
+ * which is exactly what makes one place answerable from another.
+ */
 export function PlayingCard({ card }: { card: Card }) {
   // A joker has no suit and no rank worth printing in a corner, so it is its own face
   // rather than a card with two fields left blank.
   if (card.suit === null) {
     return (
-      <span className="card card--joker">
+      <span className="card card--joker" data-card-id={card.id}>
         <span className="card__suit">★</span>
       </span>
     );
@@ -53,7 +61,7 @@ export function PlayingCard({ card }: { card: Card }) {
 
   const red = card.suit === "hearts" || card.suit === "diamonds";
   return (
-    <span className={`card ${red ? "card--red" : "card--black"}`}>
+    <span className={`card ${red ? "card--red" : "card--black"}`} data-card-id={card.id}>
       <span className="card__rank">{card.rank}</span>
       <span className="card__suit">{GLYPH[card.suit]}</span>
     </span>

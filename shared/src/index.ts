@@ -33,6 +33,8 @@ export type { GameErrorCode, GameError } from "./errors.ts";
 
 export type {
   Phase,
+  DrawSource,
+  LastMoveView,
   SelfView,
   OpponentView,
   PlayerRoundResultView,

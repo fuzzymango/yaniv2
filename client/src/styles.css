@@ -872,6 +872,27 @@ body {
 }
 
 /*
+ * The seat as a place a card flies to and from (`seatBox`, `ghosts.ts`): the middle card of
+ * the arc, laid out like any other, and inside it the box that is actually measured — the
+ * same card turned back level about its own centre, so a ghost arrives upright, on that
+ * card's centre, and at a card's own size.
+ *
+ * Hidden because the hand it stands for is already drawn around it: there is nothing here to
+ * look at, only somewhere to arrive. `visibility` rather than `display: none`, which has no
+ * box to measure at all, and rather than a transparent card, which would still be painted.
+ */
+.table-seat__box {
+  visibility: hidden;
+}
+
+.table-seat__box-level {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 50%;
+}
+
+/*
  * The other shape a hand takes at a seat: revealed, face up and cascaded along one axis
  * (`CascadeReveal`, issue #60). Its box comes from `cascadeFootprint` and each card's place
  * from `cascadeOffset`, both inline and both in card widths — the same arrangement the arc
@@ -1117,6 +1138,54 @@ body {
   transform: translateY(0.25rem);
   opacity: 0.4;
   filter: grayscale(0.5);
+}
+
+/* --- cards in flight --- */
+
+/*
+ * A place a card has not reached yet — on the pile it is being discarded onto (issue #72),
+ * or in the hand it is being drawn into (issue #73). It keeps its room in the row —
+ * `visibility` rather than `display`, so the row is laid out exactly as it will be once
+ * everything lands, and the ghost above has a box to fly to that will not move under it.
+ * Which cards these are is decided in `ghosts.ts` and nowhere in this stylesheet: a card is
+ * only ever hidden while there is one of its own in the air.
+ *
+ * The *card* goes, never the control around it. A flight is decorative and may not take a
+ * move away for as long as it lasts — a hidden button cannot be tapped or focused, and the
+ * slapdown window, which opens on the viewer's own discard and so overlaps a flight every
+ * time, would spend the whole 300ms untappable and unlit. Hiding what is inside leaves the
+ * control its box, its ring and its flash, and a card arriving in hand can be tapped into a
+ * selection before it has landed.
+ */
+.landing .card {
+  visibility: hidden;
+}
+
+/*
+ * The layer the cards fly across: the whole viewport, over everything on the table and
+ * part of none of it.
+ *
+ * Fixed rather than absolute because the boxes it positions against were measured in the
+ * viewport's own coordinates (`getBoundingClientRect`), so anything else would need the
+ * offset working out — the one piece of geometry this feature deliberately does not do by
+ * hand. Untappable throughout: everything a flight illustrates has already happened, and
+ * the live controls are underneath it answering as usual.
+ */
+.flight {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/*
+ * One card in the air. Placed at its landing box and moved back to where it came from —
+ * `transform-origin` is what makes the moving back a subtraction rather than a matrix, and
+ * `flip.ts` assumes exactly this corner.
+ */
+.flight__card {
+  position: absolute;
+  transform-origin: top left;
 }
 
 /*

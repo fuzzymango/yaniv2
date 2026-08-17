@@ -70,6 +70,57 @@ discard; otherwise it is inert, and a tap on it asks for nothing and is refused 
 carries as `DrawAction` — which pile, and which card if it came off the discard — named for
 the tap that produces it rather than the message it sends.
 
+## Last move
+
+The turn that just resolved, named as a fact rather than reconstructed: who took it, which
+pile they drew from, and which card they drew — `RoundState.lastMove`, and `lastMove` on
+the view. Exactly one move, overwritten by the next — not a history, not a log.
+
+It exists because the drawn card is otherwise **unknowable downstream**: what is left of a
+pile after a pickup reaches a client as a count, so a run's two ends, or a same-rank set,
+leave nothing to say which card went. A **slapdown** and a **Yaniv call** are not draws and
+so are not moves in this sense — both leave the last move standing, which is why a client
+watches it for *changes* rather than treating every arrival as fresh news.
+
+Its **drawn card** is the one part that varies by viewer: public when it came off the
+discard pile, since it was face up there a moment earlier, and the mover's alone when it
+came off the deck, since it is a card of a hidden hand now. See
+[ADR-0007](docs/adr/0007-last-move-on-the-wire.md).
+
+## Card flight
+
+One move as something to *watch*: the cards leaving a hand for the discard pile, and the card
+coming back the other way from wherever it was drawn (issue #69). A flight belongs to the
+move that produced a position, not to the position — it is over in well under the beat the
+next move waits out, and a table showing the same position a second later is showing nothing
+in flight at all.
+
+Which is why the client treats it as an **event** rather than table state: it is decided once,
+as a position reaches the screen (`flightFrom` in `client/src/flight.ts`, published as
+`SessionSnapshot.flight`), and gone from everything published after it. A position nobody
+watched arrive has no flight — a page that has just opened, a seat claimed back, a fresh deal
+— and neither has a broadcast that left the **last move** where it was, which is what a
+slapdown and a Yaniv call both do.
+
+The drawn card **may have no face**: `flight.ts` passes the server's redaction through
+untouched, so a card off the deck flies as a back for everyone but the drawer. Nothing on the
+client re-derives what a viewer may see.
+
+What actually crosses the screen is a **ghost** — a copy of the card, drawn over the table and
+inert, flying between two boxes measured off the real thing (`ghosts.ts`, `CardsInFlight.tsx`,
+`flip.ts`). The card it is a copy of waits at its **landing place**: the spot the position has
+already given it — a *place*, in the hand or on the pile, not merely a card, since a slapdown
+inside a flight can put one card in both — kept empty for as long as its ghost is in the air,
+or the same card would be drawn twice. A **seat** is the third place, and the one nothing waits
+at: a hand that is not the viewer's own is a count drawn as a fan of backs, so it is one box
+rather than a card each, and no card sits at that end of a journey to be shown twice. A ghost
+off the **deck** is drawn as a back, and has no box of its own to have come from — the deck is
+where its journey starts, and it turns over at neither end, because the hand it lands in is
+already showing its face; a ghost with no face at all, flying into somebody else's hand, is
+drawn the same way and named by the seat it is going to. The flight is over in `FLIGHT_MS`,
+well inside the pacer's beat, so a chain of moves is one flight per beat. Every move at the
+table flies, whoever took it (issues #72, #73, #74); `docs/client-table.md` has the decisions.
+
 ## Slapdown and the slapdown window
 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it

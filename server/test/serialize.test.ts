@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { DrawSource } from "@yaniv/shared";
 import { callYaniv, removePlayer, startGame } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
@@ -214,6 +215,84 @@ describe("serializeStateForPlayer — slapdown eligibility", () => {
 
   it("reports no eligibility with no window open", () => {
     assert.equal(serializeStateForPlayer(scenario(), "p1").you.slapdownEligible, false);
+  });
+});
+
+/**
+ * The move that just resolved, told to everyone — but its drawn card only where that card
+ * is already public. A pickup came off the face-up pile a moment earlier, so it is news to
+ * nobody; a deck draw is a card of the mover's hidden hand, and goes no further than them.
+ * The same boundary `slapdownEligible` is kept on, one field along. Issue #70.
+ */
+describe("serializeStateForPlayer — the last move", () => {
+  const moved = (drawSource: DrawSource) =>
+    makeState({
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace" },
+        { id: "p3", name: "Alan" },
+      ],
+      hands: { p1: ["hearts-3", "spades-8"], p2: ["spades-K"], p3: ["clubs-9"] },
+      lastDiscard: ["clubs-7"],
+      currentTurnPlayerId: "p2",
+      lastMove: { playerId: "p1", drawSource, drawnCardId: "spades-8" },
+    });
+
+  it("names the mover and the source for every viewer", () => {
+    for (const viewer of ["p1", "p2", "p3"]) {
+      const view = serializeStateForPlayer(moved("deck"), viewer);
+      assert.equal(view.lastMove?.playerId, "p1");
+      assert.equal(view.lastMove?.drawSource, "deck");
+    }
+  });
+
+  it("shows a card taken off the discard pile to everyone", () => {
+    for (const viewer of ["p1", "p2", "p3"]) {
+      const view = serializeStateForPlayer(moved("discard"), viewer);
+      assert.equal(view.lastMove?.drawnCard?.id, "spades-8", `hidden from ${viewer}`);
+    }
+  });
+
+  it("shows a card taken off the deck to the mover alone", () => {
+    const mover = serializeStateForPlayer(moved("deck"), "p1");
+    assert.equal(mover.lastMove?.drawnCard?.id, "spades-8");
+
+    for (const viewer of ["p2", "p3"]) {
+      const view = serializeStateForPlayer(moved("deck"), viewer);
+      assert.equal(view.lastMove?.drawnCard, null, `${viewer} was told what p1 drew`);
+      assert.ok(
+        !JSON.stringify(view).includes("spades-8"),
+        `a deck draw leaked into ${viewer}'s payload`,
+      );
+    }
+  });
+
+  /**
+   * A scored round reveals every hand, so the card is public by then anyway — the
+   * redaction is kept all the same rather than made a question of phase, because "was
+   * this viewer entitled to it" is one rule and a phase-dependent one is two.
+   */
+  it("stands after the round is scored, still redacted", () => {
+    const scored = unwrap(
+      callYaniv(
+        makeState({
+          hands: { p1: ["hearts-A", "hearts-2"], p2: ["spades-K"] },
+          lastMove: { playerId: "p2", drawSource: "deck", drawnCardId: "spades-K" },
+        }),
+        "p1",
+      ),
+    );
+
+    assert.equal(serializeStateForPlayer(scored, "p2").lastMove?.drawnCard?.id, "spades-K");
+    assert.equal(serializeStateForPlayer(scored, "p1").lastMove?.drawnCard, null);
+  });
+
+  it("reports no move before one has been made", () => {
+    assert.equal(serializeStateForPlayer(scenario(), "p1").lastMove, null);
+    assert.equal(
+      serializeStateForPlayer(makeState({ phase: "lobby" }), "p1").lastMove,
+      null,
+    );
   });
 });
 

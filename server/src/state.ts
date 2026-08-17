@@ -1,4 +1,4 @@
-import type { Card, RoomSettings } from "@yaniv/shared";
+import type { Card, DrawSource, RoomSettings } from "@yaniv/shared";
 import type { Result } from "./result.ts";
 
 /**
@@ -47,6 +47,23 @@ export interface SlapdownWindow {
 }
 
 /**
+ * The turn that just resolved: whose it was, where they drew from, and the card they
+ * drew. Written by `takeTurn` and by nothing else — a slapdown and a Yaniv call are not
+ * draws, so they leave whatever is here alone.
+ *
+ * Fully populated, unlike `LastMoveView`: the redaction of `drawnCard` is a fact about a
+ * viewer, so it belongs to `serializeStateForPlayer` and not to the domain model.
+ *
+ * Exactly one move, overwritten by the next, never a log — see the "Out of Scope" note on
+ * issue #69.
+ */
+export interface LastMove {
+  playerId: string;
+  drawSource: DrawSource;
+  drawnCard: Card;
+}
+
+/**
  * Everything that resets between rounds. Replacing this whole object is the only way a
  * round begins, which is what makes "forgot to clear a field" unrepresentable.
  */
@@ -70,6 +87,12 @@ export interface RoundState {
    * has already moved on by the time this is readable.
    */
   slapdown: SlapdownWindow | null;
+  /**
+   * The turn that just resolved, or null before the round's first one. Kept because it is
+   * not recoverable from the rest of this state: once a card leaves the pile for a hand,
+   * nothing a client can see says which of the pickup-eligible ones it was.
+   */
+  lastMove: LastMove | null;
 }
 
 export interface PlayerRoundResult {

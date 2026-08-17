@@ -26,6 +26,8 @@ import type {
   ServerToClientEvents,
 } from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
+import type { CardFlight } from "./flight.ts";
+import { flightFrom } from "./flight.ts";
 import type { Clock } from "./pacing.ts";
 import { createPacer, systemClock } from "./pacing.ts";
 import type { DrawSource } from "./turn.ts";
@@ -146,6 +148,23 @@ export interface SessionSnapshot {
    * a rule about incoming server state, which is what this module is for.
    */
   readonly selection: readonly string[];
+  /**
+   * The move the position was reached by, when it is one worth watching happen — the cards
+   * that left a hand for the pile and the card that came back the other way. Null the rest
+   * of the time, which is most of it.
+   *
+   * A one-shot: it is set by the publication that draws the position it belongs to and is
+   * gone from the next one, whatever that next one is about. That is what makes it an event
+   * to play rather than a fact about the table — a card is in flight for as long as the
+   * animation takes and not for as long as the position stands, so a tap or a refusal
+   * arriving behind it does not put the same cards up again.
+   *
+   * What it does *not* do is count renders: a component that re-renders off the snapshot it
+   * already has reads the same flight, and it is the one flight either way. Playing each
+   * exactly once is the animating layer's own job, and the object's identity is what it has
+   * to tell them apart by. `flight.ts` decides what is in it; nothing here re-decides.
+   */
+  readonly flight: CardFlight | null;
 }
 
 export interface Session {
@@ -302,11 +321,18 @@ export function createSession(
     connected: true,
     resuming: false,
     selection: [],
+    flight: null,
   };
   const listeners = new Set<() => void>();
 
+  /**
+   * `flight` is cleared unless the publication being made is one that has a move to show,
+   * which is what makes it one-shot: nothing has to remember to put it back down, and no
+   * publication about something else — a tap, a refusal, a connection going — can leave the
+   * last move on the screen to be flown a second time.
+   */
   const publish = (next: Partial<SessionSnapshot>): void => {
-    snapshot = { ...snapshot, ...next };
+    snapshot = { ...snapshot, flight: null, ...next };
     for (const listener of listeners) listener();
   };
 
@@ -348,6 +374,11 @@ export function createSession(
    *
    * A committed turn's lock is released here and only here, on a strictly newer position
    * than the one it was played from.
+   *
+   * It is also the one place that holds the outgoing position and the arriving one at the
+   * same time, which is what a move to animate is read from — and it is asked here rather
+   * than on arrival because a chain of bot turns is drawn a beat apart: a card flies as its
+   * move reaches the screen, not as it lands on the wire.
    */
   const show = ({ view, version: arrivedAt }: Position): void => {
     const played = committedAt !== null && arrivedAt > committedAt;
@@ -355,6 +386,7 @@ export function createSession(
 
     publish({
       view,
+      flight: flightFrom(snapshot.view, view),
       selection: carriedInto(view),
       busy: played ? false : snapshot.busy,
     });
@@ -465,7 +497,9 @@ export function createSession(
 
       // The position comes back in the ack rather than as a broadcast — it is the answer
       // to this call and to nobody else's — so it is counted in as an arrival like any
-      // other, and drawn at once rather than queued: there is no chain behind it.
+      // other, and drawn at once rather than queued: there is no chain behind it. Nothing
+      // flies on it either: a table being sat back down at is a position landing, not a
+      // move anybody watched, and whatever last happened at it may be several turns old.
       version += 1;
       const { view } = result.value;
       // Re-stored rather than merely kept, so a page that came up on a credential leaves
