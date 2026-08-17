@@ -111,11 +111,15 @@ inert, flying between two boxes measured off the real thing (`ghosts.ts`, `Cards
 `flip.ts`). The card it is a copy of waits at its **landing place**: the spot the position has
 already given it — a *place*, in the hand or on the pile, not merely a card, since a slapdown
 inside a flight can put one card in both — kept empty for as long as its ghost is in the air,
-or the same card would be drawn twice. A ghost off the **deck** is drawn as a back, and has no
-box of its own to have come from — the deck is where its journey starts, and it turns over at
-neither end, because the hand it lands in is already showing its face. The flight
-is over in `FLIGHT_MS`, well inside the pacer's beat. Today the viewer's own move flies both
-ways (issues #72, #73); `docs/client-table.md` has the decisions.
+or the same card would be drawn twice. A **seat** is the third place, and the one nothing waits
+at: a hand that is not the viewer's own is a count drawn as a fan of backs, so it is one box
+rather than a card each, and no card sits at that end of a journey to be shown twice. A ghost
+off the **deck** is drawn as a back, and has no box of its own to have come from — the deck is
+where its journey starts, and it turns over at neither end, because the hand it lands in is
+already showing its face; a ghost with no face at all, flying into somebody else's hand, is
+drawn the same way and named by the seat it is going to. The flight is over in `FLIGHT_MS`,
+well inside the pacer's beat, so a chain of moves is one flight per beat. Every move at the
+table flies, whoever took it (issues #72, #73, #74); `docs/client-table.md` has the decisions.
 
 ## Slapdown and the slapdown window
 

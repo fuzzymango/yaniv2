@@ -26,8 +26,9 @@
  * a control, delays an intent or holds up a position. A player who taps through a flight
  * plays their turn as though there were none, and the ghosts are dropped mid-air.
  *
- * This ticket flies the viewer's own move, both ways (issues #72, #73) — an opponent's is
- * the ticket after it, and the same mechanism pointed at other boxes.
+ * Every move at the table flies, whoever took it (issues #72, #73, #74): the viewer's own
+ * between their hand and the felt, everybody else's between their seat and it. Which boxes
+ * that means is `ghosts.ts`'s answer, and the measuring below does not know the difference.
  */
 
 import type { CSSProperties, RefObject } from "react";
@@ -77,8 +78,9 @@ const wantsStillness = (): boolean =>
 
 /**
  * Everywhere on the screen a flight can begin or end, boxed where it is drawn: every card by
- * its own id, and the deck under `DECK_BOX` — the one place in the measurements that is not
- * a card, because the card that comes off it was nowhere a moment ago (`ghosts.ts`).
+ * its own id, and the deck and each seat under their own names — the places in the
+ * measurements that are not cards, standing in at whichever end of a journey the client was
+ * never told a card id for (`DECK_BOX` and `seatBox` in `ghosts.ts`).
  *
  * The root it is given must hold the table and **not** the ghosts: a ghost is a copy of a
  * card and carries the same id, so a layer inside this root would answer for the card it
@@ -103,7 +105,7 @@ export interface InFlight {
    * place that is. Drawing both the card and its ghost would show the same card twice, one of
    * them sitting still at the end of the other's journey.
    *
-   * By place and not by card, because a card can be in both at once: a slapdown inside
+   * By place and not by card, because a card can be in two at once: a slapdown inside
    * `FLIGHT_MS` puts the card still flying into the hand onto the pile, and where it has
    * actually got to is not a place waiting for it.
    *
@@ -157,7 +159,7 @@ export function useCardFlight(flight: CardFlight | null, viewerId: string): InFl
 
   return {
     rootRef,
-    landing: new Map(ghosts.map((ghost) => [ghost.card.id, ghost.into])),
+    landing: new Map(ghosts.map((ghost) => [ghost.id, ghost.into])),
     ghosts,
     settle,
   };
@@ -207,15 +209,15 @@ export function CardsInFlight({
   onSettled: () => void;
 }) {
   /**
-   * The element each ghost is drawn as, by card id — the same name the ghosts are keyed by,
-   * rather than a second identity by position in a list. Refs are attached during the
-   * commit, so every ghost rendered below is in here before the effect runs.
+   * The element each ghost is drawn as, by the name the ghost answers to — rather than a
+   * second identity by position in a list. Refs are attached during the commit, so every
+   * ghost rendered below is in here before the effect runs.
    */
   const drawn = useRef(new Map<string, HTMLElement>());
 
   useLayoutEffect(() => {
     const animations = ghosts.flatMap((ghost) => {
-      const element = drawn.current.get(ghost.card.id);
+      const element = drawn.current.get(ghost.id);
       if (element === undefined) return [];
       return [
         element.animate([{ transform: startOf(ghost) }, { transform: "none" }], {
@@ -249,22 +251,22 @@ export function CardsInFlight({
           className="flight__card"
           style={ghostStyle(ghost)}
           ref={(element) => {
-            if (element === null) drawn.current.delete(ghost.card.id);
-            else drawn.current.set(ghost.card.id, element);
+            if (element === null) drawn.current.delete(ghost.id);
+            else drawn.current.set(ghost.id, element);
           }}
-          key={ghost.card.id}
+          key={ghost.id}
         >
           {/*
-            A back rather than a face, for a card that was face down where it started: it
-            crosses the table as the deck's card and turns over nowhere, because the hand it
-            lands in is already showing it. Deliberately not a `PlayingCard` — that names the
-            card in the markup, and a card the viewer is watching arrive face down has no
-            business being findable by name on the way.
+            A back rather than a face, for a card with no face to show — one off the deck,
+            which turns over nowhere: where the drawer's own is going the hand is already
+            showing it, and anybody else's it is never shown at all. Deliberately not a
+            `PlayingCard` — that names the card in the markup, and a card being watched arrive
+            face down has no business being findable by name on the way.
           */}
-          {ghost.faceDown ? (
+          {ghost.face === null ? (
             <span className="card card--back" />
           ) : (
-            <PlayingCard card={ghost.card} />
+            <PlayingCard card={ghost.face} />
           )}
         </span>
       ))}

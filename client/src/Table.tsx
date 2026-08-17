@@ -180,10 +180,10 @@ export function Table({
             onClick={() => onCommitTurn({ kind: "deck" })}
           >
             {/*
-              The one thing on this table measured by the flight layer without being a card
-              (`DECK_BOX`): a card drawn off here was nowhere on the screen a moment ago, so
-              the deck is where its journey starts. The back stays put throughout — the deck
-              is a pile, not the card that left it.
+              Measured by the flight layer without being a card (`DECK_BOX`, and each seat's
+              own box is the other): a card drawn off here was nowhere on the screen a moment
+              ago, so the deck is where its journey starts. The back stays put throughout —
+              the deck is a pile, not the card that left it.
             */}
             <span className="card card--back" data-flight-box={DECK_BOX} />
             <span className="pick__count">{view.drawPileCount}</span>

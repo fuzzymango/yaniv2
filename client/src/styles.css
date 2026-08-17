@@ -872,6 +872,27 @@ body {
 }
 
 /*
+ * The seat as a place a card flies to and from (`seatBox`, `ghosts.ts`): the middle card of
+ * the arc, laid out like any other, and inside it the box that is actually measured — the
+ * same card turned back level about its own centre, so a ghost arrives upright, on that
+ * card's centre, and at a card's own size.
+ *
+ * Hidden because the hand it stands for is already drawn around it: there is nothing here to
+ * look at, only somewhere to arrive. `visibility` rather than `display: none`, which has no
+ * box to measure at all, and rather than a transparent card, which would still be painted.
+ */
+.table-seat__box {
+  visibility: hidden;
+}
+
+.table-seat__box-level {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 50%;
+}
+
+/*
  * The other shape a hand takes at a seat: revealed, face up and cascaded along one axis
  * (`CascadeReveal`, issue #60). Its box comes from `cascadeFootprint` and each card's place
  * from `cascadeOffset`, both inline and both in card widths — the same arrangement the arc

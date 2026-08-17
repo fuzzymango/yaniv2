@@ -79,16 +79,28 @@ decisions, none of them about the rules of anything:
   card still flies to where it actually lands. Only the destination boxes are trusted to
   outlive the animation, which is why the ghost is placed there and moved back rather than
   the other way round.
-- **The deck is measured as a place, being the one start that is not a card.** A card drawn
-  off it was nowhere on the screen a moment ago — the draw pile reaches a client as a count —
-  so the deck's own element is measured alongside the cards (`data-flight-box`, `DECK_BOX`)
-  and is where that card's journey begins. It is a box a card can leave and never land in.
+- **The deck and every seat are measured as places, being the ends that are not cards.** A
+  card drawn off the deck was nowhere on the screen a moment ago — the draw pile reaches a
+  client as a count — and a card in somebody else's hand is nowhere on it now, that hand
+  being a count too, drawn as a fan of backs. So the deck's element and each seat's are
+  measured alongside the cards (`data-flight-box`, `DECK_BOX`, `seatBox`), and stand in at
+  whichever end of a journey the client was never told a card id for. One box per seat and
+  not per card: a hand held there is one place however many cards are in it. The seat's box
+  *is* the middle card of its fan, laid out like every other card in it, with the box that
+  gets measured turned back level inside it — two elements, because the fan turns about its
+  hinge and the levelling has to turn about the card's own centre, and an element has one
+  `transform-origin`. The CSS still does all the trigonometry, and what is measured is
+  card-shaped rather than the bounding box of a rotated card, which is wider at every angle
+  but a right one.
 - **A card off the deck flies face down and turns over nowhere.** It was face down where it
   started, and where it lands the hand underneath is already showing its face: a flip at the
   end would animate a fact the position had stated before the card set off. A card off the
   discard pile has been public all along and flies as itself, from the place on the pile it
   has just left. Which way up follows from where it came from, so there is one decision
-  rather than two that could disagree.
+  rather than two that could disagree — with one addition for somebody else's draw off the
+  deck, which has no face at all for anyone but them (ADR-0007) and so flies as a back named
+  by the seat it is going to. The client re-derives none of that: `ghosts.ts` passes the
+  wire's redaction through, and a ghost with no face is drawn as a back.
 - **The ghost flies and the real card waits.** A card in the air leaves its landing place
   empty (`.landing .card`, `visibility` so the row is already laid out as it will settle), or
   the same card would be drawn twice — once sitting at the end of the other's journey. The
@@ -97,7 +109,10 @@ decisions, none of them about the rules of anything:
   and a card still arriving in hand can be tapped into a selection before it has landed. A
   landing place is a place and not a card (`Ghost.into`): one card can be drawn in two of them
   at once, since a slapdown inside a flight puts the card still arriving in the hand onto the
-  pile, and the place it has genuinely reached has nothing to wait for.
+  pile, and the place it has genuinely reached has nothing to wait for. **A seat is the one
+  landing nothing waits at**: the fan there stands for a count the position has already
+  settled, so there is no card at the end of that journey to be drawn twice — and a back too
+  few would misstate the count its own label states in words.
 - **`FLIGHT_MS` is nobody's sibling but `PACE_MS`'s.** 300ms against a 700ms beat: how long
   a card takes to cross and how long a position stays are separate questions, tied only by
   the flight having to be over inside the beat, with room to read the settled table.
@@ -109,7 +124,9 @@ decisions, none of them about the rules of anything:
   off from one — so the preference is read as a flight that never starts, and the table is
   the one it was before any of this existed.
 
-Today it flies the viewer's own move, both ways: the discard out (issue #72) and the draw
-back in (issue #73). An opponent's move is the same mechanism pointed at other boxes — their
-cards start from a seat rather than from a hand, which is why `ghosts.ts` answers a move that
-is not the viewer's with nothing at all rather than flying it off the wrong edge (issue #74).
+Every move at the table flies, whoever took it: the viewer's own between their hand and the
+felt (issues #72, #73), and everybody else's between their seat and it (issue #74) — which is
+what answers the complaint this started from, since "did they draw from the deck or the pile?"
+is a question about somebody else's turn. Whose move it is decides only which boxes are asked
+for; nothing downstream of `ghosts.ts` knows the difference, and a chain of bot turns is
+already one position per beat, so each move flies inside its own (`pacing.ts`).

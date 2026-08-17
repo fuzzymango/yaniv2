@@ -19,37 +19,65 @@ import type { Box } from "./flip.ts";
 /**
  * The deck's own name among the measured boxes.
  *
- * Every other box a flight uses belongs to a card and is found by that card's id. A card off
- * the deck has none: a moment ago it was somewhere in a pile the client is only ever told the
- * size of, so the deck itself is where its journey starts — measured off the one element on
- * the table that stands for it (`data-flight-box` in `Table.tsx`). A place a card can leave
- * and never land in, and a name no card can answer to, since every card id carries a suit or
- * a joker (`Card` in `shared`).
+ * Every card a flight moves is normally found by its own id. A card off the deck has none to
+ * be found by: a moment ago it was somewhere in a pile the client is only ever told the size
+ * of, so the deck itself is where its journey starts — measured off the one element on the
+ * table that stands for it (`data-flight-box` in `Table.tsx`). A place a card can leave and
+ * never land in, and a name no card can answer to, since every card id carries a suit or a
+ * joker (`Card` in `shared`).
  */
 export const DECK_BOX = "deck";
 
 /**
- * Which of the two places a move moves cards between a card is arriving at.
+ * A seat's own name among the measured boxes — the deck's counterpart at the other end of the
+ * table, and for the same reason.
+ *
+ * A hand that is not the viewer's own reaches the screen as a count and is drawn as a fan of
+ * backs (`CardFan` in `Seat.tsx`), so no card in it has a box of its own: a card an opponent
+ * discards was nowhere findable a moment ago, and one they draw is nowhere findable now. The
+ * seat stands in at whichever end is theirs. One box per seat and not per card, because a
+ * hand held there is one place however many cards are in it.
+ *
+ * Prefixed so it cannot be read as a card: no card id carries a colon (`Card` in `shared`),
+ * and no player id can turn one of these into `DECK_BOX`.
+ */
+export const seatBox = (playerId: string): string => `seat:${playerId}`;
+
+/**
+ * Which of the places a move moves cards between a card is arriving at.
  *
  * It is what a landing place is left empty *by*, and it has to be said rather than assumed
- * from the card, because one card can be in both places at once for as long as a flight
+ * from the card, because one card can be in two places at once for as long as a flight
  * lasts: a slapdown inside `FLIGHT_MS` puts the card still flying into the hand onto the
  * pile, and the place it has actually reached must not be blanked out waiting for it.
+ *
+ * A `seat` is the one landing that nothing waits at. An opponent's hand is a fan of backs
+ * standing for a count the position has already settled, so there is no card sitting at the
+ * end of that journey to be drawn twice — and a back too few for the length of a flight
+ * would misstate the count the label beside it states in words.
  */
-export type Landing = "hand" | "pile";
+export type Landing = "hand" | "pile" | "seat";
 
-/** One card in the air: which card, where it was, where it is going, and how it is drawn. */
+/** One card in the air: what it is, where it was, where it is going, and how it is drawn. */
 export interface Ghost {
-  readonly card: Card;
+  /**
+   * What it answers to among the ghosts, and what its landing place is looked up by: the
+   * card's own id, or — for a card nobody may see — the seat it is flying to, there being at
+   * most one such card in a move.
+   */
+  readonly id: string;
+  /**
+   * The face to draw, or null for a back.
+   *
+   * Null is a card off the **deck**, whoever drew it: it was face down where it started, and
+   * it turns over nowhere — the drawer's own hand is already showing it where it lands, and
+   * anybody else's never will, the wire having redacted it (ADR-0007). A card off the discard
+   * pile has been public all along and flies as itself, into a hand or into a seat alike.
+   */
+  readonly face: Card | null;
   readonly from: Box;
   readonly to: Box;
   readonly into: Landing;
-  /**
-   * Drawn as a back rather than as its face, for the whole journey. A card off the deck was
-   * face down where it started and is a hand card where it lands, and it turns over at
-   * neither end: it arrives and the position underneath it is already showing its face.
-   */
-  readonly faceDown: boolean;
 }
 
 /**
@@ -67,10 +95,12 @@ const flown = (
  * The cards of a move, on their way to where the position already has them.
  *
  * `before` is where everything was at the last render and `after` where it is now — the two
- * halves of FLIP, keyed by card id and, for the deck, by `DECK_BOX`. A move by anybody but the
- * viewer has nothing to fly: an opponent's cards start from a seat rather than from a hand,
- * which is a later ticket's business (issue #74) and not a reason to fly the wrong card off
- * the wrong edge.
+ * halves of FLIP, keyed by card id and, for the deck and every seat, by the names above.
+ *
+ * Whose move it is decides only which boxes are asked for, never what flies (issue #74): the
+ * viewer's own cards leave their hand and come back to it, and everybody else's leave their
+ * seat and come back to it. What is *shown* is the server's business and is passed through
+ * untouched — a card the wire redacted has no face here either.
  */
 export function ghostsFor(
   flight: CardFlight,
@@ -78,22 +108,31 @@ export function ghostsFor(
   before: ReadonlyMap<string, Box>,
   after: ReadonlyMap<string, Box>,
 ): Ghost[] {
-  if (flight.playerId !== viewerId) return [];
+  const mine = flight.playerId === viewerId;
+  const seat = seatBox(flight.playerId);
 
   const discarded = flight.discarded.flatMap((card) =>
-    flown({ card, into: "pile", faceDown: false }, before.get(card.id), after.get(card.id)),
+    flown(
+      { id: card.id, face: card, into: "pile" },
+      mine ? before.get(card.id) : before.get(seat),
+      after.get(card.id),
+    ),
   );
-
-  const drawn = flight.drawnCard;
-  if (drawn === null) return discarded;
 
   // Where it came from is also how it is drawn, and for the same reason: a card off the pile
   // was face up in a place of its own a moment ago, and a card off the deck was neither.
+  const drawn = flight.drawnCard;
   const fromDeck = flight.drawSource === "deck";
-  const from = before.get(fromDeck ? DECK_BOX : drawn.id);
+  /** Where the drawn card is, if this viewer has been told which card it is at all. */
+  const boxOfDrawn = (boxes: ReadonlyMap<string, Box>): Box | undefined =>
+    drawn === null ? undefined : boxes.get(drawn.id);
 
   return [
     ...discarded,
-    ...flown({ card: drawn, into: "hand", faceDown: fromDeck }, from, after.get(drawn.id)),
+    ...flown(
+      { id: drawn?.id ?? seat, face: fromDeck ? null : drawn, into: mine ? "hand" : "seat" },
+      fromDeck ? before.get(DECK_BOX) : boxOfDrawn(before),
+      mine ? boxOfDrawn(after) : after.get(seat),
+    ),
   ];
 }

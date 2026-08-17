@@ -18,7 +18,9 @@
  * Presentational, like `PlayingCard`: nothing here decides anything, and the cards are
  * face down because an opponent's hand is not on the wire in the first place (see
  * "Serialization is the security boundary" in CLAUDE.md) — not because this chose to hide
- * it.
+ * it. The one element drawn to be measured rather than looked at is the fan's own flight box
+ * (`seatBox`, issue #74): a hand nobody can see has no card in it to fly to or from, so the
+ * seat stands in for the lot, and even that is a place the layout already puts a card at.
  *
  * The classes are `table-seat` rather than `seat`, which the lobby's roster row already
  * has. Two screens, two meanings of the word, and the lobby's is the older one.
@@ -37,6 +39,7 @@ import {
   fanOverhang,
 } from "./fan.ts";
 import { PlayingCard } from "./PlayingCard.tsx";
+import { seatBox } from "./ghosts.ts";
 import type { Zone } from "./seating.ts";
 
 /** One side of the felt, holding the seats `seatZones` dealt it, in turn order. */
@@ -85,8 +88,20 @@ const cardWidths = (n: number) => `calc(var(--card-w) * ${n})`;
  * a transform otherwise costs nothing in layout, and it is pushed out past its edge of the
  * screen by exactly `fanOverhang`. What is left on screen is most of the fan — the part
  * nearest the felt.
+ *
+ * `flightBox` is the name this hand answers to when a card is flying to or from it
+ * (`seatBox` in `ghosts.ts`): one box for the whole hand, since none of the cards in it is
+ * on the wire to have a box of its own.
  */
-export function CardFan({ zone, count }: { zone: Zone; count: number }) {
+export function CardFan({
+  zone,
+  count,
+  flightBox,
+}: {
+  zone: Zone;
+  count: number;
+  flightBox: string;
+}) {
   const box = fanFootprint(count, zone);
   const overhang = fanOverhang(count);
 
@@ -107,6 +122,32 @@ export function CardFan({ zone, count }: { zone: Zone; count: number }) {
     // Decorative: what these cards say is how many there are, and the label below says
     // that in words. A card back is not a card, so there is nothing here to read out.
     <div className={`table-seat__fan table-seat__fan--${zone}`} style={style} aria-hidden="true">
+      {/*
+        Where a card flies to and from at this seat, and the one element here that is drawn
+        for something other than being looked at: a hand held here is a count and a fan of
+        backs, so no card in it can be measured by name (`seatBox`, `CardsInFlight.tsx`).
+
+        It is the middle card of the arc, drawn exactly as the rest are, with the box that
+        gets measured turned back upright *inside* it. Two elements rather than one because
+        the turning back has to happen about the card's centre while the fan's own turn
+        happens about its hinge, and an element has one `transform-origin` — so the inner box
+        comes back level, on the same centre, and `getBoundingClientRect` answers with a
+        card-shaped box rather than the bounding box of a rotated card, which is wider than
+        the card at every angle but a right one. A ghost lands at the size it flew at, and
+        the CSS has done all of the trigonometry: nothing here knows an angle's sine.
+      */}
+      <span
+        className="card table-seat__card table-seat__box"
+        style={{
+          transform: `rotate(${ZONE_ROTATION[zone]}deg) translateY(${cardWidths(-FAN_RADIUS)})`,
+        }}
+      >
+        <span
+          className="table-seat__box-level"
+          data-flight-box={flightBox}
+          style={{ transform: `rotate(${-ZONE_ROTATION[zone]}deg)` }}
+        />
+      </span>
       {fanAngles(count).map((angle, i) => (
         <span
           className="card card--back table-seat__card"
@@ -195,7 +236,7 @@ export function OpponentSeat({
         </>
       }
     >
-      <CardFan zone={zone} count={opponent.handSize} />
+      <CardFan zone={zone} count={opponent.handSize} flightBox={seatBox(opponent.id)} />
     </Seat>
   );
 }
