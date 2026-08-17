@@ -106,7 +106,8 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `main.tsx` | The entrypoint. Opens the socket, hands over the seat store and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
 | `session.ts` | The session core: owns the socket and the seat's credential, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
-| `flight.ts` | `flightFrom` — the position on the screen and the one arriving in, and either the move between them (`CardFlight`: mover, discarded cards, draw source, drawn card where the viewer may know it) or nothing. Pure and total, `turn.ts`'s counterpart on the way in; the one seam the card flight is tested at |
+| `flight.ts` | `flightFrom` — the position on the screen and the one arriving in, and either the move between them (`CardFlight`: mover, discarded cards, draw source, drawn card where the viewer may know it) or nothing. Pure and total, `turn.ts`'s counterpart on the way in |
+| `ghosts.ts` | `ghostsFor` — a move and the boxes on the screen in, the cards actually in the air out (`Ghost`: which card, from where, to where, and `faceDown`), dropping whatever the screen cannot place at both ends. `DECK_BOX` is the deck's name among those boxes, being where a drawn card starts and the one measurement that is not a card's. Pure and total |
 | `flip.ts` | `invert` and `transformOf` — where a card has landed and where it came from, as the transform that puts it back. The arithmetic of the flight, and all of it: measured boxes in, one CSS transform out. Pure and total |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). Generic over the opponent, so the live table and the round-end reveal zone their own payloads. `revealSeats` is the round end's own: the viewer's row out for the bottom of the screen, the rest zoned in the order the round scored them |
@@ -118,7 +119,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
 | `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open |
-| `CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen after each render, and answer an arriving `CardFlight` with ghosts and the places to leave empty for them), the `CardsInFlight` overlay they fly across, and `FLIGHT_MS`. The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
+| `CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen and the deck after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), the `CardsInFlight` overlay they fly across, and `FLIGHT_MS`. The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
 | `Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held) and `CascadeReveal` (the same hand face up and read). `OpponentSeat` composes the first three for live play; the round end composes its own. Presentational throughout |
 | `RoundEnd.tsx` | `phase: 'roundEnd'` — who called, whether they were Assafed, and the same seated table with every hand face up, each player's round folded onto their own seat's label |
 | `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and the same two ways out the lobby offers |
@@ -436,17 +437,17 @@ the server never sends, so `slapdownEligible` *is* the answer.
 Opponents are drawn round three sides of the felt (`seatZones`): fans of face-down backs
 under upright labels while the round is played, the same seats cascaded face up once it is
 scored, with each player's numbers on their own label. A hand shrinking is something to
-watch, and a scored one something to read — which is why the two shapes differ. Every
-decision behind the geometry, and what the felt gave up to make room for the seats, is in
-`docs/client-table.md` (issues #56, #58, #59, #60); `fan.ts`, `seating.ts` and `Seat.tsx`
-are where it lives.
+watch, and a scored one something to read — which is why the two shapes differ. Every decision
+behind the geometry, and what the felt gave up for the seats, is in `docs/client-table.md`
+(issues #56, #58, #59, #60); `fan.ts`, `seating.ts` and `Seat.tsx` are where it lives.
 
 **A move is watched crossing that table, not merely published onto it** (issue #69). The
-session says *what* moved (`flight.ts`); `CardsInFlight.tsx` measures where on the screen it
-happens and animates the difference closed (FLIP, `flip.ts`), rather than repeating the
-geometry above — so a change to how a hand is laid out cannot send a card to the wrong place.
-Decorative throughout: nothing waits on a flight and reduced motion skips it. Its decisions
-are in `docs/client-table.md` too; today it flies the viewer's own discard (#72).
+session says *what* moved (`flight.ts`), `ghosts.ts` which of it the screen can draw and which
+way up, and `CardsInFlight.tsx` measures where it happens and animates the difference closed
+(FLIP, `flip.ts`) rather than repeating the geometry above — so a hand relaid out cannot send a
+card to the wrong place. Decorative throughout: nothing waits on a flight and reduced motion
+skips it. Decisions in `docs/client-table.md`; today it flies the viewer's own move both ways —
+the discard out (#72), the draw back in (#73).
 
 ### Settings are edited in one place and shown in another
 
@@ -474,7 +475,7 @@ is testability: the session core is driven under `node:test` against a real sock
 with no browser, no jsdom and no React test dependencies. Components are not tested at all,
 a consequence of that split rather than a gap — behaviour worth testing on its own belongs in
 the session core, or in one of the pure modules beside it (`turn.ts`, `seating.ts`, `fan.ts`,
-`flight.ts`, `flip.ts`, `settings.ts`), where every layout rule with an answer lives.
+`flight.ts`, `ghosts.ts`, `flip.ts`, `settings.ts`), where every layout rule with an answer lives.
 `useCardFlight` is the one hook outside `useSession`, and only because a flight is measured
 off rendered elements — it decides nothing the pure modules could have been asked instead.
 
@@ -674,9 +675,8 @@ Not oversights — deferred on purpose, in this order of likely next work:
   drops every match in progress — same as a restart, and the reason splitting client and
   server into two services (giving up same-origin, ADR-0003) would be the fix if that cost
   ever matters. A room nobody resumes and no host closes leaks until then: no idle sweep.
-- **Slapdown against a bot.** Both clients offer it, but bots neither slap down for
-  themselves nor can be raced by a human, `playBotTurns` running in the same tick — both
-  deliberate per ADR-0005.
+- **Slapdown against a bot.** Both clients offer it, but bots neither slap down for themselves
+  nor can be raced by a human, `playBotTurns` running in the same tick — both per ADR-0005.
 - **Disambiguating a joker that extends a run.** The browser sends the selection in tap
   order, so tap order decides where the joker sits (`docs/rules.md` §4) — a deliberate wart.
 

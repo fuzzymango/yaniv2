@@ -10,29 +10,34 @@
  *
  * The shape is FLIP, and the order matters:
  *
- *   1. every card on the screen is measured after each render, so the position a move
- *      started from is still on hand once the position it ended at has been drawn;
- *   2. a move arrives, and the cards it discarded are measured where they have landed;
+ *   1. every card on the screen is measured after each render — and the deck with them,
+ *      being where a drawn card comes from and the one box that is not a card's — so the
+ *      position a move started from is still on hand once the position it ended at has
+ *      been drawn;
+ *   2. a move arrives, and the cards it moved are measured where they have landed;
  *   3. a ghost is drawn at each landing place, moved back to where that card was, and let
  *      go — while the real card underneath waits, its face hidden and its control live,
  *      for its ghost to arrive.
+ *
+ * *Which* cards those are, and which way up each flies, is asked of `ghosts.ts`: this file
+ * measures, animates and decides nothing else.
  *
  * Purely decorative, and that is a constraint rather than a description: nothing here locks
  * a control, delays an intent or holds up a position. A player who taps through a flight
  * plays their turn as though there were none, and the ghosts are dropped mid-air.
  *
- * This ticket flies the viewer's own discard and nothing else (issue #72) — an opponent's
- * discard and the card coming back the other way are the tickets after it, and both are
- * this same mechanism pointed at other boxes.
+ * This ticket flies the viewer's own move, both ways (issues #72, #73) — an opponent's is
+ * the ticket after it, and the same mechanism pointed at other boxes.
  */
 
-import type { Card } from "@yaniv/shared";
 import type { CSSProperties, RefObject } from "react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { PlayingCard } from "./PlayingCard.tsx";
 import type { Box } from "./flip.ts";
 import { invert, transformOf } from "./flip.ts";
 import type { CardFlight } from "./flight.ts";
+import type { Ghost, Landing } from "./ghosts.ts";
+import { ghostsFor } from "./ghosts.ts";
 
 /**
  * How long a card is in the air.
@@ -57,13 +62,6 @@ export const FLIGHT_MS = 300;
  */
 const EASING = "ease-out";
 
-/** One card in the air: which card, where it was, and where it is going. */
-export interface Ghost {
-  readonly card: Card;
-  readonly from: Box;
-  readonly to: Box;
-}
-
 /**
  * Whether the player has asked for less movement. Read at the moment a flight would start
  * rather than once at load, so a preference changed mid-match is honoured on the next move.
@@ -78,7 +76,9 @@ const wantsStillness = (): boolean =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
- * Every card currently on the screen, by id, boxed where it is drawn.
+ * Everywhere on the screen a flight can begin or end, boxed where it is drawn: every card by
+ * its own id, and the deck under `DECK_BOX` — the one place in the measurements that is not
+ * a card, because the card that comes off it was nowhere a moment ago (`ghosts.ts`).
  *
  * The root it is given must hold the table and **not** the ghosts: a ghost is a copy of a
  * card and carries the same id, so a layer inside this root would answer for the card it
@@ -88,41 +88,29 @@ const wantsStillness = (): boolean =>
 function measure(root: HTMLElement | null): Map<string, Box> {
   const boxes = new Map<string, Box>();
   if (root === null) return boxes;
-  for (const element of root.querySelectorAll<HTMLElement>("[data-card-id]")) {
-    const id = element.dataset.cardId;
+  for (const element of root.querySelectorAll<HTMLElement>("[data-card-id], [data-flight-box]")) {
+    const id = element.dataset.cardId ?? element.dataset.flightBox;
     if (id !== undefined) boxes.set(id, element.getBoundingClientRect());
   }
   return boxes;
 }
 
-/**
- * What is watchable about a move, once the screen is taken into account: a card that was
- * nowhere a moment ago, or has landed nowhere now, has no flight to draw and is dropped
- * rather than guessed at.
- */
-const ghostsFor = (
-  cards: readonly Card[],
-  before: Map<string, Box>,
-  after: Map<string, Box>,
-): Ghost[] =>
-  cards.flatMap((card) => {
-    const from = before.get(card.id);
-    const to = after.get(card.id);
-    return from === undefined || to === undefined ? [] : [{ card, from, to }];
-  });
-
 export interface InFlight {
-  /** The screen the cards are measured within — every `[data-card-id]` inside it. */
+  /** The screen the boxes are measured within — every card inside it, and the deck. */
   readonly rootRef: RefObject<HTMLElement | null>;
   /**
-   * The cards whose place should be left empty because they have not arrived yet. Drawing
-   * both the card and its ghost would show the same card twice, one of them sitting still
-   * at the end of the other's journey.
+   * The cards whose place should be left empty because they have not arrived yet, and which
+   * place that is. Drawing both the card and its ghost would show the same card twice, one of
+   * them sitting still at the end of the other's journey.
+   *
+   * By place and not by card, because a card can be in both at once: a slapdown inside
+   * `FLIGHT_MS` puts the card still flying into the hand onto the pile, and where it has
+   * actually got to is not a place waiting for it.
    *
    * A place, not a control: whatever encloses one of these cards keeps working throughout,
    * because a flight may not cost a player a move (`.landing .card` in `styles.css`).
    */
-  readonly landing: ReadonlySet<string>;
+  readonly landing: ReadonlyMap<string, Landing>;
   /** Handed straight to `<CardsInFlight>`, which is the only thing that can read them. */
   readonly ghosts: readonly Ghost[];
   /** Every ghost has arrived, or been dropped. */
@@ -134,11 +122,8 @@ export interface InFlight {
  *
  * `flight` is the session's one-shot (see `SessionSnapshot.flight`), and it is consumed by
  * identity: the object is the event, so the same one arriving again — a re-render off the
- * snapshot already held — is the same flight and is not flown twice.
- *
- * A move by anybody but the viewer is consumed and dropped here: the boxes an opponent's
- * cards start from are their seat rather than a hand, which is the next ticket's problem
- * (issue #69) and not a reason for this one to fly the wrong card off the wrong edge.
+ * snapshot already held — is the same flight and is not flown twice. It is consumed whether
+ * or not anything flies: a move nobody is shown is still a move that has been dealt with.
  */
 export function useCardFlight(flight: CardFlight | null, viewerId: string): InFlight {
   const rootRef = useRef<HTMLElement>(null);
@@ -162,10 +147,9 @@ export function useCardFlight(flight: CardFlight | null, viewerId: string): InFl
 
     if (flight === null || flight === played.current) return;
     played.current = flight;
-    if (flight.playerId !== viewerId) return;
     if (wantsStillness()) return;
 
-    const flying = ghostsFor(flight.discarded, before, boxes.current);
+    const flying = ghostsFor(flight, viewerId, before, boxes.current);
     if (flying.length > 0) setGhosts(flying);
   });
 
@@ -173,7 +157,7 @@ export function useCardFlight(flight: CardFlight | null, viewerId: string): InFl
 
   return {
     rootRef,
-    landing: new Set(ghosts.map((ghost) => ghost.card.id)),
+    landing: new Map(ghosts.map((ghost) => [ghost.card.id, ghost.into])),
     ghosts,
     settle,
   };
@@ -270,7 +254,18 @@ export function CardsInFlight({
           }}
           key={ghost.card.id}
         >
-          <PlayingCard card={ghost.card} />
+          {/*
+            A back rather than a face, for a card that was face down where it started: it
+            crosses the table as the deck's card and turns over nowhere, because the hand it
+            lands in is already showing it. Deliberately not a `PlayingCard` — that names the
+            card in the markup, and a card the viewer is watching arrive face down has no
+            business being findable by name on the way.
+          */}
+          {ghost.faceDown ? (
+            <span className="card card--back" />
+          ) : (
+            <PlayingCard card={ghost.card} />
+          )}
         </span>
       ))}
     </div>

@@ -27,6 +27,8 @@ import { OpponentSeat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
 import { CloseRoomIcon } from "./WayOut.tsx";
 import type { CardFlight } from "./flight.ts";
+import type { Landing } from "./ghosts.ts";
+import { DECK_BOX } from "./ghosts.ts";
 import { ZONES, bySeat, seatZones } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
@@ -95,25 +97,31 @@ export function Table({
 
   /*
    * The cards of the move this position was reached by, on their way to where the position
-   * already has them. Nothing else on this screen reads it: `landing` says which cards are
-   * still in the air so their place can be left empty, and the layer draws them. See
-   * `CardsInFlight.tsx` — it is decorative from end to end, and no control below waits on it.
+   * already has them — out of the hand onto the pile, and the drawn card back the other way.
+   * Nothing else on this screen reads it: `landing` says which cards are still in the air so
+   * their place can be left empty, and the layer draws them. See `CardsInFlight.tsx` — it is
+   * decorative from end to end, and no control below waits on it.
    */
   const { rootRef, landing, ghosts, settle } = useCardFlight(flight, view.you.id);
 
   /**
-   * A place on the pile whose card is still in the air. Said once here and worn by whatever
-   * encloses the card — the control keeps its box, its ring and its flash, and only the face
-   * inside it waits (`.landing .card` in `styles.css`).
+   * A place whose card is still in the air. Said once here and worn by whatever encloses the
+   * card: the control keeps its box, its ring and its flash, and only the face inside it
+   * waits (`.landing .card` in `styles.css`).
+   *
+   * The place is asked about as well as the card, because a card can be drawn in two of them
+   * at once — a slapdown inside a flight puts the card still arriving in the hand onto the
+   * pile, where it has genuinely landed and has nothing to wait for.
    */
-  const landingClass = (cardId: string): string => (landing.has(cardId) ? "landing" : "");
+  const landingClass = (cardId: string, place: Landing): string =>
+    landing.get(cardId) === place ? "landing" : "";
 
   /**
    * The pile as a whole, for the one control that is the whole pile. Everything on it is the
    * discard that has just been played, so a slapdown window — which opens on the viewer's own
    * move — opens over cards that have not arrived yet.
    */
-  const pileLanding = view.lastDiscard.some((card) => landing.has(card.id));
+  const pileLanding = view.lastDiscard.some((card) => landing.get(card.id) === "pile");
 
   const zones = seatZones([...view.opponents].sort(bySeat(view)));
 
@@ -171,7 +179,13 @@ export function Table({
             disabled={!canDraw}
             onClick={() => onCommitTurn({ kind: "deck" })}
           >
-            <span className="card card--back" />
+            {/*
+              The one thing on this table measured by the flight layer without being a card
+              (`DECK_BOX`): a card drawn off here was nowhere on the screen a moment ago, so
+              the deck is where its journey starts. The back stays put throughout — the deck
+              is a pile, not the card that left it.
+            */}
+            <span className="card card--back" data-flight-box={DECK_BOX} />
             <span className="pick__count">{view.drawPileCount}</span>
           </button>
 
@@ -212,7 +226,7 @@ export function Table({
                 takeable.has(card.id) ? (
                   // A card still in the air leaves its place empty rather than sitting in it
                   // twice — the face only, so the draw target underneath it stays a control.
-                  <li className={landingClass(card.id)} key={card.id}>
+                  <li className={landingClass(card.id, "pile")} key={card.id}>
                     <button
                       className="pick"
                       type="button"
@@ -226,7 +240,7 @@ export function Table({
                 ) : (
                   // Deliberately not a `.pick`: there is no control here at all, so there is
                   // nothing to give it a pointer cursor or a focus stop either.
-                  <li className={`discard__out ${landingClass(card.id)}`} key={card.id}>
+                  <li className={`discard__out ${landingClass(card.id, "pile")}`} key={card.id}>
                     <PlayingCard card={card} />
                   </li>
                 ),
@@ -280,7 +294,10 @@ export function Table({
           {view.you.hand.map((card) => {
             const chosen = selection.includes(card.id);
             return (
-              <li key={card.id}>
+              // A card still on its way into the hand keeps its place in the row and waits
+              // there — the face only, so it can be tapped into a selection the whole time
+              // it is arriving, exactly as it could if nothing were in the air.
+              <li className={landingClass(card.id, "hand")} key={card.id}>
                 <button
                   className={`pick ${chosen ? "pick--chosen" : ""}`}
                   type="button"

@@ -1122,17 +1122,19 @@ body {
 /* --- cards in flight --- */
 
 /*
- * A place on the table a card has not reached yet (issue #72). It keeps its room in the
- * row — `visibility` rather than `display`, so the pile is laid out exactly as it will be
- * once everything lands, and the ghost above has a box to fly to that will not move under
- * it. Which cards these are is decided in `CardsInFlight.tsx` and nowhere in this
- * stylesheet: a card is only ever hidden while there is one of its own in the air.
+ * A place a card has not reached yet — on the pile it is being discarded onto (issue #72),
+ * or in the hand it is being drawn into (issue #73). It keeps its room in the row —
+ * `visibility` rather than `display`, so the row is laid out exactly as it will be once
+ * everything lands, and the ghost above has a box to fly to that will not move under it.
+ * Which cards these are is decided in `ghosts.ts` and nowhere in this stylesheet: a card is
+ * only ever hidden while there is one of its own in the air.
  *
  * The *card* goes, never the control around it. A flight is decorative and may not take a
  * move away for as long as it lasts — a hidden button cannot be tapped or focused, and the
  * slapdown window, which opens on the viewer's own discard and so overlaps a flight every
  * time, would spend the whole 300ms untappable and unlit. Hiding what is inside leaves the
- * control its box, its ring and its flash.
+ * control its box, its ring and its flash, and a card arriving in hand can be tapped into a
+ * selection before it has landed.
  */
 .landing .card {
   visibility: hidden;

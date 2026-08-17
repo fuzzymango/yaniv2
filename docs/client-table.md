@@ -66,9 +66,10 @@ player reads in one place. Three things separate it from live play (issues #56, 
 
 A position arriving is a move having happened, and the cards it moved are drawn crossing the
 table on their way to where the position already has them (issue #69). What moved is decided
-in the session core and off the wire (`flight.ts`, "Card flight" in `CONTEXT.md`); where on
-the screen it happens is `CardsInFlight.tsx`, the one file in this client that measures a
-rendered element. Five decisions, none of them about the rules of anything:
+in the session core and off the wire (`flight.ts`, "Card flight" in `CONTEXT.md`); which of it
+the screen can actually draw is `ghosts.ts`; where on the screen it happens is
+`CardsInFlight.tsx`, the one file in this client that measures a rendered element. Seven
+decisions, none of them about the rules of anything:
 
 - **It asks the screen, not the geometry.** Every card names itself in the markup
   (`data-card-id`, on `PlayingCard` itself), every card on screen is measured after each
@@ -78,11 +79,25 @@ rendered element. Five decisions, none of them about the rules of anything:
   card still flies to where it actually lands. Only the destination boxes are trusted to
   outlive the animation, which is why the ghost is placed there and moved back rather than
   the other way round.
+- **The deck is measured as a place, being the one start that is not a card.** A card drawn
+  off it was nowhere on the screen a moment ago — the draw pile reaches a client as a count —
+  so the deck's own element is measured alongside the cards (`data-flight-box`, `DECK_BOX`)
+  and is where that card's journey begins. It is a box a card can leave and never land in.
+- **A card off the deck flies face down and turns over nowhere.** It was face down where it
+  started, and where it lands the hand underneath is already showing its face: a flip at the
+  end would animate a fact the position had stated before the card set off. A card off the
+  discard pile has been public all along and flies as itself, from the place on the pile it
+  has just left. Which way up follows from where it came from, so there is one decision
+  rather than two that could disagree.
 - **The ghost flies and the real card waits.** A card in the air leaves its landing place
   empty (`.landing .card`, `visibility` so the row is already laid out as it will settle), or
   the same card would be drawn twice — once sitting at the end of the other's journey. The
   *face* waits and never the control around it: the slapdown window opens on the viewer's own
-  discard, so a hidden button would be an untappable window for the length of every flight.
+  discard, so a hidden button would be an untappable window for the length of every flight,
+  and a card still arriving in hand can be tapped into a selection before it has landed. A
+  landing place is a place and not a card (`Ghost.into`): one card can be drawn in two of them
+  at once, since a slapdown inside a flight puts the card still arriving in the hand onto the
+  pile, and the place it has genuinely reached has nothing to wait for.
 - **`FLIGHT_MS` is nobody's sibling but `PACE_MS`'s.** 300ms against a 700ms beat: how long
   a card takes to cross and how long a position stays are separate questions, tied only by
   the flight having to be over inside the beat, with room to read the settled table.
@@ -94,5 +109,7 @@ rendered element. Five decisions, none of them about the rules of anything:
   off from one — so the preference is read as a flight that never starts, and the table is
   the one it was before any of this existed.
 
-Today it flies the viewer's own discard (issue #72). An opponent's discard and the card
-coming back the other way are the same mechanism pointed at other boxes.
+Today it flies the viewer's own move, both ways: the discard out (issue #72) and the draw
+back in (issue #73). An opponent's move is the same mechanism pointed at other boxes — their
+cards start from a seat rather than from a hand, which is why `ghosts.ts` answers a move that
+is not the viewer's with nothing at all rather than flying it off the wrong edge (issue #74).
