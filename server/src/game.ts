@@ -1,6 +1,8 @@
 import type { Card, TurnAction } from "@yaniv/shared";
 import {
   ASSAF_PENALTY,
+  MILESTONE_INTERVAL,
+  MILESTONE_REDUCTION,
   MIN_PLAYERS,
   canCallYaniv,
   canonicalizeSet,
@@ -469,7 +471,12 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
     } else {
       delta = value;
     }
-    const scoreAfter = scores.get(id)! + delta;
+    let scoreAfter = scores.get(id)! + delta;
+    // The round winner (delta === 0) never re-triggers a reduction, even sitting on a
+    // multiple already — a milestone is crossed, not merely occupied.
+    const milestoneReduction =
+      delta > 0 && scoreAfter % MILESTONE_INTERVAL === 0 ? MILESTONE_REDUCTION : 0;
+    scoreAfter -= milestoneReduction;
     scores.set(id, scoreAfter);
     results.push({
       playerId: id,
@@ -477,6 +484,7 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
       hand: round.hands[id] ?? [],
       handValue: value,
       delta,
+      milestoneReduction,
       scoreAfter,
     });
   }

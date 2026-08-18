@@ -147,7 +147,15 @@ otherwise the caller.
 Round scores accumulate. The match ends as soon as any player's total is **greater than
 100**. The player with the **lowest** total wins; ties mean multiple winners.
 
-There is no score reduction on hitting a round number — see excluded variants.
+Whenever a round adds to a player's total (a positive score for that round) and the
+resulting total lands **exactly** on a multiple of 50, that player's score drops by 50 on
+the spot, before the match-end check runs — which can pull them back under 100 and save
+them from busting. The round winner (whose own delta is 0) never triggers this, even if
+already sitting on a multiple of 50, and a round that jumps past a multiple without landing
+on it exactly (45 → 53, say) triggers nothing. At most one reduction per player per round,
+however large the delta. Landing on 100 is not special-cased as a first or only trigger —
+150, 200 and every later multiple of 50 reduce exactly the same way. Always on, for every
+match — there is no setting that turns it off.
 
 A finished match may be **played again** by the same table: every score returns to 0, the
 round count starts over, and round 1 is dealt straight away with its opening player drawn
@@ -161,7 +169,6 @@ match — their seat is not refilled.
 These are common in other Yaniv rulesets and are deliberately **not** implemented. Each
 would be added as an explicit rule flag, never as scattered special cases.
 
-- **100/50 halving** — landing exactly on 100 dropping you to 50.
 - **Jokers wild in same-rank sets** — jokers are wild in runs (§4) but do not complete
   three of a kind.
 - **Multi-deck play.**

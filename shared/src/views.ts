@@ -88,6 +88,8 @@ export interface PlayerRoundResultView {
   handValue: number;
   /** Points added to this player's score for the round. */
   delta: number;
+  /** 0 unless a milestone reduction fired this round; `MILESTONE_REDUCTION` when it did. */
+  milestoneReduction: number;
   scoreAfter: number;
 }
 

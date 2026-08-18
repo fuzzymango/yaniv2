@@ -27,6 +27,7 @@ function finishedMatch(options: {
     hand: [],
     handValue: 0,
     delta: 0,
+    milestoneReduction: 0,
     scoreAfter: p.score,
   }));
 

@@ -130,6 +130,8 @@ export interface PlayerRoundResult {
   hand: Card[];
   handValue: number;
   delta: number;
+  /** 0 unless a milestone reduction fired this round; `MILESTONE_REDUCTION` when it did. */
+  milestoneReduction: number;
   scoreAfter: number;
 }
 

@@ -63,6 +63,7 @@ const round = (
     hand: [],
     handValue: 0,
     delta: 0,
+    milestoneReduction: 0,
     scoreAfter: 0,
   })),
 });

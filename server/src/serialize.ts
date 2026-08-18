@@ -24,6 +24,7 @@ function toRoundResultView(result: RoundResult): RoundResultView {
       hand: sortHand(p.hand),
       handValue: p.handValue,
       delta: p.delta,
+      milestoneReduction: p.milestoneReduction,
       scoreAfter: p.scoreAfter,
     })),
   };
