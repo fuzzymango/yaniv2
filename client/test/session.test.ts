@@ -1377,6 +1377,7 @@ describe("the move to animate", () => {
       );
 
       const flight = ours.flight!;
+      assert.ok(flight.kind === "turn", "a discard and a draw is a turn");
       assert.deepEqual(
         flight.discarded.map((c) => c.id),
         [chosen.id],
@@ -1415,6 +1416,8 @@ describe("the move to animate", () => {
       const theirs = flights.filter((f) => f.playerId !== host.getSnapshot().view!.you.id);
       assert.ok(theirs.length > 0, "a chain of bot moves was watched");
       for (const flight of theirs) {
+        // Every move in the chain is a turn: a bot never slaps down (ADR-0005).
+        assert.ok(flight.kind === "turn", "a bot's move is a turn");
         if (flight.drawSource === "deck") {
           assert.equal(flight.drawnCard, null, "a bot's deck draw is nobody else's to see");
         } else {

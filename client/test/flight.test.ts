@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { PlayerGameView } from "@yaniv/shared";
+import type { TurnFlight } from "../src/flight.ts";
 import { flightFrom } from "../src/flight.ts";
 import { card, cards, viewOf } from "./helpers.ts";
 
@@ -24,6 +25,17 @@ const position = (overrides: Partial<PlayerGameView> = {}): PlayerGameView => ({
   ...overrides,
 });
 
+/**
+ * The turn between two positions, narrowed to the shape the case is about. Every case below
+ * that reads a field of a flight is about a discard-and-draw, and nothing there — a slapdown,
+ * or no flight at all — is the case failing rather than something to assert around.
+ */
+const turnBetween = (shown: PlayerGameView, arriving: PlayerGameView): TurnFlight => {
+  const flight = flightFrom(shown, arriving);
+  assert.ok(flight !== null && flight.kind === "turn", "a turn was expected");
+  return flight;
+};
+
 describe("flightFrom", () => {
   it("describes the turn that produced the arriving position", () => {
     const before = position();
@@ -33,6 +45,7 @@ describe("flightFrom", () => {
     });
 
     assert.deepEqual(flightFrom(before, after), {
+      kind: "turn",
       playerId: "p2",
       discarded: cards("hearts-5"),
       drawSource: "deck",
@@ -48,7 +61,7 @@ describe("flightFrom", () => {
     });
 
     assert.deepEqual(
-      flightFrom(before, after)?.discarded,
+      turnBetween(before, after).discarded,
       cards("hearts-5", "clubs-5", "spades-5"),
       "three cards leaving one hand are one move, not three",
     );
@@ -64,7 +77,7 @@ describe("flightFrom", () => {
     // Nothing is inferred even where there is only one thing it could be: the field the
     // server sent is the answer in every case, so there is no second way of arriving at it
     // to disagree with the first.
-    assert.deepEqual(flightFrom(before, after)?.drawnCard, card("hearts-6"));
+    assert.deepEqual(turnBetween(before, after).drawnCard, card("hearts-6"));
   });
 
   it("names the card taken off the pile rather than working it out", () => {
@@ -77,9 +90,9 @@ describe("flightFrom", () => {
       lastMove: { playerId: "p2", drawSource: "discard", drawnCard: card("hearts-8") },
     });
 
-    const flight = flightFrom(before, after);
-    assert.equal(flight?.drawSource, "discard");
-    assert.deepEqual(flight?.drawnCard, card("hearts-8"));
+    const flight = turnBetween(before, after);
+    assert.equal(flight.drawSource, "discard");
+    assert.deepEqual(flight.drawnCard, card("hearts-8"));
   });
 
   it("shows the drawn card to whoever the server showed it to", () => {
@@ -94,24 +107,22 @@ describe("flightFrom", () => {
     });
     const toEverybodyElse = position({ lastMove: { ...off, drawnCard: null } });
 
-    assert.deepEqual(flightFrom(before, toTheMover)?.drawnCard, card("diamonds-4"));
-    assert.equal(flightFrom(before, toEverybodyElse)?.drawnCard, null);
+    assert.deepEqual(turnBetween(before, toTheMover).drawnCard, card("diamonds-4"));
+    assert.equal(turnBetween(before, toEverybodyElse).drawnCard, null);
   });
 
-  it("has nothing to show when the last move is the one already shown", () => {
-    // A slapdown, or a Yaniv call: the position moves, the last move does not (ADR-0007).
-    // The two facts are equal by value and not by identity — every broadcast is serialized
-    // afresh — so a client that compared references would animate the same turn twice.
-    const before = position({
+  it("has nothing to show when neither fact has changed", () => {
+    // A Yaniv call: the position moves, and neither the last move nor the last slapdown
+    // does (ADR-0007, ADR-0008). The facts are equal by value and not by identity — every
+    // broadcast is serialized afresh — so a client that compared references would animate
+    // the same turn twice.
+    const stood = {
       lastDiscard: cards("hearts-5"),
-      lastMove: { playerId: "p2", drawSource: "deck", drawnCard: null },
-    });
-    const after = position({
-      lastDiscard: cards("hearts-5", "diamonds-5"),
-      lastMove: { playerId: "p2", drawSource: "deck", drawnCard: null },
-    });
+      lastMove: { playerId: "p2", drawSource: "deck", drawnCard: null } as const,
+      lastSlapdown: { playerId: "p1", card: card("diamonds-5") },
+    };
 
-    assert.equal(flightFrom(before, after), null);
+    assert.equal(flightFrom(position(stood), position({ ...stood, drawPileCount: 29 })), null);
   });
 
   it("has nothing to show for the first position of all", () => {
@@ -157,5 +168,71 @@ describe("flightFrom", () => {
 
     assert.equal(flightFrom(played, scored), null, "the round being scored");
     assert.equal(flightFrom(scored, played), null, "and whatever follows a scored one");
+  });
+
+  describe("a slapdown", () => {
+    /** The turn that opened the window, standing where it was throughout (ADR-0007). */
+    const move = { playerId: "p2", drawSource: "deck", drawnCard: null } as const;
+    const slapped = { playerId: "p1", card: card("diamonds-5") };
+
+    it("describes the card put down out of turn, and whose it was", () => {
+      // Structurally not a turn: one card leaves a hand and nothing comes back, so there is
+      // no draw to name and no set — which is why the two are told apart by a tag rather
+      // than by which fields happen to be filled in.
+      const before = position({ lastDiscard: cards("hearts-5"), lastMove: move });
+      const after = position({
+        lastDiscard: cards("hearts-5", "diamonds-5"),
+        lastMove: move,
+        lastSlapdown: slapped,
+      });
+
+      assert.deepEqual(flightFrom(before, after), {
+        kind: "slapdown",
+        playerId: "p1",
+        card: card("diamonds-5"),
+      });
+    });
+
+    it("is watched for changes the way the last move is", () => {
+      // The fact is left standing until the next slapdown overwrites it, so the turn that
+      // closes the window arrives with it still there — and is the turn flying, not the slap
+      // a second time. At most one of the two facts changes per broadcast.
+      const before = position({ lastMove: move, lastSlapdown: slapped });
+      const after = position({
+        lastDiscard: cards("clubs-9"),
+        lastMove: { playerId: "p1", drawSource: "discard", drawnCard: card("hearts-5") },
+        lastSlapdown: slapped,
+      });
+
+      assert.equal(turnBetween(before, after).kind, "turn", "the fact that changed is the turn");
+    });
+
+    it("is not flown again for a slap already shown", () => {
+      const before = position({ lastMove: move, lastSlapdown: slapped });
+      const after = position({ lastMove: move, lastSlapdown: { ...slapped } });
+
+      assert.equal(flightFrom(before, after), null);
+    });
+
+    it("has nothing to show across a deal", () => {
+      // The same rule the last move is held to: a fact from the round before is not a card
+      // anybody at this table just watched leave a hand.
+      const before = position({ roundNumber: 1, lastMove: move, lastSlapdown: null });
+      const after = position({ roundNumber: 2, lastMove: null, lastSlapdown: slapped });
+
+      assert.equal(flightFrom(before, after), null);
+    });
+
+    it("has nothing to show unless both positions are a round being played", () => {
+      const played = position({ lastMove: move, lastSlapdown: null });
+      const scored = position({ phase: "roundEnd", lastMove: move, lastSlapdown: slapped });
+
+      assert.equal(flightFrom(played, scored), null, "the round being scored");
+      assert.equal(flightFrom(scored, played), null, "and whatever follows a scored one");
+    });
+
+    it("has nothing to show for the first position of all", () => {
+      assert.equal(flightFrom(null, position({ lastMove: move, lastSlapdown: slapped })), null);
+    });
   });
 });

@@ -149,9 +149,10 @@ export interface SessionSnapshot {
    */
   readonly selection: readonly string[];
   /**
-   * The move the position was reached by, when it is one worth watching happen — the cards
-   * that left a hand for the pile and the card that came back the other way. Null the rest
-   * of the time, which is most of it.
+   * The move the position was reached by, when it is one worth watching happen: a turn — the
+   * cards that left a hand for the pile and the card that came back the other way — or a
+   * slapdown, which is one card going the one way. Null the rest of the time, which is most
+   * of it.
    *
    * A one-shot: it is set by the publication that draws the position it belongs to and is
    * gone from the next one, whatever that next one is about. That is what makes it an event

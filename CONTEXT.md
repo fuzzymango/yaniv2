@@ -113,8 +113,14 @@ Which is why the client treats it as an **event** rather than table state: it is
 as a position reaches the screen (`flightFrom` in `client/src/flight.ts`, published as
 `SessionSnapshot.flight`), and gone from everything published after it. A position nobody
 watched arrive has no flight — a page that has just opened, a seat claimed back, a fresh deal
-— and neither has a broadcast that left the **last move** where it was, which is what a
-slapdown and a Yaniv call both do.
+— and neither has a broadcast that left both facts it is read from where they were, which is
+what a **Yaniv call** does.
+
+Those facts are the **last move** and the **last slapdown**, watched together and each for
+change of its own. A slapdown flies too, and as a shape of its own: one card out of a hand
+onto the pile and nothing coming back, tagged as such rather than told apart by which fields
+a turn's shape left empty. Exactly one broadcast carries one move, so at most one of the two
+facts has changed on any arrival and there is never a choice to make between them.
 
 The drawn card **may have no face**: `flight.ts` passes the server's redaction through
 untouched, so a card off the deck flies as a back for everyone but the drawer. Nothing on the

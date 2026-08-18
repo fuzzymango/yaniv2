@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { CardFlight } from "../src/flight.ts";
+import type { SlapdownFlight, TurnFlight } from "../src/flight.ts";
 import type { Box } from "../src/flip.ts";
 import { DECK_BOX, ghostsFor, seatBox } from "../src/ghosts.ts";
 import { card, cards } from "./helpers.ts";
@@ -33,7 +33,8 @@ const SEAT = box(0, 300, 40);
 const boxes = (entries: Record<string, Box>): Map<string, Box> => new Map(Object.entries(entries));
 
 /** The viewer's own turn: one card discarded, one drawn off the deck. */
-const move = (overrides: Partial<CardFlight> = {}): CardFlight => ({
+const move = (overrides: Partial<TurnFlight> = {}): TurnFlight => ({
+  kind: "turn",
   playerId: "p1",
   discarded: cards("hearts-5"),
   drawSource: "deck",
@@ -42,8 +43,16 @@ const move = (overrides: Partial<CardFlight> = {}): CardFlight => ({
 });
 
 /** The same turn taken by the player sitting opposite, whose hand nobody else can see. */
-const theirs = (overrides: Partial<CardFlight> = {}): CardFlight =>
+const theirs = (overrides: Partial<TurnFlight> = {}): TurnFlight =>
   move({ playerId: "p2", drawnCard: null, ...overrides });
+
+/** The viewer's own slapdown: one card out of their hand onto the pile, and nothing back. */
+const slap = (overrides: Partial<SlapdownFlight> = {}): SlapdownFlight => ({
+  kind: "slapdown",
+  playerId: "p1",
+  card: card("hearts-5"),
+  ...overrides,
+});
 
 describe("ghostsFor", () => {
   it("flies each card of a discard from where it was to where it landed", () => {
@@ -211,6 +220,41 @@ describe("ghostsFor", () => {
         ghostsFor(theirs({ drawSource: "discard", drawnCard: card("clubs-7") }), "p1", before, after),
         [],
       );
+    });
+  });
+
+  describe("a slapdown", () => {
+    it("flies the viewer's own card out of their hand onto the pile", () => {
+      // One card, one way: nothing is drawn for it to come back the other way, and the deck
+      // is not a place a slapdown touches at either end.
+      const before = boxes({ "hearts-5": HAND, [DECK_BOX]: DECK });
+      const after = boxes({ "hearts-5": PILE, [DECK_BOX]: DECK });
+
+      assert.deepEqual(ghostsFor(slap(), "p1", before, after), [
+        { id: "hearts-5", face: card("hearts-5"), from: HAND, to: PILE, into: "pile" },
+      ]);
+    });
+
+    it("flies somebody else's out of their seat, face up the whole way", () => {
+      // Their hand is a fan of backs standing for a count, so the seat is where the card sets
+      // off from — and the card itself is no secret, being the one they have just put face up
+      // on the pile (ADR-0008).
+      const before = boxes({ [seatBox("p2")]: SEAT });
+      const after = boxes({ "hearts-5": PILE, [seatBox("p2")]: SEAT });
+
+      assert.deepEqual(ghostsFor(slap({ playerId: "p2" }), "p1", before, after), [
+        { id: "hearts-5", face: card("hearts-5"), from: SEAT, to: PILE, into: "pile" },
+      ]);
+    });
+
+    it("drops a card it cannot place at both ends", () => {
+      // The same rule a turn's cards are held to: a seat that has not been drawn, or a card
+      // the pile has not landed yet, is a journey with one end missing.
+      const landed = boxes({ "hearts-5": PILE });
+
+      assert.deepEqual(ghostsFor(slap(), "p1", boxes({}), landed), []);
+      assert.deepEqual(ghostsFor(slap(), "p1", landed, boxes({})), []);
+      assert.deepEqual(ghostsFor(slap({ playerId: "p2" }), "p1", boxes({}), landed), []);
     });
   });
 });
