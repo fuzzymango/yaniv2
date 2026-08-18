@@ -296,6 +296,106 @@ describe("serializeStateForPlayer — the last move", () => {
   });
 });
 
+/**
+ * The slapdown that just resolved, told to everyone in full. Nothing to redact, unlike
+ * `lastMove.drawnCard`: a slapped card is face up on `lastDiscard` by the time this field
+ * is written, so naming it says nothing the pile does not already. Issue #93, ADR-0008.
+ */
+describe("serializeStateForPlayer — the last slapdown", () => {
+  const slapped = () =>
+    makeState({
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace" },
+        { id: "p3", name: "Alan" },
+      ],
+      hands: { p1: ["hearts-3"], p2: ["spades-K"], p3: ["clubs-9"] },
+      lastDiscard: ["hearts-7", "diamonds-7", "spades-7"],
+      currentTurnPlayerId: "p2",
+      lastSlapdown: { playerId: "p1", cardId: "spades-7" },
+    });
+
+  it("names the slapper and the card for every viewer alike", () => {
+    for (const viewer of ["p1", "p2", "p3"]) {
+      const view = serializeStateForPlayer(slapped(), viewer);
+      assert.equal(view.lastSlapdown?.playerId, "p1", `hidden from ${viewer}`);
+      assert.equal(view.lastSlapdown?.card.id, "spades-7", `hidden from ${viewer}`);
+    }
+  });
+
+  /**
+   * The reason it needs no redaction: the card it names is one of the cards on the
+   * face-up pile every viewer is already sent in full.
+   */
+  it("names only a card already face up on the discard pile", () => {
+    for (const viewer of ["p1", "p2", "p3"]) {
+      const view = serializeStateForPlayer(slapped(), viewer);
+      assert.ok(
+        ids(view.lastDiscard).includes(view.lastSlapdown!.card.id),
+        `${viewer} was told a card that is not on the pile`,
+      );
+    }
+  });
+
+  it("leaks nothing else of the slapper's hand", () => {
+    const state = makeState({
+      hands: { p1: ["hearts-3", "clubs-4"], p2: ["spades-K"] },
+      lastDiscard: ["hearts-7", "spades-7"],
+      currentTurnPlayerId: "p2",
+      lastSlapdown: { playerId: "p1", cardId: "spades-7" },
+    });
+    const wire = JSON.stringify(serializeStateForPlayer(state, "p2"));
+
+    for (const cardId of ["hearts-3", "clubs-4"]) {
+      assert.ok(!wire.includes(cardId), `serialized view leaked ${cardId}`);
+    }
+  });
+
+  it("says nothing about whose window is open — that stays `slapdownEligible`'s", () => {
+    const view = serializeStateForPlayer(
+      makeState({
+        hands: { p1: ["spades-7"], p2: ["clubs-2"] },
+        lastDiscard: ["hearts-7"],
+        currentTurnPlayerId: "p2",
+        slapdown: { playerId: "p1", cardId: "spades-7" },
+      }),
+      "p2",
+    );
+
+    assert.equal(view.lastSlapdown, null);
+    assert.equal(view.you.slapdownEligible, false);
+  });
+
+  /** Ungated by phase, as `lastMove` is: the round it belongs to is the one being read. */
+  it("stands once the round is scored", () => {
+    const scored = unwrap(
+      callYaniv(
+        makeState({
+          hands: { p1: ["hearts-A", "hearts-2"], p2: ["spades-K"] },
+          lastDiscard: ["hearts-7", "spades-7"],
+          lastSlapdown: { playerId: "p2", cardId: "spades-7" },
+        }),
+        "p1",
+      ),
+    );
+
+    for (const viewer of ["p1", "p2"]) {
+      const view = serializeStateForPlayer(scored, viewer);
+      assert.equal(view.phase, "roundEnd");
+      assert.equal(view.lastSlapdown?.playerId, "p2");
+      assert.equal(view.lastSlapdown?.card.id, "spades-7");
+    }
+  });
+
+  it("reports no slapdown before one has been made", () => {
+    assert.equal(serializeStateForPlayer(scenario(), "p1").lastSlapdown, null);
+    assert.equal(
+      serializeStateForPlayer(makeState({ phase: "lobby" }), "p1").lastSlapdown,
+      null,
+    );
+  });
+});
+
 describe("serializeStateForPlayer — settings", () => {
   it("is present and carries the room's own values, in the lobby", () => {
     const view = serializeStateForPlayer(

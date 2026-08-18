@@ -1492,6 +1492,39 @@ describe("slapping down", () => {
     assert.equal(after.you.slapdownEligible, false, "the window closed behind it");
   });
 
+  /**
+   * The fact a client watches a slapdown by, over a real connection: the seat it came out
+   * of, which no diff of two positions could name. Told to everyone alike and unredacted —
+   * the card is on the face-up pile by the time it is sent. docs/adr/0008.
+   */
+  it("names the slapper and the card to both seats alike", async () => {
+    const { ada, grace, adaView } = await playToAnOpenWindow();
+    ada.watcher.reset();
+    grace.watcher.reset();
+
+    expectOk(await ask(ada.client, "slapDown"));
+
+    for (const seat of [ada, grace]) {
+      const after = await seat.watcher.until(
+        (v) => v.lastSlapdown !== null,
+        `${seat.name} to be told about the slapdown`,
+      );
+      assert.equal(after.lastSlapdown!.playerId, ada.id);
+      assert.equal(after.lastSlapdown!.card.id, after.lastDiscard.at(-1)!.id);
+      assert.ok(
+        adaView.you.hand.some((c) => c.id === after.lastSlapdown!.card.id),
+        `${seat.name} was told a card that never came out of Ada's hand`,
+      );
+    }
+  });
+
+  it("says nothing about a slapdown before one is made", async () => {
+    const { adaView, graceView } = await playToAnOpenWindow();
+
+    assert.equal(adaView.lastSlapdown, null);
+    assert.equal(graceView.lastSlapdown, null, "an open window is not a slapdown");
+  });
+
   it("refuses a second slap once the window is used up", async () => {
     const { ada } = await playToAnOpenWindow();
     expectOk(await ask(ada.client, "slapDown"));

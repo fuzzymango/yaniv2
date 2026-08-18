@@ -87,6 +87,20 @@ discard pile, since it was face up there a moment earlier, and the mover's alone
 came off the deck, since it is a card of a hidden hand now. See
 [ADR-0007](docs/adr/0007-last-move-on-the-wire.md).
 
+## Last slapdown
+
+The slapdown that just resolved: whose it was and the card they put down —
+`RoundState.lastSlapdown`, and `lastSlapdown` on the view. A **sibling** of the last move,
+never a part of it: a slapdown is not a turn, so the last move is left standing and this
+changes instead. Exactly one, overwritten by the next, cleared by a fresh deal.
+
+It exists because *whose* seat the card came from is **unknowable downstream**: the card
+itself can be read off `lastDiscard` growing by one, but an open window is private to its
+holder (see "Slapdown and the slapdown window"), so every other viewer sees a card arrive
+with no seat attached. Nothing about it is redacted — by the time it is written the card is
+face up on the pile everyone is already sent in full. See
+[ADR-0008](docs/adr/0008-slapdown-on-the-wire.md).
+
 ## Card flight
 
 One move as something to *watch*: the cards leaving a hand for the discard pile, and the card
@@ -126,8 +140,8 @@ table flies, whoever took it (issues #72, #73, #74); `docs/client-table.md` has 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it
 matches, out of turn and without taking one (`docs/rules.md` §9). It is not a turn and not
 a mode of one: the turn passed to the next player the moment the discard-and-draw resolved,
-and a slapdown leaves it exactly where it is. All it does is take a card off a hand and add
-it to `lastDiscard`.
+and a slapdown leaves it exactly where it is. All it does is take a card off a hand, add it
+to `lastDiscard`, and record itself as the **last slapdown** for a client to watch.
 
 The **slapdown window** is the state it is available in: the stretch between one player's
 turn resolving and the next player's beginning. It is the only state in this game in which

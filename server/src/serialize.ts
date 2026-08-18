@@ -98,6 +98,7 @@ export function serializeStateForPlayer(
       lastDiscard: [],
       buriedCount: 0,
       lastMove: null,
+      lastSlapdown: null,
       roundResult: null,
       winnerIds: null,
     };
@@ -144,6 +145,10 @@ export function serializeStateForPlayer(
     lastDiscard: round.lastDiscard,
     buriedCount: round.buried.length,
     lastMove: round.lastMove ? toLastMoveView(round.lastMove, viewer.id) : null,
+    // Passed through whole, unlike the move above: the card it names is on the face-up
+    // pile every viewer is sent in full, so there is nothing here for one player to know
+    // and another not — and so no per-viewer view of it to build. docs/adr/0008.
+    lastSlapdown: round.lastSlapdown,
     roundResult:
       revealing && state.lastRoundResult
         ? toRoundResultView(state.lastRoundResult)

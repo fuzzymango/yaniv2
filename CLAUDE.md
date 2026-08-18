@@ -82,14 +82,13 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
 not redundant: `play.ts` answers "do the rules and the bot behave?", `playSocket.ts` answers
 "does the wire work?".
 
-- **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
-  their own terminals, over a **real socket connection** to a separately running server
-  (`npm run serve` first); flags are tabulated in `README.md`. Composition only, like
-  `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`. `render.ts` (view → frame,
-  plus the view-less main menu) and `commands.ts` (typed line + view → a `Command`) are pure
-  and total — bad input returns `invalid`, never throws. `session.ts` drives the loop, its
-  input and output injected so tests can, and **imports nothing from `src/` except types**:
-  reaching for `RoomManager` or `GameState` makes it a second server, not a transport test.
+- **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in their
+  own terminals, over a **real socket connection** to a separately running server (`npm run
+  serve` first). Composition only, like `index.ts`: argv, stdin/stdout and a socket, handed to
+  `cli/`, where `render.ts` and `commands.ts` are pure and total — bad input returns `invalid`,
+  never throws. `session.ts` drives the loop, its input and output injected so tests can, and
+  **imports nothing from `src/` except types**: reaching for `RoomManager` makes it a second
+  server, not a transport test.
 - **`play.ts`** — `npm run demo`. Bots only, in process, no transport: drives `RoomManager`
   and the pure transitions directly. Accepts `--seed <n>` and `--players <n>`, and a whole
   match is reproducible from the seed alone — which makes it the tool for judging bot play.
@@ -152,17 +151,17 @@ an open question. Calling Yaniv (`callYaniv`) is a separate action that replaces
 entirely, not a mode of `takeTurn`.
 
 **Slapdown does not reopen this.** `slapDown` (docs/rules.md §9) is not a turn and not a
-mode of one: `takeTurn` records the window it opened (`round.slapdown`, per `opensSlapdown`
-in the shared rulebook) and hands the turn on as usual, and slapping the card down only
-shrinks a hand and extends `lastDiscard` — `currentTurnPlayerId` never moves. The window
-closes on the slap or on the next player's `takeTurn`/`callYaniv`, whichever the server
-processes first; both assign `round.slapdown` outright rather than merging it, so a stale
-window cannot survive a turn. No lock and no timer — ADR-0005.
+mode of one: `takeTurn` records the window it opened (`round.slapdown`, per `opensSlapdown` in
+the shared rulebook) and hands the turn on as usual, and slapping the card down only shrinks a
+hand, extends `lastDiscard` and records `round.lastSlapdown` — `currentTurnPlayerId` never
+moves. The window closes on the slap or on the next player's `takeTurn`/`callYaniv`, whichever
+the server processes first; both assign `round.slapdown` outright rather than merging it, so a
+stale window cannot survive a turn. No lock and no timer — ADR-0005.
 
-The wire keeps that shape: a payload-free `slapDown` — the server already knows which card is
-meant — through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for whoever
-loses the race, and eligibility on `SelfView` alone. Both clients offer it, and against bots
-neither can win the race, per ADR-0005 — what it costs, not a defect in either.
+The wire keeps that shape: a payload-free `slapDown` (the server already knows which card is
+meant) through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for whoever loses
+the race, and eligibility on `SelfView` alone. Both clients offer it; bots never slap down for
+themselves and cannot be raced by a human, per ADR-0005 — what it costs, not a defect in either.
 
 ### Round state is nested
 
@@ -265,9 +264,12 @@ revealed to everyone only at `phase: 'roundEnd'` / `'gameEnd'`, where the rules 
 Tests assert no hidden card id reaches a payload, mutation-tested by breaking the
 serializer on purpose to confirm the leak tests fail.
 
-**The last move is sent with its drawn card redacted.** `RoundState.lastMove` records who
-just took a turn, which pile they drew from and the card itself; the serializer sends that
-card to everyone off the face-up discard and to the mover alone off the deck. docs/adr/0007.
+**The last move is sent with its drawn card redacted.** `RoundState.lastMove` records who just
+took a turn, which pile they drew from and the card itself; the serializer sends that card to
+everyone off the face-up discard and to the mover alone off the deck (docs/adr/0007).
+**`RoundState.lastSlapdown` is its unredacted sibling** — who slapped and which card, written by
+`slapDown` and cleared by `dealRound`, sent whole: the card is face up by then, and the seat it
+came out of is the part no client could infer. docs/adr/0008.
 
 **A finished round names its own players.** `PlayerRoundResult` carries a `name` copied in
 when the round is scored, and the serializer uses that rather than looking the id up in
@@ -677,8 +679,7 @@ Not oversights — deferred on purpose, in this order of likely next work:
   room nobody resumes and no host closes leaks until then: no idle sweep.
 - **Slapdown against a bot.** Both clients offer it, but bots neither slap down for themselves
   nor can be raced by a human, `playBotTurns` running in the same tick (ADR-0005).
-- **Disambiguating a joker that extends a run.** The browser sends the selection in tap
-  order, so tap order decides where the joker sits (`docs/rules.md` §4) — a deliberate wart.
+- **Disambiguating a joker that extends a run.** Tap order decides where it sits — a wart (§4).
 
 ## Running things
 
@@ -686,7 +687,6 @@ Not oversights — deferred on purpose, in this order of likely next work:
 npm test                                  # all workspaces, node:test
 npm run typecheck                         # tsc --build across the monorepo
 npm run serve --workspace=@yaniv/server   # the socket server (PORT, default 3000)
-npm run demo --workspace=@yaniv/server    # bots play a full match in process (--seed, --players)
 ```
 
 Every command and flag is tabulated in `README.md`. One thing to know before reading it:

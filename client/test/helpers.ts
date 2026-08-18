@@ -119,6 +119,7 @@ export function viewOf(
     lastDiscard,
     buriedCount: 2,
     lastMove: null,
+    lastSlapdown: null,
     roundResult: null,
     winnerIds: null,
   };

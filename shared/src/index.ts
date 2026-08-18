@@ -35,6 +35,7 @@ export type {
   Phase,
   DrawSource,
   LastMoveView,
+  LastSlapdownView,
   SelfView,
   OpponentView,
   PlayerRoundResultView,
