@@ -141,13 +141,31 @@ decisions, none of them about the rules of anything:
 - **`FLIGHT_MS` is nobody's sibling but `PACE_MS`'s.** 300ms against a 700ms beat: how long
   a card takes to cross and how long a position stays are separate questions, tied only by
   the flight having to be over inside the beat, with room to read the settled table.
+- **A slapdown is the same journey, played harder** (issue #95). One card, at twice the
+  speed, on an accelerating curve where a discard decelerates, landing with a pop past its own
+  size and a jolt across the whole table. Nothing in it is a second animation: the pop is a
+  keyframe on the ghost already flying, and the jolt is a class the flight's own settling puts
+  on the element every control is already inside — a transform, so hit-testing goes with it
+  and a tap during the jolt lands where it looks like it lands.
+- **Below the beat, the durations are one chain** (`timing.ts`): `SLAP_MS` a fraction of
+  `FLIGHT_MS`, and the jolt a fraction of `SLAP_MS`. A slapdown is *sharper than a discard*,
+  which is a ratio and not a speed — tuned as a number of its own it would be right until the
+  next time the flight changed. The chain is plain arithmetic in a module of its own precisely
+  so a test with no DOM near it can assert the derivations hold.
+- **The jolt is the table's, not the pile's.** What a slapdown is worth showing is the room
+  reacting to it; a pile that wobbled on its own would be a card doing something the position
+  does not say it did. The known cost is that a transformed table is briefly the containing
+  block for the settings modal, the one `fixed` thing inside it — invisible on a phone, where
+  the table is the viewport, and cheaper than a wrapper around everything but the modal.
 - **It is decorative, and that is a constraint.** Nothing locks, delays or waits on a
   flight; a player tapping through one plays exactly as they would with none, and whatever
   is still in the air when the screen moves on is dropped mid-flight.
 - **Reduced motion is asked in code, not in CSS.** The rest of the client answers
   `prefers-reduced-motion` with a stylesheet rule, but a measured animation cannot be turned
   off from one — so the preference is read as a flight that never starts, and the table is
-  the one it was before any of this existed.
+  the one it was before any of this existed. One gate covers all three parts of a slapdown:
+  the pop rides the flight and the jolt is triggered by its finishing, so a flight that never
+  happens takes both with it, and neither needs a rule of its own to suppress.
 
 Every move at the table flies, whoever took it: the viewer's own between their hand and the
 felt (issues #72, #73), and everybody else's between their seat and it (issue #74) — which is

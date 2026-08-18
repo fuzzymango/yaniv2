@@ -62,6 +62,24 @@ export interface LastMoveView {
   drawnCard: Card | null;
 }
 
+/**
+ * The slapdown that just resolved — whose it was and the card they put down. A sibling of
+ * `LastMoveView`, not a part of it: a slapdown is not a turn and records no draw, so the
+ * last move is left standing (docs/adr/0007) while this changes.
+ *
+ * Sent because it is not recoverable downstream either: `lastDiscard` grows by a card, but
+ * nothing on the wire says whose hand that card came out of — an open window is private to
+ * its holder (`SelfView.slapdownEligible`), so a client watching an opponent has no seat to
+ * name. docs/adr/0008.
+ *
+ * Nothing here is redacted, unlike `LastMoveView.drawnCard`: by the time this is written
+ * the card is face up on `lastDiscard`, which every viewer is sent in full.
+ */
+export interface LastSlapdownView {
+  playerId: string;
+  card: Card;
+}
+
 /** One player's revealed result for a finished round. */
 export interface PlayerRoundResultView {
   playerId: string;
@@ -119,6 +137,12 @@ export interface PlayerGameView {
    * client watches it for changes rather than treating every arrival as fresh news.
    */
   lastMove: LastMoveView | null;
+  /**
+   * The slapdown that just resolved, or null before one has been made in this round.
+   * Unchanged by a turn or a Yaniv call, so a client watches it for changes the same way
+   * it watches `lastMove`. Told to everyone in full — see `LastSlapdownView`.
+   */
+  lastSlapdown: LastSlapdownView | null;
 
   /** Populated only in `roundEnd` and `gameEnd`, where all hands are revealed. */
   roundResult: RoundResultView | null;

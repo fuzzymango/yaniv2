@@ -57,6 +57,7 @@ function dealRound(
     turnOrder,
     slapdown: null,
     lastMove: null,
+    lastSlapdown: null,
   };
 
   return {
@@ -385,6 +386,10 @@ export function slapDown(state: GameState, playerId: string): ActionResult {
     hands: { ...round.hands, [playerId]: hand.filter((c) => c.id !== window.card.id) },
     lastDiscard: [...round.lastDiscard, window.card],
     slapdown: null,
+    // The slapdown's own fact, beside the card landing on the pile: which seat it came
+    // out of is not otherwise recoverable, an open window being private to its holder.
+    // `lastMove` is left standing — this is not a turn and records no draw. docs/adr/0008.
+    lastSlapdown: { playerId, card: window.card },
   };
 
   return ok({ ...state, round: newRound });

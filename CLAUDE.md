@@ -82,14 +82,13 @@ Not part of the shipped engine — two smoke-test harnesses, split by what they 
 not redundant: `play.ts` answers "do the rules and the bot behave?", `playSocket.ts` answers
 "does the wire work?".
 
-- **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in
-  their own terminals, over a **real socket connection** to a separately running server
-  (`npm run serve` first); flags are tabulated in `README.md`. Composition only, like
-  `index.ts`: argv, stdin/stdout and a socket, handed to `cli/`. `render.ts` (view → frame,
-  plus the view-less main menu) and `commands.ts` (typed line + view → a `Command`) are pure
-  and total — bad input returns `invalid`, never throws. `session.ts` drives the loop, its
-  input and output injected so tests can, and **imports nothing from `src/` except types**:
-  reaching for `RoomManager` or `GameState` makes it a second server, not a transport test.
+- **`playSocket.ts`** — `npm run play`. A human against bots, or against other humans in their
+  own terminals, over a **real socket connection** to a separately running server (`npm run
+  serve` first). Composition only, like `index.ts`: argv, stdin/stdout and a socket, handed to
+  `cli/`, where `render.ts` and `commands.ts` are pure and total — bad input returns `invalid`,
+  never throws. `session.ts` drives the loop, its input and output injected so tests can, and
+  **imports nothing from `src/` except types**: reaching for `RoomManager` makes it a second
+  server, not a transport test.
 - **`play.ts`** — `npm run demo`. Bots only, in process, no transport: drives `RoomManager`
   and the pure transitions directly. Accepts `--seed <n>` and `--players <n>`, and a whole
   match is reproducible from the seed alone — which makes it the tool for judging bot play.
@@ -106,8 +105,8 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `main.tsx` | The entrypoint. Opens the socket, hands over the seat store and mounts `App`, and nothing else — `server/src/index.ts`'s counterpart |
 | `session.ts` | The session core: owns the socket and the seat's credential, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
-| `flight.ts` | `flightFrom` — the position on the screen and the one arriving in, and either the move between them (`CardFlight`: mover, discarded cards, draw source, drawn card where the viewer may know it) or nothing. Pure and total, `turn.ts`'s counterpart on the way in |
-| `ghosts.ts` | `ghostsFor` — a move and the boxes on the screen in, the cards actually in the air out (`Ghost`: what it answers to, the face to draw or none, from where, to where and into which place), dropping whatever the screen cannot place at both ends. `DECK_BOX` and `seatBox` are the boxes that are not cards' — the deck a drawn card starts from, and the seat somebody else's hand is one place at, both ends the client is never told a card id for |
+| `flight.ts` | `flightFrom` — the position on the screen and the one arriving in, and either the move between them or nothing. Two facts watched, `lastMove` and `lastSlapdown`, and at most one changes per arrival; `CardFlight` is tagged by which (`TurnFlight`: mover, discarded cards, draw source, drawn card where the viewer may know it — `SlapdownFlight`: mover and the one card, never redacted). Pure and total, `turn.ts`'s counterpart on the way in |
+| `ghosts.ts` | `ghostsFor` — a move and the boxes on the screen in, the cards actually in the air out (`Ghost`: what it answers to, the face to draw or none, from where, to where and into which place), dropping whatever the screen cannot place at both ends. Branches on the flight's tag — a slapdown is one card out of a hand or a seat onto the pile and nothing back, in the same box vocabulary. `DECK_BOX` and `seatBox` are the boxes that are not cards' — the deck a drawn card starts from, and the seat somebody else's hand is one place at, both ends the client is never told a card id for |
 | `flip.ts` | `invert` and `transformOf` — where a card has landed and where it came from, as the transform that puts it back. The arithmetic of the flight, and all of it: measured boxes in, one CSS transform out. Pure and total |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). One placement for the table in both its phases: a scored round is seated by the same call off the same roster, so the two cannot disagree. Generic over the opponent, since seating is a fact about a list's order and nothing about what is in it |
@@ -120,7 +119,8 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
 | `Table.tsx` | `phase: 'playing'` **and `'roundEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, and the call become the deal |
-| `CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen, and the deck and the seats with them, after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), the `CardsInFlight` overlay they fly across, and `FLIGHT_MS`. The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
+| `timing.ts` | How long the moving parts of a move last, as one chain: `FLIGHT_MS` → `SLAP_MS` → `SHAKE_MS`, each a fraction of the one above it, so the table is retuned from one number and cannot end up half fast and half slow. `PACE_MS` sits above the chain without being derived from it. Plain arithmetic, so a test with no DOM asserts the derivations |
+| `CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen, and the deck and the seats with them, after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), and the `CardsInFlight` overlay they fly across. Also *how* it flies, which is the one thing here that is not a measurement: a turn crosses in `FLIGHT_MS` and decelerates, a slapdown crosses in `SLAP_MS` on a sharper curve, pops on landing and jolts the table (`.table--jolt`, worn for `SHAKE_MS`). The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
 | `Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held, carrying the seat's own `data-flight-box` — the one box in this client drawn to be measured rather than looked at) and `CascadeReveal` (the same hand face up and read, in the seat's own reserved box). Both take that box from `seatFootprint`, so swapping one for the other moves nothing around them. `OpponentSeat` composes the first three for live play; `Table.tsx` composes the scored seat. Presentational throughout |
 | `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and the same two ways out the lobby offers |
 | `SettingsEditor.tsx` | The host's four controls, in the lobby and nowhere else. Offers exactly what `isValidSettings` accepts, and sends the whole object per change |
@@ -152,17 +152,17 @@ an open question. Calling Yaniv (`callYaniv`) is a separate action that replaces
 entirely, not a mode of `takeTurn`.
 
 **Slapdown does not reopen this.** `slapDown` (docs/rules.md §9) is not a turn and not a
-mode of one: `takeTurn` records the window it opened (`round.slapdown`, per `opensSlapdown`
-in the shared rulebook) and hands the turn on as usual, and slapping the card down only
-shrinks a hand and extends `lastDiscard` — `currentTurnPlayerId` never moves. The window
-closes on the slap or on the next player's `takeTurn`/`callYaniv`, whichever the server
-processes first; both assign `round.slapdown` outright rather than merging it, so a stale
-window cannot survive a turn. No lock and no timer — ADR-0005.
+mode of one: `takeTurn` records the window it opened (`round.slapdown`, per `opensSlapdown` in
+the shared rulebook) and hands the turn on as usual, and slapping the card down only shrinks a
+hand, extends `lastDiscard` and records `round.lastSlapdown` — `currentTurnPlayerId` never
+moves. The window closes on the slap or on the next player's `takeTurn`/`callYaniv`, whichever
+the server processes first; both assign `round.slapdown` outright rather than merging it, so a
+stale window cannot survive a turn. No lock and no timer — ADR-0005.
 
-The wire keeps that shape: a payload-free `slapDown` — the server already knows which card is
-meant — through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for whoever
-loses the race, and eligibility on `SelfView` alone. Both clients offer it, and against bots
-neither can win the race, per ADR-0005 — what it costs, not a defect in either.
+The wire keeps that shape: a payload-free `slapDown` (the server already knows which card is
+meant) through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for whoever loses
+the race, and eligibility on `SelfView` alone. Both clients offer it; bots never slap down for
+themselves and cannot be raced by a human, per ADR-0005 — what it costs, not a defect in either.
 
 ### Round state is nested
 
@@ -265,9 +265,12 @@ revealed to everyone only at `phase: 'roundEnd'` / `'gameEnd'`, where the rules 
 Tests assert no hidden card id reaches a payload, mutation-tested by breaking the
 serializer on purpose to confirm the leak tests fail.
 
-**The last move is sent with its drawn card redacted.** `RoundState.lastMove` records who
-just took a turn, which pile they drew from and the card itself; the serializer sends that
-card to everyone off the face-up discard and to the mover alone off the deck. docs/adr/0007.
+**The last move is sent with its drawn card redacted.** `RoundState.lastMove` records who just
+took a turn, which pile they drew from and the card itself; the serializer sends that card to
+everyone off the face-up discard and to the mover alone off the deck (docs/adr/0007).
+**`RoundState.lastSlapdown` is its unredacted sibling** — who slapped and which card, written by
+`slapDown` and cleared by `dealRound`, sent whole: the card is face up by then, and the seat it
+came out of is the part no client could infer. docs/adr/0008.
 
 **A finished round names its own players.** `PlayerRoundResult` carries a `name` copied in
 when the round is scored, and the serializer uses that rather than looking the id up in
@@ -430,24 +433,23 @@ server never sends, so `slapdownEligible` *is* the answer.
 ### The table is seated, and the scored round is the same table
 
 Opponents are drawn round three sides of the felt (`seatZones`): fans of face-down backs under
-upright labels while the round is played, the same seats cascaded face up once it is scored,
-with each player's numbers on their own label. A hand shrinking is something to watch, and a
-scored one something to read — which is why the two shapes differ.
+upright labels while the round is played, the same seats cascaded face up with each player's
+numbers once it is scored — a hand shrinking is something to watch, a scored one something to read.
 
 **And it is one screen, not two** (issue #78): `Table.tsx` renders both phases, so a round
 ending changes what is in three slots and nothing about where anything is. One placement
 (`bySeat` off the live roster) and one reserved box per seat (`seatFootprint`) are what make
 that hold by construction. Every decision behind the geometry is in `docs/client-table.md`
-(issues #56, #58, #59, #60, #78, and the flight below); `fan.ts`, `score.ts`, `seating.ts` and
-`Seat.tsx` are where it lives.
+(issues #56, #58, #59, #60, #78, and the flight below); it lives in `fan.ts`, `score.ts`,
+`seating.ts` and `Seat.tsx`.
 
 **A move is watched crossing that table, not merely published onto it** (issues #69, #72-#74).
 The session says *what* moved (`flight.ts`), `ghosts.ts` which of it the screen can draw and which
-way up, and `CardsInFlight.tsx` measures where it happens and animates the difference closed (FLIP,
-`flip.ts`) rather than repeating the geometry above. Every move flies both ways, whoever took it —
-one box for a hand that reaches the screen as a count, and the wire's redaction passed through, so
-somebody else's draw off the deck flies as a back. Nothing waits on a flight, reduced motion skips
-it, and it stays scoped to `playing`: a scored round is a table to read, not a move to watch.
+way up, and `CardsInFlight.tsx` measures where and closes the difference (FLIP, `flip.ts`). Every
+move flies both ways, whoever took it, with the wire's redaction passed through. **A slapdown flies
+as its own shape** (#95): faster and sharper, popping on landing and jolting the table, on durations
+derived from a turn's rather than tuned beside them (`timing.ts`). Nothing waits on a flight,
+reduced motion skips all of it, and it is scoped to `playing`.
 
 ### Settings are edited in one place and shown in another
 
@@ -475,9 +477,9 @@ is testability: the session core is driven under `node:test` against a real sock
 with no browser, no jsdom and no React test dependencies. Components are not tested at all,
 a consequence of that split rather than a gap — behaviour worth testing on its own belongs in
 the session core, or in one of the pure modules beside it (`turn.ts`, `seating.ts`, `fan.ts`,
-`flight.ts`, `ghosts.ts`, `flip.ts`, `settings.ts`), where every layout rule with an answer lives.
-`useCardFlight` is the one hook outside `useSession`, and only because a flight is measured
-off rendered elements — it decides nothing the pure modules could have been asked instead.
+`flight.ts`, `ghosts.ts`, `flip.ts`, `timing.ts`, `settings.ts`): every layout rule with an
+answer, and every duration with a derivation. `useCardFlight` is the one hook outside
+`useSession`: a flight is measured off rendered elements, and only its keyframes decided there.
 
 Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` compares by
 identity, so a mutated object would leave React rendering a position that has moved on.
@@ -677,8 +679,7 @@ Not oversights — deferred on purpose, in this order of likely next work:
   room nobody resumes and no host closes leaks until then: no idle sweep.
 - **Slapdown against a bot.** Both clients offer it, but bots neither slap down for themselves
   nor can be raced by a human, `playBotTurns` running in the same tick (ADR-0005).
-- **Disambiguating a joker that extends a run.** The browser sends the selection in tap
-  order, so tap order decides where the joker sits (`docs/rules.md` §4) — a deliberate wart.
+- **Disambiguating a joker that extends a run.** Tap order decides where it sits — a wart (§4).
 
 ## Running things
 
@@ -686,7 +687,6 @@ Not oversights — deferred on purpose, in this order of likely next work:
 npm test                                  # all workspaces, node:test
 npm run typecheck                         # tsc --build across the monorepo
 npm run serve --workspace=@yaniv/server   # the socket server (PORT, default 3000)
-npm run demo --workspace=@yaniv/server    # bots play a full match in process (--seed, --players)
 ```
 
 Every command and flag is tabulated in `README.md`. One thing to know before reading it:

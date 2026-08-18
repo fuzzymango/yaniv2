@@ -87,6 +87,20 @@ discard pile, since it was face up there a moment earlier, and the mover's alone
 came off the deck, since it is a card of a hidden hand now. See
 [ADR-0007](docs/adr/0007-last-move-on-the-wire.md).
 
+## Last slapdown
+
+The slapdown that just resolved: whose it was and the card they put down —
+`RoundState.lastSlapdown`, and `lastSlapdown` on the view. A **sibling** of the last move,
+never a part of it: a slapdown is not a turn, so the last move is left standing and this
+changes instead. Exactly one, overwritten by the next, cleared by a fresh deal.
+
+It exists because *whose* seat the card came from is **unknowable downstream**: the card
+itself can be read off `lastDiscard` growing by one, but an open window is private to its
+holder (see "Slapdown and the slapdown window"), so every other viewer sees a card arrive
+with no seat attached. Nothing about it is redacted — by the time it is written the card is
+face up on the pile everyone is already sent in full. See
+[ADR-0008](docs/adr/0008-slapdown-on-the-wire.md).
+
 ## Card flight
 
 One move as something to *watch*: the cards leaving a hand for the discard pile, and the card
@@ -99,8 +113,14 @@ Which is why the client treats it as an **event** rather than table state: it is
 as a position reaches the screen (`flightFrom` in `client/src/flight.ts`, published as
 `SessionSnapshot.flight`), and gone from everything published after it. A position nobody
 watched arrive has no flight — a page that has just opened, a seat claimed back, a fresh deal
-— and neither has a broadcast that left the **last move** where it was, which is what a
-slapdown and a Yaniv call both do.
+— and neither has a broadcast that left both facts it is read from where they were, which is
+what a **Yaniv call** does.
+
+Those facts are the **last move** and the **last slapdown**, watched together and each for
+change of its own. A slapdown flies too, and as a shape of its own: one card out of a hand
+onto the pile and nothing coming back, tagged as such rather than told apart by which fields
+a turn's shape left empty. Exactly one broadcast carries one move, so at most one of the two
+facts has changed on any arrival and there is never a choice to make between them.
 
 The drawn card **may have no face**: `flight.ts` passes the server's redaction through
 untouched, so a card off the deck flies as a back for everyone but the drawer. Nothing on the
@@ -121,13 +141,32 @@ drawn the same way and named by the seat it is going to. The flight is over in `
 well inside the pacer's beat, so a chain of moves is one flight per beat. Every move at the
 table flies, whoever took it (issues #72, #73, #74); `docs/client-table.md` has the decisions.
 
+A **slapdown flies as its own thing** (issue #95), and how it flies is most of what says it is
+not a turn: the one card crosses in `SLAP_MS` rather than `FLIGHT_MS`, on an accelerating curve
+where a discard decelerates, lands with a brief **pop** past its own size, and **jolts the
+whole table** behind it. Those durations are a **chain, not a set of numbers**
+(`client/src/timing.ts`): the slap is a fraction of the flight and the jolt a fraction of the
+slap, so the table is retuned by editing one value and cannot end up half fast and half slow.
+The chain hangs off the pacer's beat without being derived from it — a flight has to finish
+inside a beat, and that is the whole of what the two owe each other. All three parts are one
+thing to a player who has asked for less motion: the flight never starts, so the pop and the
+jolt never happen, and the card is simply on the pile where the position already put it.
+
 ## Slapdown and the slapdown window
 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it
 matches, out of turn and without taking one (`docs/rules.md` §9). It is not a turn and not
 a mode of one: the turn passed to the next player the moment the discard-and-draw resolved,
-and a slapdown leaves it exactly where it is. All it does is take a card off a hand and add
-it to `lastDiscard`.
+and a slapdown leaves it exactly where it is. All it does is take a card off a hand, add it
+to `lastDiscard`, and record itself as the **last slapdown** for a client to watch.
+
+That record is the wire fact behind the flight above (issue #93): **who slapped and which
+card**, sent to everyone unredacted, since the card is face up on the pile by the time it is
+written and the seat it came out of is the part no client could work out for itself
+([ADR-0008](docs/adr/0008-slapdown-on-the-wire.md)). It is the **last move**'s sibling
+rather than a variant of it, and each is left standing by whatever the other records — which
+is what lets a client watch the two facts side by side and always have at most one of them
+change per broadcast.
 
 The **slapdown window** is the state it is available in: the stretch between one player's
 turn resolving and the next player's beginning. It is the only state in this game in which

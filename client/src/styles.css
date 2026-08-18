@@ -690,6 +690,47 @@ body {
 }
 
 /*
+ * The table knocked by a slapdown (issue #95): everything on the felt jolted a couple of
+ * pixels and set straight again, for as long as the layer that put the class on leaves it on
+ * (`--jolt-ms`, off the timing chain in `timing.ts` — the stylesheet says how far it moves
+ * and nothing about how long, so the whole chain is still tuned from one number).
+ *
+ * A transform and nothing else, on the element every control here is already inside. Both
+ * halves matter: a transform carries hit-testing with it, so a tap during the jolt lands on
+ * whatever it looks like it is landing on, and moving the *table* rather than the pile is
+ * what makes it a room reacting rather than a card wobbling. Small on purpose — a slapdown is
+ * a moment and not an earthquake, and the boxes a flight is measured against are inside this
+ * element.
+ *
+ * The known cost of transforming this element: for the length of the jolt it is the
+ * containing block for anything `fixed` inside it, which is the settings modal and only the
+ * settings modal. On a phone the table *is* the viewport and there is nothing to see; on a
+ * wide screen a modal left open through somebody else's slapdown is briefly boxed by the
+ * column. Worth less than the structure a wrapper around everything-but-the-modal would cost.
+ *
+ * Nothing here answers `prefers-reduced-motion`, and that is not an omission: this class is
+ * put on by the same code that decides whether a slapdown flies at all, so a player who has
+ * asked for stillness never gets one to suppress (`wantsStillness` in `CardsInFlight.tsx`).
+ */
+.table--jolt {
+  animation: table-jolt var(--jolt-ms) ease-out;
+}
+
+@keyframes table-jolt {
+  25% {
+    transform: translate(-2px, 2px) rotate(-0.25deg);
+  }
+
+  60% {
+    transform: translate(2px, -1px) rotate(0.2deg);
+  }
+
+  100% {
+    transform: none;
+  }
+}
+
+/*
  * The settings icon, pinned to the corner of the table itself rather than riding the top
  * of the column.
  *

@@ -1312,6 +1312,110 @@ describe("the last move", () => {
   });
 });
 
+/**
+ * `round.lastSlapdown` is the slapdown's own fact, a sibling of `lastMove` rather than a
+ * replacement: a slapped card lands somewhere on screen, and no diff of two positions says
+ * whose seat it came from, since an opponent's eligibility is never on the wire. Issue #93.
+ */
+describe("the last slapdown", () => {
+  const open = () =>
+    makeState({
+      hands: { p1: ["spades-7", "clubs-9"], p2: ["clubs-2", "diamonds-3"] },
+      drawPile: ["hearts-10"],
+      lastDiscard: ["hearts-7", "diamonds-7"],
+      currentTurnPlayerId: "p2",
+      slapdown: { playerId: "p1", cardId: "spades-7" },
+      lastMove: { playerId: "p1", drawSource: "deck", drawnCardId: "spades-7" },
+    });
+
+  it("records the slapper and the card they put down", () => {
+    const after = unwrap(slapDown(open(), "p1"));
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round.lastSlapdown, {
+      playerId: "p1",
+      card: card("spades-7"),
+    });
+  });
+
+  it("leaves the card on the discard pile and out of the hand as before", () => {
+    const after = unwrap(slapDown(open(), "p1"));
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(ids(after.round.lastDiscard), [
+      "hearts-7",
+      "diamonds-7",
+      "spades-7",
+    ]);
+    assert.deepEqual(ids(after.round.hands["p1"]!), ["clubs-9"]);
+  });
+
+  it("leaves the last move exactly as it found it", () => {
+    const after = unwrap(slapDown(open(), "p1"));
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round.lastMove, {
+      playerId: "p1",
+      drawSource: "deck",
+      drawnCard: card("spades-7"),
+    });
+  });
+
+  it("is empty until someone slaps one down", () => {
+    assert.equal(open().round?.lastSlapdown ?? null, null);
+
+    const played = unwrap(
+      takeTurn(
+        makeState({
+          hands: { p1: ["hearts-3", "clubs-2"], p2: ["diamonds-4"] },
+          drawPile: ["spades-A"],
+          lastDiscard: ["hearts-6"],
+        }),
+        "p1",
+        { discardCardIds: ["hearts-3"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+    assert.equal(played.phase, "playing");
+    assert.equal(played.round.lastSlapdown, null);
+  });
+
+  it("stands through the turns that follow it, to be watched for change", () => {
+    const slapped = unwrap(slapDown(open(), "p1"));
+    const after = unwrap(
+      takeTurn(
+        slapped,
+        "p2",
+        { discardCardIds: ["clubs-2"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round.lastSlapdown, {
+      playerId: "p1",
+      card: card("spades-7"),
+    });
+  });
+
+  it("is cleared by the next round, so nothing replays over a fresh deal", () => {
+    const slapped = unwrap(slapDown(open(), "p1"));
+    const scored = unwrap(callYaniv(slapped, "p2"));
+    const next = unwrap(startNextRound(scored, "p1", rng()));
+
+    assert.equal(next.phase, "playing");
+    assert.equal(next.round.lastSlapdown, null);
+  });
+
+  it("is empty on a freshly dealt match", () => {
+    const state = unwrap(
+      startGame(makeState({ phase: "lobby", roundNumber: 0 }), "p1", rng()),
+    );
+    assert.equal(state.phase, "playing");
+    assert.equal(state.round.lastSlapdown, null);
+  });
+});
+
 describe("startNextRound", () => {
   const finished = () => {
     const state = makeState({

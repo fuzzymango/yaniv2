@@ -62,6 +62,8 @@ export interface StateOptions {
   slapdown?: { playerId: string; cardId: string };
   /** A move already recorded on the round, named by its drawn card's id. */
   lastMove?: { playerId: string; drawSource: DrawSource; drawnCardId: string };
+  /** A slapdown already recorded on the round, named by whose it was and its card id. */
+  lastSlapdown?: { playerId: string; cardId: string };
   settings?: Partial<RoomSettings>;
 }
 
@@ -113,6 +115,12 @@ export function makeState(options: StateOptions = {}): GameState {
           playerId: options.lastMove.playerId,
           drawSource: options.lastMove.drawSource,
           drawnCard: card(options.lastMove.drawnCardId),
+        }
+      : null,
+    lastSlapdown: options.lastSlapdown
+      ? {
+          playerId: options.lastSlapdown.playerId,
+          card: card(options.lastSlapdown.cardId),
         }
       : null,
   };

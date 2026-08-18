@@ -13,7 +13,7 @@
  */
 
 import type { Card } from "@yaniv/shared";
-import type { CardFlight } from "./flight.ts";
+import type { CardFlight, SlapdownFlight, TurnFlight } from "./flight.ts";
 import type { Box } from "./flip.ts";
 
 /**
@@ -48,7 +48,7 @@ export const seatBox = (playerId: string): string => `seat:${playerId}`;
  *
  * It is what a landing place is left empty *by*, and it has to be said rather than assumed
  * from the card, because one card can be in two places at once for as long as a flight
- * lasts: a slapdown inside `FLIGHT_MS` puts the card still flying into the hand onto the
+ * lasts: a slapdown inside a flight puts the card still flying into the hand onto the
  * pile, and the place it has actually reached must not be blanked out waiting for it.
  *
  * A `seat` is the one landing that nothing waits at. An opponent's hand is a fan of backs
@@ -92,6 +92,23 @@ const flown = (
 ): Ghost[] => (from === undefined || to === undefined ? [] : [{ ...ghost, from, to }]);
 
 /**
+ * A card discarded: out of wherever the mover's cards are held, onto its own place on the
+ * pile, face up because that is what a pile is.
+ *
+ * The one journey a turn and a slapdown have in common, which is why it is written once — a
+ * slapdown is a discard made out of turn, and it lands where every other discard does.
+ * `heldAt` is the box it left, and the whole of what "whose move it is" decides here: the
+ * card's own place for the viewer's hand, and the seat for a hand nobody else can see.
+ */
+const ontoPile = (
+  card: Card,
+  heldAt: string,
+  before: ReadonlyMap<string, Box>,
+  after: ReadonlyMap<string, Box>,
+): Ghost[] =>
+  flown({ id: card.id, face: card, into: "pile" }, before.get(heldAt), after.get(card.id));
+
+/**
  * The cards of a move, on their way to where the position already has them.
  *
  * `before` is where everything was at the last render and `after` where it is now — the two
@@ -101,9 +118,46 @@ const flown = (
  * viewer's own cards leave their hand and come back to it, and everybody else's leave their
  * seat and come back to it. What is *shown* is the server's business and is passed through
  * untouched — a card the wire redacted has no face here either.
+ *
+ * *What kind* of move it is is asked of the tag and never of which fields are filled in: a
+ * turn and a slapdown are different journeys, not one journey with a piece missing.
  */
 export function ghostsFor(
   flight: CardFlight,
+  viewerId: string,
+  before: ReadonlyMap<string, Box>,
+  after: ReadonlyMap<string, Box>,
+): Ghost[] {
+  return flight.kind === "turn"
+    ? ghostsOfTurn(flight, viewerId, before, after)
+    : ghostsOfSlapdown(flight, viewerId, before, after);
+}
+
+/**
+ * A slapdown: one card, one way, and nothing coming back.
+ *
+ * It is the discard above and no more of it, journey for journey — hence the shared `ontoPile`
+ * rather than a second reading of the same boxes. The deck is the one place it never touches
+ * at either end: the card was drawn on the turn before this one, and that draw has already
+ * been watched.
+ *
+ * The card always has a face. Nothing about a slapdown is redacted (ADR-0008) — it is face up
+ * on the pile by the time the fact naming it is written.
+ */
+function ghostsOfSlapdown(
+  flight: SlapdownFlight,
+  viewerId: string,
+  before: ReadonlyMap<string, Box>,
+  after: ReadonlyMap<string, Box>,
+): Ghost[] {
+  const mine = flight.playerId === viewerId;
+  const card = flight.card;
+  return ontoPile(card, mine ? card.id : seatBox(flight.playerId), before, after);
+}
+
+/** A turn: a set out of a hand onto the pile, and one card back the other way. */
+function ghostsOfTurn(
+  flight: TurnFlight,
   viewerId: string,
   before: ReadonlyMap<string, Box>,
   after: ReadonlyMap<string, Box>,
@@ -112,11 +166,7 @@ export function ghostsFor(
   const seat = seatBox(flight.playerId);
 
   const discarded = flight.discarded.flatMap((card) =>
-    flown(
-      { id: card.id, face: card, into: "pile" },
-      mine ? before.get(card.id) : before.get(seat),
-      after.get(card.id),
-    ),
+    ontoPile(card, mine ? card.id : seat, before, after),
   );
 
   // Where it came from is also how it is drawn, and for the same reason: a card off the pile

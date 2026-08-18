@@ -64,6 +64,24 @@ export interface LastMove {
 }
 
 /**
+ * The slapdown that just resolved: whose it was and the card they put down. Written by
+ * `slapDown` and by nothing else.
+ *
+ * A sibling of `LastMove` rather than a part of it — a slapdown is not a turn (ADR-0005)
+ * and records no draw, so the last move stays exactly as it was. It is a separate fact
+ * because it is one nothing downstream can recover: `lastDiscard` grows by a card, but
+ * whose hand it came out of is never on the wire, an open window being private to its
+ * holder. docs/adr/0008.
+ *
+ * Same shape as `SlapdownWindow` and deliberately not the same type: one says a card may
+ * still go down, the other that one already has.
+ */
+export interface LastSlapdown {
+  playerId: string;
+  card: Card;
+}
+
+/**
  * Everything that resets between rounds. Replacing this whole object is the only way a
  * round begins, which is what makes "forgot to clear a field" unrepresentable.
  */
@@ -93,6 +111,12 @@ export interface RoundState {
    * nothing a client can see says which of the pickup-eligible ones it was.
    */
   lastMove: LastMove | null;
+  /**
+   * The slapdown that just resolved, or null before the round's first one. Overwritten by
+   * the next slapdown and left alone by everything else, so a client watches it for change
+   * exactly as it watches `lastMove`.
+   */
+  lastSlapdown: LastSlapdown | null;
 }
 
 export interface PlayerRoundResult {
