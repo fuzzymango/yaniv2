@@ -122,6 +122,12 @@ keep payloads small, not to keep anything back). The **drawn card** is redacted 
 exactly the last move's rule, and it matters more here: one withheld card is a card, a round
 of them is an opponent's whole hand. See [ADR-0007](docs/adr/0007-last-move-on-the-wire.md).
 
+Read on the browser client as the **history drawer**: the same log newest first, in mini
+cards behind an arrow on the left edge of the felt, and drawn **only while the round is being
+played** (issue #91) — a scored round tells its own story at full size in the seats. Which
+end is the interesting one, how many moves fit before it scrolls, and whether the drawer is
+open at all are the client's alone; none of them is a fact about the round.
+
 ## Card flight
 
 One move as something to *watch*: the cards leaving a hand for the discard pile, and the card

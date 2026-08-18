@@ -44,16 +44,29 @@ export function cardLabel(card: Card): string {
  * Every card says which card it is, in the markup as well as on its face.
  *
  * The one thing here that is not about drawing a card: it is how the flight layer finds a
- * card on the screen to measure (`CardsInFlight.tsx`). Still nothing about what the card *means* —
- * an id is the card's own name, and the same name in a hand, on the pile and in a reveal,
- * which is exactly what makes one place answerable from another.
+ * card on the screen to measure (`CardsInFlight.tsx`). Still nothing about what a card
+ * *means* — an id is the card's own name, and the same name in a hand, on the pile and in
+ * a reveal, which is exactly what makes one place answerable from another.
+ *
+ * **`mini` is the one variant, and it is deliberately two things at once** (issue #91): a
+ * card drawn at the size of an icon, and a card that gives up its id. A mini card is a
+ * *picture* of a card rather than the card itself — it is drawn in the move history, where
+ * the very same card is quite likely also sitting on the felt. Two elements answering to one
+ * id would leave the flight layer measuring whichever of them it walked into last
+ * (`measure` in `CardsInFlight.tsx`), so a picture carries no name: never measured, never
+ * flown, and never a place left empty for an arrival.
  */
-export function PlayingCard({ card }: { card: Card }) {
+export function PlayingCard({ card, mini = false }: { card: Card; mini?: boolean }) {
+  // The size and the id are one choice, made once here rather than twice below, so the two
+  // faces a card can have cannot end up disagreeing about what a mini one is.
+  const size = mini ? " card--mini" : "";
+  const id = mini ? undefined : card.id;
+
   // A joker has no suit and no rank worth printing in a corner, so it is its own face
   // rather than a card with two fields left blank.
   if (card.suit === null) {
     return (
-      <span className="card card--joker" data-card-id={card.id}>
+      <span className={`card card--joker${size}`} data-card-id={id}>
         <span className="card__suit">★</span>
       </span>
     );
@@ -61,7 +74,7 @@ export function PlayingCard({ card }: { card: Card }) {
 
   const red = card.suit === "hearts" || card.suit === "diamonds";
   return (
-    <span className={`card ${red ? "card--red" : "card--black"}`} data-card-id={card.id}>
+    <span className={`card ${red ? "card--red" : "card--black"}${size}`} data-card-id={id}>
       <span className="card__rank">{card.rank}</span>
       <span className="card__suit">{GLYPH[card.suit]}</span>
     </span>
