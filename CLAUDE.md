@@ -38,7 +38,7 @@ React: a framework-free session core plus one component per screen). Every works
 | File | Contents |
 |---|---|
 | `cards.ts` | `Card`/`Suit`/`Rank`, rank ordering, `rankToValue` (the scoring table, `docs/rules.md` §1), and `sortHand`/`compareCards` (display order only — see below) |
-| `views.ts` | `PlayerGameView` and friends — what a client actually receives |
+| `views.ts` | `PlayerGameView` and friends — what a client actually receives, the round's `moveHistory` included |
 | `errors.ts` | `GameErrorCode` union |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and the client |
@@ -57,7 +57,7 @@ this costs `shared` none of its dependency-freedom. See `docs/adr/0002`.
 
 | File | Contents |
 |---|---|
-| `state.ts` | `GameState`, `RoundState`, `Player` — the domain model |
+| `state.ts` | `GameState`, `RoundState`, `Player`, `MoveHistoryEntry` — the domain model |
 | `config.ts` | The operational constants only — `BOT_NAMES` and `ROOM_CODE_*`. The rule constants live in `shared` |
 | `rng.ts` | `Rng` type + `mulberry32` seeded PRNG |
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
@@ -271,6 +271,14 @@ everyone off the face-up discard and to the mover alone off the deck (docs/adr/0
 **`RoundState.lastSlapdown` is its unredacted sibling** — who slapped and which card, written by
 `slapDown` and cleared by `dealRound`, sent whole: the card is face up by then, and the seat it
 came out of is the part no client could infer. docs/adr/0008.
+
+**`RoundState.moveHistory` is the log those two are not** — every turn and every slapdown of
+the round, oldest first, appended by the same two transitions and emptied by the deal. Sent in
+full in every phase, `toMoveHistoryView` applying the last move's redaction rule entry by
+entry: a deck draw to the mover alone, a pickup and a slapdown to everyone. Its turns also
+carry the **discarded set**, so a set since buried is named on the wire — public information,
+`buriedCount` being a count for payload size rather than for secrecy. See "Move history" in
+`CONTEXT.md`.
 
 **A finished round names its own players.** `PlayerRoundResult` carries a `name` copied in
 when the round is scored, and the serializer uses that rather than looking the id up in

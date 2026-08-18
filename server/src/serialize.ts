@@ -1,12 +1,18 @@
 import type {
   LastMoveView,
+  MoveHistoryEntryView,
   OpponentView,
   PlayerGameView,
   RoundResultView,
   SelfView,
 } from "@yaniv/shared";
 import { sortHand } from "@yaniv/shared";
-import type { GameState, LastMove, RoundResult } from "./state.ts";
+import type {
+  GameState,
+  LastMove,
+  MoveHistoryEntry,
+  RoundResult,
+} from "./state.ts";
 
 /**
  * Names come from the result itself, not from the roster: a player may have given their
@@ -47,6 +53,35 @@ function toLastMoveView(move: LastMove, viewerPlayerId: string): LastMoveView {
     drawSource: move.drawSource,
     drawnCard: revealed ? move.drawnCard : null,
   };
+}
+
+/**
+ * Redact the round's log for one viewer, entry by entry.
+ *
+ * Deliberately the same rule as `toLastMoveView` above and not a looser one: a logged turn
+ * is the same fact a moment later, and a card that was the mover's alone when it was drawn
+ * does not become anybody else's for having scrolled up the list. A slapdown passes through
+ * whole, its card having been face up on the pile since it landed.
+ *
+ * The whole list goes to every viewer in every phase — what varies is only which drawn
+ * cards are named, which is why there is nothing here about `roundEnd`.
+ */
+function toMoveHistoryView(
+  history: MoveHistoryEntry[],
+  viewerPlayerId: string,
+): MoveHistoryEntryView[] {
+  return history.map((entry) => {
+    if (entry.kind === "slapdown") return entry;
+    const revealed =
+      entry.drawSource === "discard" || entry.playerId === viewerPlayerId;
+    return {
+      kind: "turn",
+      playerId: entry.playerId,
+      discarded: entry.discarded,
+      drawSource: entry.drawSource,
+      drawnCard: revealed ? entry.drawnCard : null,
+    };
+  });
 }
 
 /**
@@ -100,6 +135,7 @@ export function serializeStateForPlayer(
       buriedCount: 0,
       lastMove: null,
       lastSlapdown: null,
+      moveHistory: [],
       roundResult: null,
       winnerIds: null,
     };
@@ -150,6 +186,7 @@ export function serializeStateForPlayer(
     // pile every viewer is sent in full, so there is nothing here for one player to know
     // and another not — and so no per-viewer view of it to build. docs/adr/0008.
     lastSlapdown: round.lastSlapdown,
+    moveHistory: toMoveHistoryView(round.moveHistory, viewer.id),
     roundResult:
       revealing && state.lastRoundResult
         ? toRoundResultView(state.lastRoundResult)

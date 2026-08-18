@@ -48,6 +48,17 @@ export function cards(...ids: string[]): Card[] {
   return ids.map(card);
 }
 
+/** One logged move for `makeState`, mirroring `MoveHistoryEntry` with ids for cards. */
+export type MoveHistorySpec =
+  | {
+      kind: "turn";
+      playerId: string;
+      discardedIds: string[];
+      drawSource: DrawSource;
+      drawnCardId: string;
+    }
+  | { kind: "slapdown"; playerId: string; cardId: string };
+
 export interface StateOptions {
   phase?: Phase;
   players?: Array<{ id: string; name?: string; score?: number; isBot?: boolean }>;
@@ -64,6 +75,8 @@ export interface StateOptions {
   lastMove?: { playerId: string; drawSource: DrawSource; drawnCardId: string };
   /** A slapdown already recorded on the round, named by whose it was and its card id. */
   lastSlapdown?: { playerId: string; cardId: string };
+  /** Moves already logged on the round, oldest first, named by their cards' ids. */
+  moveHistory?: MoveHistorySpec[];
   settings?: Partial<RoomSettings>;
 }
 
@@ -123,6 +136,21 @@ export function makeState(options: StateOptions = {}): GameState {
           card: card(options.lastSlapdown.cardId),
         }
       : null,
+    moveHistory: (options.moveHistory ?? []).map((entry) =>
+      entry.kind === "turn"
+        ? {
+            kind: "turn" as const,
+            playerId: entry.playerId,
+            discarded: cards(...entry.discardedIds),
+            drawSource: entry.drawSource,
+            drawnCard: card(entry.drawnCardId),
+          }
+        : {
+            kind: "slapdown" as const,
+            playerId: entry.playerId,
+            card: card(entry.cardId),
+          },
+    ),
   };
 
   const active: GameStateActive = { ...base, phase, round };

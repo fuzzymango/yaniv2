@@ -926,6 +926,22 @@ describe("playing a match", () => {
       if (lastMove?.drawSource === "discard" && lastMove.drawnCard) {
         maySee.add(lastMove.drawnCard.id);
       }
+      // The round's log names the same public cards a round earlier: a discarded set was
+      // face up on the table when it was laid, and stays namable once it is buried — that
+      // pile is a count on the wire to keep payloads small, not to keep a secret. What the
+      // log may not name is the other half of the rule, asserted below.
+      for (const entry of published.moveHistory) {
+        if (entry.kind === "slapdown") {
+          maySee.add(entry.card.id);
+          continue;
+        }
+        for (const card of entry.discarded) maySee.add(card.id);
+        if (entry.drawSource === "deck" && entry.playerId !== me) {
+          assert.equal(entry.drawnCard, null, "a bot's deck draw was logged to us");
+        } else if (entry.drawnCard) {
+          maySee.add(entry.drawnCard.id);
+        }
+      }
       const json = JSON.stringify(published);
       for (const cardId of everyCardId) {
         if (maySee.has(cardId)) continue;
@@ -940,6 +956,40 @@ describe("playing a match", () => {
         assert.ok(!("hand" in opponent), "an opponent was sent with a hand attached");
       }
     }
+  });
+
+  /**
+   * Bot moves reach the log through the same transitions a human's do, so there is no
+   * bot-specific code for this to exercise — only the fact that there isn't.
+   */
+  it("logs every move of the round, the bots' included, one entry per broadcast", async () => {
+    const { client, watcher, view } = await sitDown();
+    const me = view.you.id;
+    assert.deepEqual(view.moveHistory, [], "a fresh deal has nothing to read back");
+
+    watcher.reset();
+    expectOk(
+      await ask(client, "takeTurn", {
+        discardCardIds: [view.you.hand[0]!.id],
+        draw: { source: "deck" },
+      }),
+    );
+    const back = await watcher.until(
+      (v) => v.currentTurnPlayerId === me,
+      "the turn to come back",
+    );
+
+    assert.equal(
+      back.moveHistory.length,
+      watcher.seen.length,
+      "one logged move per published one",
+    );
+    assert.equal(back.moveHistory[0]!.playerId, me, "the player's own turn is first");
+    assert.deepEqual(
+      watcher.seen.map((published) => published.moveHistory.length),
+      watcher.seen.map((_, index) => index + 1),
+      "the log grew by one move at a time, in step with the broadcasts",
+    );
   });
 
   it("sends each connection its own view of the same table", async () => {
