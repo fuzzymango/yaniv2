@@ -265,20 +265,12 @@ revealed to everyone only at `phase: 'roundEnd'` / `'gameEnd'`, where the rules 
 Tests assert no hidden card id reaches a payload, mutation-tested by breaking the
 serializer on purpose to confirm the leak tests fail.
 
-**The last move is sent with its drawn card redacted.** `RoundState.lastMove` records who just
-took a turn, which pile they drew from and the card itself; the serializer sends that card to
-everyone off the face-up discard and to the mover alone off the deck (docs/adr/0007).
-**`RoundState.lastSlapdown` is its unredacted sibling** — who slapped and which card, written by
-`slapDown` and cleared by `dealRound`, sent whole: the card is face up by then, and the seat it
-came out of is the part no client could infer. docs/adr/0008.
-
-**`RoundState.moveHistory` is the log those two are not** — every turn and every slapdown of
-the round, oldest first, appended by the same two transitions and emptied by the deal. Sent in
-full in every phase, `toMoveHistoryView` applying the last move's redaction rule entry by
-entry: a deck draw to the mover alone, a pickup and a slapdown to everyone. Its turns also
-carry the **discarded set**, so a set since buried is named on the wire — public information,
-`buriedCount` being a count for payload size rather than for secrecy. See "Move history" in
-`CONTEXT.md`.
+**The last move is sent with its drawn card redacted.** `RoundState.lastMove` records the mover,
+the pile they drew from and the card itself; the serializer sends that card to everyone off the
+face-up discard and to the mover alone off the deck (docs/adr/0007). **`lastSlapdown` is its
+unredacted sibling** — who slapped and which card, sent whole: the card is face up by then, and
+the seat no client could infer (docs/adr/0008). And **`moveHistory` is the log neither is** —
+the round's turns and slapdowns, redacted per entry on the same rule. docs/adr/0010.
 
 **A finished round names its own players.** `PlayerRoundResult` carries a `name` copied in
 when the round is scored, and the serializer uses that rather than looking the id up in

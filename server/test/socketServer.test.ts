@@ -926,23 +926,18 @@ describe("playing a match", () => {
       if (lastMove?.drawSource === "discard" && lastMove.drawnCard) {
         maySee.add(lastMove.drawnCard.id);
       }
-      // The round's log names the same public cards a round earlier: a discarded set was
-      // face up on the table when it was laid, and stays namable once it is buried — that
-      // pile is a count on the wire to keep payloads small, not to keep a secret. What the
-      // log may not name is the other half of the rule, asserted below.
+      // The round's log names public cards of its own — a discarded set was face up when
+      // it was laid, and stays namable once buried, that pile being a count on the wire to
+      // keep payloads small rather than to keep a secret. So it is checked on its own
+      // terms, entry by entry, and lifted out of the payload the rest of this asserts
+      // over: widening `maySee` for it would excuse the same card ids everywhere else.
       for (const entry of published.moveHistory) {
-        if (entry.kind === "slapdown") {
-          maySee.add(entry.card.id);
-          continue;
-        }
-        for (const card of entry.discarded) maySee.add(card.id);
+        if (entry.kind === "slapdown") continue;
         if (entry.drawSource === "deck" && entry.playerId !== me) {
           assert.equal(entry.drawnCard, null, "a bot's deck draw was logged to us");
-        } else if (entry.drawnCard) {
-          maySee.add(entry.drawnCard.id);
         }
       }
-      const json = JSON.stringify(published);
+      const json = JSON.stringify({ ...published, moveHistory: [] });
       for (const cardId of everyCardId) {
         if (maySee.has(cardId)) continue;
         assert.ok(!json.includes(`"${cardId}"`), `${cardId} leaked into a broadcast`);

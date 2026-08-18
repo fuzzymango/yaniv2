@@ -158,6 +158,11 @@ export interface RoundState {
    * Uncapped: a round is bounded by its own deck, so the list is short by construction,
    * and a cap would be a rule about how far back a player may look that `docs/rules.md`
    * does not have. Round-scoped like everything else here, so a fresh deal empties it.
+   *
+   * `lastMove` and `lastSlapdown` are deliberately *not* derived from this, though the
+   * newest entry of each kind would give them: each is a fact a client watches for change
+   * (docs/adr/0007, 0008), and "the last entry tagged `turn`" is a search whose answer
+   * would silently start moving the day a third kind of move joined the log.
    */
   moveHistory: MoveHistoryEntry[];
 }
