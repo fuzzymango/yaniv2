@@ -48,7 +48,7 @@ import { CloseRoomIcon } from "./WayOut.tsx";
 import type { CardFlight } from "./flight.ts";
 import type { Landing } from "./ghosts.ts";
 import { DECK_BOX } from "./ghosts.ts";
-import { scoreLabel } from "./score.ts";
+import { roundOutcome, scoreLabel } from "./score.ts";
 import type { Zone } from "./seating.ts";
 import { ZONES, bySeat, seatZones } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
@@ -201,7 +201,7 @@ export function Table({
    * what to draw in it.
    */
   const seatFor = (zone: Zone, opponent: OpponentView) => {
-    const row = result === null ? null : scored(opponent.id);
+    const row = scored(opponent.id);
     if (result === null || row === null) {
       return (
         <OpponentSeat
@@ -224,48 +224,33 @@ export function Table({
     );
   };
 
-  /** A name off the round's own record, which is the only place a departed seat is left. */
-  const named = (id: string) =>
-    result?.players.find((player) => player.playerId === id)?.name ?? "Somebody";
-
-  /*
-   * The outcome is about somebody, and if that somebody is the viewer it says so — "You
-   * called Yaniv", not their own name back at them. Which it is can only be decided here,
-   * since it depends on whose screen this is.
-   */
-  const subject = (id: string) => (id === view.you.id ? "You" : named(id));
-  const object = (id: string) => (id === view.you.id ? "you" : named(id));
-
   /** The viewer's own row of the round, for the footer under their revealed hand. */
   const yourRound = scored(view.you.id);
 
   /*
-   * What the one line above the felt says, and how loudly. Three things can be true of a
+   * What the one line above the felt says, and how loudly. Four things can be true of a
    * position and only one of them is ever the news: how the round ended, that a window is
-   * open, or whose turn it is. Decided once here rather than nested into the markup, since
-   * the tone follows the sentence and the two must not come apart.
+   * open, that it is this player's go, or whose it is instead. Sentence and tone come out of
+   * one branch rather than two, since a colour saying one thing over words saying another is
+   * the only way this line can be wrong.
    */
-  const said =
+  const line =
     result !== null
-      ? `${subject(result.callerId)} called Yaniv — ${
-          result.assaferId === null ? "it stood." : `Assafed by ${object(result.assaferId)}.`
-        }`
+      ? {
+          said: roundOutcome(result, view.you.id),
+          tone: result.assaferId === null ? "turn--stood" : "turn--assaf",
+        }
       : slapdownTarget
-        ? "Slapdown! Tap the pile to send the card you just drew straight back"
+        ? {
+            said: "Slapdown! Tap the pile to send the card you just drew straight back",
+            tone: "turn--slap",
+          }
         : yourTurn
-          ? "Your turn — tap cards, then the deck or a face-up card"
-          : `${onTurn?.name ?? "Somebody"} is playing`;
-
-  const tone =
-    result !== null
-      ? result.assaferId === null
-        ? "turn--stood"
-        : "turn--assaf"
-      : slapdownTarget
-        ? "turn--slap"
-        : yourTurn
-          ? "turn--yours"
-          : "";
+          ? {
+              said: "Your turn — tap cards, then the deck or a face-up card",
+              tone: "turn--yours",
+            }
+          : { said: `${onTurn?.name ?? "Somebody"} is playing`, tone: "" };
 
   return (
     <>
@@ -396,8 +381,8 @@ export function Table({
           the other: a call that was Assafed cost the caller 30 and won somebody else the
           round (docs/rules.md §6).
         */}
-        <p className={`turn ${tone}`} role="status">
-          {said}
+        <p className={`turn ${line.tone}`} role="status">
+          {line.said}
         </p>
 
         {/*
