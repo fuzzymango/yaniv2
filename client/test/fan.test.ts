@@ -28,6 +28,7 @@ import {
   fanAngles,
   fanFootprint,
   fanOverhang,
+  seatFootprint,
 } from "../src/fan.ts";
 import { ZONES } from "../src/seating.ts";
 
@@ -266,6 +267,88 @@ describe("cascadeFootprint", () => {
       assert.ok(last + CARD_HEIGHT <= down.height + 1e-9, `${n} cards: ${down.height} deep`);
       const across = cascadeFootprint(n, "horizontal");
       assert.ok(last + 1 <= across.width + 1e-9, `${n} cards: ${across.width} wide`);
+    }
+  });
+});
+
+describe("seatFootprint", () => {
+  it("reserves nothing for a seat with no cards", () => {
+    for (const zone of ZONES) {
+      assert.deepEqual(seatFootprint(0, zone), { width: 0, height: 0 }, zone);
+    }
+  });
+
+  it("holds the fan, so a hand in play sits in it unchanged", () => {
+    for (const zone of ZONES) {
+      for (let n = 1; n <= 12; n++) {
+        const seat = seatFootprint(n, zone);
+        const fan = fanFootprint(n, zone);
+        assert.ok(seat.width >= fan.width - 1e-9, `${zone}, ${n} cards: ${seat.width}`);
+        assert.ok(seat.height >= fan.height - 1e-9, `${zone}, ${n} cards: ${seat.height}`);
+      }
+    }
+  });
+
+  it("holds the revealed hand, so the same seat takes it without growing", () => {
+    for (const zone of ZONES) {
+      for (let n = 1; n <= 12; n++) {
+        const seat = seatFootprint(n, zone);
+        const reveal = cascadeFootprint(n, ZONE_CASCADE[zone]);
+        assert.ok(seat.width >= reveal.width - 1e-9, `${zone}, ${n} cards: ${seat.width}`);
+        assert.ok(seat.height >= reveal.height - 1e-9, `${zone}, ${n} cards: ${seat.height}`);
+      }
+    }
+  });
+
+  it("clears the edge the fan hangs off, so a revealed hand is on screen to be read", () => {
+    // The seat keeps its overhang in both shapes (`fanOverhang`), so the part of the box
+    // still on screen has to hold the whole cascade — a revealed hand is read card by card,
+    // and a fan of backs is the only one of the two that may hang off the edge.
+    for (const zone of ZONES) {
+      for (let n = 1; n <= 12; n++) {
+        const seat = seatFootprint(n, zone);
+        const reveal = cascadeFootprint(n, ZONE_CASCADE[zone]);
+        // The depth axis is the one the overhang runs along: outward from the felt.
+        const deep = zone === "top" ? seat.height : seat.width;
+        const revealDeep = zone === "top" ? reveal.height : reveal.width;
+        assert.ok(
+          deep - fanOverhang(n) >= revealDeep - 1e-9,
+          `${zone}, ${n} cards: ${deep - fanOverhang(n)} on screen for ${revealDeep}`,
+        );
+      }
+    }
+  });
+
+  it("reserves no more than the two shapes and the overhang between them need", () => {
+    // Stable is not the same as roomy: a seat that reserved a fixed maximum would leave a
+    // small hand sitting in a hole (issue #78). Every side is one of the two shapes.
+    for (const zone of ZONES) {
+      for (let n = 1; n <= 12; n++) {
+        const seat = seatFootprint(n, zone);
+        const fan = fanFootprint(n, zone);
+        const reveal = cascadeFootprint(n, ZONE_CASCADE[zone]);
+        const pad = fanOverhang(n);
+        assert.ok(
+          seat.width <= Math.max(fan.width, reveal.width + pad) + 1e-9,
+          `${zone}, ${n} cards: ${seat.width} wide`,
+        );
+        assert.ok(
+          seat.height <= Math.max(fan.height, reveal.height + pad) + 1e-9,
+          `${zone}, ${n} cards: ${seat.height} deep`,
+        );
+      }
+    }
+  });
+
+  it("grows with the hand and never shrinks, at every seat", () => {
+    for (const zone of ZONES) {
+      let previous = 0;
+      for (let n = 1; n <= 12; n++) {
+        const { width, height } = seatFootprint(n, zone);
+        const area = width * height;
+        assert.ok(area >= previous - 1e-9, `${zone}, ${n} cards: ${area} after ${previous}`);
+        previous = area;
+      }
     }
   });
 });

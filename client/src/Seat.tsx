@@ -28,15 +28,15 @@
 
 import type { CSSProperties, ReactNode } from "react";
 import type { Card, OpponentView } from "@yaniv/shared";
-import type { CascadeAxis } from "./fan.ts";
 import {
   FAN_RADIUS,
+  ZONE_CASCADE,
   ZONE_ROTATION,
   cascadeFootprint,
   cascadeOffset,
   fanAngles,
-  fanFootprint,
   fanOverhang,
+  seatFootprint,
 } from "./fan.ts";
 import { PlayingCard } from "./PlayingCard.tsx";
 import { seatBox } from "./ghosts.ts";
@@ -77,6 +77,33 @@ export function Seat({ zone, name, isTurn = false, detail, children }: SeatProps
 const cardWidths = (n: number) => `calc(var(--card-w) * ${n})`;
 
 /**
+ * The push off the seat's own edge of the screen, as the margin that does it.
+ *
+ * A margin rather than a transform: a transform costs no layout space, so it would leave
+ * the label sitting under where the cards used to be, half a hand away from what it names.
+ * A margin moves the two together — and, applied to the seat's reserved box rather than to
+ * the shape inside it, it is the same distance whichever shape that is (`seatFootprint`).
+ */
+const overhangStyle = (zone: Zone, count: number): CSSProperties => {
+  const overhang = cardWidths(-fanOverhang(count));
+  return {
+    marginLeft: zone === "left" ? overhang : undefined,
+    marginRight: zone === "right" ? overhang : undefined,
+    marginTop: zone === "top" ? overhang : undefined,
+  };
+};
+
+/** The box a seat reserves for its hand, whichever shape is currently in it. */
+const handSlot = (zone: Zone, count: number): CSSProperties => {
+  const box = seatFootprint(count, zone);
+  return {
+    width: cardWidths(box.width),
+    height: cardWidths(box.height),
+    ...overhangStyle(zone, count),
+  };
+};
+
+/**
  * A hand held face down, arced about its hinge and turned to face the felt.
  *
  * Every card is placed by a transform off that one hinge point, so the fan is a single
@@ -84,10 +111,11 @@ const cardWidths = (n: number) => `calc(var(--card-w) * ${n})`;
  * card's own angle rather than applied to a wrapper around them — a wrapper would have to
  * be sized and centred a second time, and the two sizes would then be free to disagree.
  *
- * The element's own box is the footprint the fan actually occupies (`fanFootprint`), which
- * a transform otherwise costs nothing in layout, and it is pushed out past its edge of the
- * screen by exactly `fanOverhang`. What is left on screen is most of the fan — the part
- * nearest the felt.
+ * The element's own box is the one the seat reserves for a hand of this size in either of
+ * its two shapes (`seatFootprint`), which a transform otherwise costs nothing in layout, and
+ * it is pushed out past its edge of the screen by exactly `fanOverhang`. What is left on
+ * screen is most of the fan — the part nearest the felt. The box is the reveal's as well as
+ * the arc's so that a round being scored changes what is in the seat and never its size.
  *
  * `flightBox` is the name this hand answers to when a card is flying to or from it
  * (`seatBox` in `ghosts.ts`): one box for the whole hand, since none of the cards in it is
@@ -102,26 +130,14 @@ export function CardFan({
   count: number;
   flightBox: string;
 }) {
-  const box = fanFootprint(count, zone);
-  const overhang = fanOverhang(count);
-
-  /*
-    The push off the edge is a margin rather than a transform: a transform costs no layout
-    space, so it would leave the label sitting under where the fan used to be, half a fan
-    away from the cards it names. A margin moves the two together.
-  */
-  const style: CSSProperties = {
-    width: cardWidths(box.width),
-    height: cardWidths(box.height),
-    marginLeft: zone === "left" ? cardWidths(-overhang) : undefined,
-    marginRight: zone === "right" ? cardWidths(-overhang) : undefined,
-    marginTop: zone === "top" ? cardWidths(-overhang) : undefined,
-  };
-
   return (
     // Decorative: what these cards say is how many there are, and the label below says
     // that in words. A card back is not a card, so there is nothing here to read out.
-    <div className={`table-seat__fan table-seat__fan--${zone}`} style={style} aria-hidden="true">
+    <div
+      className={`table-seat__fan table-seat__fan--${zone}`}
+      style={handSlot(zone, count)}
+      aria-hidden="true"
+    >
       {/*
         Where a card flies to and from at this seat, and the one element here that is drawn
         for something other than being looked at: a hand held here is a count and a fan of
@@ -178,31 +194,43 @@ export function CardFan({
  * Built the way `CardFan` is: an element whose own box is the footprint the cards occupy
  * (`cascadeFootprint`), with each card placed on it by a transform off the same offsets
  * the box was measured from — so the label below cannot be drawn over, whatever the hand.
+ *
+ * That box sits inside the seat's own reserved one, which is the arc's as well (issue #78):
+ * the seat is the same size in both shapes, so a round being scored swaps what is in it
+ * without moving anything around it. Inside that box the cascade hugs the *felt* end — the
+ * seat still hangs off its edge of the screen by `fanOverhang`, which is right for a fan of
+ * backs and would take a bite out of a hand somebody has to read.
  */
-export function CascadeReveal({ cards, axis }: { cards: readonly Card[]; axis: CascadeAxis }) {
+export function CascadeReveal({ cards, zone }: { cards: readonly Card[]; zone: Zone }) {
+  const axis = ZONE_CASCADE[zone];
   const box = cascadeFootprint(cards.length, axis);
   /* One place the axis becomes a direction, rather than the same fork in two transforms. */
   const along = axis === "vertical" ? "translateY" : "translateX";
 
   return (
     <div
-      className={`cascade cascade--${axis}`}
-      style={{ width: cardWidths(box.width), height: cardWidths(box.height) }}
+      className={`table-seat__reveal table-seat__reveal--${zone}`}
+      style={handSlot(zone, cards.length)}
     >
-      {cards.map((card, i) => (
-        <span
-          className="cascade__card"
-          key={card.id}
-          style={{
-            transform: `${along}(${cardWidths(cascadeOffset(i))})`,
-            // Later cards over earlier ones, so the strip left showing of each is the one
-            // its own index sits in — the edge the cascade advances away from.
-            zIndex: i,
-          }}
-        >
-          <PlayingCard card={card} />
-        </span>
-      ))}
+      <div
+        className={`cascade cascade--${axis}`}
+        style={{ width: cardWidths(box.width), height: cardWidths(box.height) }}
+      >
+        {cards.map((card, i) => (
+          <span
+            className="cascade__card"
+            key={card.id}
+            style={{
+              transform: `${along}(${cardWidths(cascadeOffset(i))})`,
+              // Later cards over earlier ones, so the strip left showing of each is the one
+              // its own index sits in — the edge the cascade advances away from.
+              zIndex: i,
+            }}
+          >
+            <PlayingCard card={card} />
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

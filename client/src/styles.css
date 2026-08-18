@@ -897,7 +897,32 @@ body {
  * (`CascadeReveal`, issue #60). Its box comes from `cascadeFootprint` and each card's place
  * from `cascadeOffset`, both inline and both in card widths — the same arrangement the arc
  * has, so nothing about either shape is written twice.
+ *
+ * The reserved box it sits in is the seat's own (`seatFootprint`, issue #78) and is the same
+ * one the arc gets, so a round being scored changes what is in the seat and never its size.
+ * Inside it the cascade hugs the *felt* end: the seat hangs off its edge of the screen by
+ * `fanOverhang` in both shapes, which is right for a fan of backs and would take a bite out
+ * of a hand somebody has to read.
  */
+.table-seat__reveal {
+  display: flex;
+}
+
+.table-seat__reveal--left {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.table-seat__reveal--right {
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.table-seat__reveal--top {
+  align-items: flex-end;
+  justify-content: center;
+}
+
 .cascade {
   position: relative;
 }
@@ -1190,9 +1215,11 @@ body {
 
 /*
  * The local player's own hand, at the bottom of the screen: bigger than the table's cards,
- * because on the table they are the ones a player picks out one at a time. The scored round
- * borrows the row for the same hand revealed, at its own size and with no controls in it
- * (`.round__you .hand`) — one hand laid out flat is one hand laid out flat, played or not.
+ * because on the table they are the ones a player picks out one at a time. The same row
+ * holds the same hand revealed once the round is scored, at the same size and with no
+ * controls in it — one hand laid out flat is one hand laid out flat, played or not, and a
+ * hand that moved or resized the moment a round ended would be the jump cut this screen
+ * exists to avoid (issue #78).
  */
 .hand {
   --card-w: min(3.75rem, 16vw);
@@ -1241,6 +1268,25 @@ body {
 }
 
 /*
+ * How the round ended, said in the same line and the same place (issue #78) — a heading of
+ * its own above the seats would push every one of them down the page at the one moment they
+ * must not move.
+ *
+ * A call that stood wears the accent the call itself did; one that was Assafed wears the
+ * danger colour, because the caller took 30 for it and the colour is the first thing that
+ * says so (docs/rules.md §6).
+ */
+.turn--stood {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.turn--assaf {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/*
  * The Yaniv call: the one button on a screen whose every other control is a card. It sits
  * where it always sits, above the hand, and is dead until the hand is low enough — a
  * control that appeared at that moment would appear under a thumb already moving.
@@ -1282,169 +1328,13 @@ body {
   }
 }
 
-/* --- a scored round --- */
-
 /*
- * Pinned to the viewport like the lobby and the table, with the seats taking the leftover
- * height and scrolling inside it, so the control to deal the next round stays at the bottom
- * where a thumb is however many players are being scored.
- *
- * No `--card-w` of its own: the seats and the viewer's own hand are drawn at two different
- * sizes on this screen (five hands read across the table, and one read close up), and a
- * screen-level default would only ever be the wrong one of the two.
+ * The same slot once the round is scored: the host's deal, where the call was a moment ago.
+ * Centred like the call and sized by its own words rather than shouted in capitals — it is
+ * the only thing left to do on the screen, so it does not have to compete for a thumb.
  */
-.round {
-  justify-content: flex-start;
-  height: 100dvh;
-  gap: 0.75rem;
-}
-
-.round__header {
-  text-align: center;
-}
-
-.round__call {
-  margin: 0.25rem 0 0;
-  font-size: clamp(1.35rem, 6vw, 1.75rem);
-  font-weight: 800;
-}
-
-/* Assaf is bad news for the caller, and the colour is the first thing that says so. */
-.round__verdict {
-  margin: 0.25rem 0 0;
-  color: var(--danger);
-  font-weight: 600;
-}
-
-.round__verdict--stood {
-  color: var(--accent);
-}
-
-/*
- * The table the round was just played at, with everybody still in their seat.
- *
- * The one thing here that is not the live table's own band (`.table__seats`): the sides are
- * *flowed* rather than pinned to the edges of a fixed box. There is no felt in the middle
- * to keep clear — that is the whole of what a scored round has room for that a live one
- * does not — and six revealed hands are the tallest thing this client ever draws, so the
- * seats have to be able to make the box taller and scroll inside it. Pinned sides could do
- * neither: an absolutely positioned seat contributes no height to scroll through.
- *
- * A grid rather than three rows, so the doubled left zone and the single right one sit
- * either side of the same space instead of stacking down it — and the sides centre
- * themselves in whatever is left under the top zone, which is where they are on the live
- * table too. At a table of two that is the difference between an opponent sitting across
- * the felt and one stranded in a corner of a box sized for six.
- */
-.round__seats {
-  /*
-   * The smallest cards in the client. Six hands are laid out at once and every one of them
-   * is read rather than tapped, so nothing here needs to be thumb-sized — and the `vh` term
-   * does the same job it does on the live table, where a doubled zone stacks up one edge.
-   */
-  --card-w: min(2rem, 8vw, 4.5vh);
-
-  flex: 1;
-  /* As on the lobby's seats: a flex item will not shrink below its content without this. */
-  min-height: 0;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  /*
-   * The sides share one row that takes whatever the top zone leaves. `1fr` still grows
-   * past that when six revealed hands need more, since a row never shrinks below its own
-   * content — which is what leaves the box something to scroll.
-   */
-  grid-template-rows: auto 1fr;
-  grid-template-areas:
-    "top top top"
-    "left . right";
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.round__seats .table-zone--left {
-  grid-area: left;
-  justify-self: start;
-}
-
-.round__seats .table-zone--right {
-  grid-area: right;
-  justify-self: end;
-}
-
-.round__seats .table-zone--top {
-  grid-area: top;
-  justify-self: center;
-}
-
-/*
- * A round's labels carry twice what a live seat's does — the marks, the delta and the hand
- * value on top of a name and a score — so they are given the room rather than wrapping into
- * a column of their own. Height is what this screen is short of, and a label is as wide as
- * the seat it sits under: the `vw` cap is what keeps two of them side by side in the top
- * zone on a narrow phone, where the fixed width alone would not.
- */
-.round__seats .table-seat__label {
-  max-width: min(10rem, 44vw);
-}
-
-/*
- * The viewer's own hand, at the bottom where they were holding it. Flat rather than
- * cascaded and bigger than a seat's: it has the width of the screen to itself, so there is
- * nothing for a cascade to save, and it is the hand its owner most wants to look at.
- */
-.round__you {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.round__you .hand {
-  --card-w: min(2.75rem, 12vw);
-
-  flex-wrap: wrap;
-  padding-top: 0;
-}
-
-/* What this round cost them, kept apart from the total it made. */
-.result__delta {
-  color: var(--ink-dim);
-  font-size: 0.85rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.result__value {
-  color: var(--ink-dim);
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
-}
-
-/*
- * A seat's label is smaller than the row at the bottom, and the numbers riding on it have
- * to come down with it or they crowd the name off its own line.
- */
-.table-seat__label .result__delta,
-.table-seat__label .result__value,
-.table-seat__label .player__score {
-  font-size: 0.7rem;
-}
-
-.round__actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-/* A desktop has height to spare, so the table sits in it rather than stretching down. */
-@media (min-width: 48rem) {
-  .round {
-    justify-content: center;
-  }
-
-  .round__seats {
-    flex: 0 1 auto;
-  }
+.deal {
+  align-self: center;
 }
 
 /* --- a finished match --- */

@@ -30,7 +30,8 @@ had to give up to make room for the lot:
   near a player rather than round them.
 - **The table's settings icon is pinned out of flow too** (`.table > .topbar`), since the
   band covers the top of the screen the column's first row would sit in: it belongs to the
-  table's corner, above the band. `RoundEnd`/`GameEnd` have no band and keep theirs in flow.
+  table's corner, above the band. That is now the corner in both phases (issue #78) — the
+  lobby and `GameEnd` have no band and keep theirs in flow.
 - **The felt gave way to the seats** (issue #59, `.felt`): the deck stacks above the discard
   and the pair is pinned against the hand, not centred in a height the seats are out of the
   flow of and float up into — and side by side at the card size the ticket keeps, the two of
@@ -43,11 +44,31 @@ had to give up to make room for the lot:
 
 ## The scored round is the same table, read rather than watched
 
-`RoundEnd` seats those same three sides — `revealSeats`, off `result.players` and never
-`bySeat`, since a player who has given up their seat is in no `turnOrder` to be sorted
-against — with the viewer's own hand flat along the bottom where they were holding it, and
-the round's numbers riding on each seat's label rather than in a list of their own, so one
-player reads in one place. Three things separate it from live play (issues #56, #60):
+**Literally the same table** (issue #78): `Table.tsx` renders `playing` and `roundEnd` both,
+and a round ending changes what is *in* three slots rather than which screen is up. There is
+no round-end screen to jump to, so the seats do not reflow, the corner icons do not snap down
+the page, and nobody has to be re-found. What changes is what changed:
+
+- **Every hand turns face up where it already is.** An in-place content swap and no
+  repositioning — instantaneous, since a player reaching a scored round is reading it, not
+  waiting on it. Animating the flip is deferred.
+- **Each label swaps a running score for `scoreLabel`** — the total and what the round added,
+  the delta always signed so a `+0` and a gain are never confusable in a label a few
+  characters wide. One function for every seat and for the viewer's own footer, which drops
+  its hand value: the cards are face up by then, and adding them up is what they are for.
+- **The turn line says how the round ended**, in place. A heading above the seats would push
+  every one of them down the page at the one moment they must not move.
+- **The Yaniv call becomes the deal** — the host's control, or the reason there is none, in
+  the slot the call was in.
+
+Seats are placed by the live roster sorted by `bySeat` in **both** phases, and the round's
+own record is looked up by id against whoever is already in a zone. Two placements could
+disagree; one cannot. (Mid-round leaving is impossible, so the round's recorded order and
+`turnOrder` agree here in every real case — reusing one calculation forecloses the drift by
+construction rather than by invariant.) A `roundEnd` with a null `roundResult` — a wire state
+the server does not produce — still falls through to `Room.tsx`.
+
+Three things still separate the revealed hand from the played one (issues #56, #60):
 
 - **The arc becomes a straight cascade** (`cascadeOffset`, `cascadeFootprint`), along the
   zone's own axis (`ZONE_CASCADE`) so a doubled zone does not collide with itself: an arc
@@ -57,10 +78,14 @@ player reads in one place. Three things separate it from live play (issues #56, 
 - **A cascaded card wears its index on the edge the next card leaves showing**
   (`.cascade--*`, `CARD_INDEX_STRIP`, which `CASCADE_STEP` is chosen to clear). A face carries its
   rank in the middle, which under another card is blank card — why real cards have corners.
-- **The sides are flowed into a grid, not pinned to a band** (`.round__seats`): no felt to
-  keep clear, and a pinned seat contributes no height for six revealed hands to scroll
-  through, which on a short phone they still must — as the flat list they replace did.
-  `GameEnd` is untouched: `standings` carries no hands, so it stays a plain scoreboard.
+- **The seat reserves one box for both shapes** (`seatFootprint`): the larger of the arc's
+  footprint and the cascade's, so the seat's own size never changes across the phase boundary
+  and the reveal cannot nudge its neighbours by reflow — and the larger of the two rather than
+  a fixed maximum, so a small hand still sits in a small seat. The overhang counts on the
+  cascade's side of that max and along its axis alone: the seat hangs off its edge of the
+  screen in both shapes, which is right for a fan of backs, so what is left on screen has to
+  hold the whole of a hand somebody must read. `GameEnd` is untouched — `standings` carries no
+  hands, so it stays a plain scoreboard.
 
 ## A move is watched crossing that table
 

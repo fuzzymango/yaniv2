@@ -110,18 +110,18 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `ghosts.ts` | `ghostsFor` — a move and the boxes on the screen in, the cards actually in the air out (`Ghost`: what it answers to, the face to draw or none, from where, to where and into which place), dropping whatever the screen cannot place at both ends. `DECK_BOX` and `seatBox` are the boxes that are not cards' — the deck a drawn card starts from, and the seat somebody else's hand is one place at, both ends the client is never told a card id for |
 | `flip.ts` | `invert` and `transformOf` — where a card has landed and where it came from, as the transform that puts it back. The arithmetic of the flight, and all of it: measured boxes in, one CSS transform out. Pure and total |
 | `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
-| `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). Generic over the opponent, so the live table and the round-end reveal zone their own payloads. `revealSeats` is the round end's own: the viewer's row out for the bottom of the screen, the rest zoned in the order the round scored them |
-| `fan.ts` | The geometry of a hand held at a seat, in two shapes. Arced during play: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Cascaded once it is revealed: `cascadeOffset`, `cascadeFootprint`, `ZONE_CASCADE` (down the sides, across the top) and the `CARD_INDEX_STRIP`/`CASCADE_STEP` pair that keeps a covered card readable. Distances in card widths, so the CSS scales it |
+| `seating.ts` | `bySeat` — the `turnOrder` comparator every screen that lists players sorts by — and `seatZones`, which deals that ordered list round the three sides of the felt (`ZONES`: `left`/`top`/`right`, cycling; `right` never doubles, since 6 players is 5 opponents). One placement for the table in both its phases: a scored round is seated by the same call off the same roster, so the two cannot disagree. Generic over the opponent, since seating is a fact about a list's order and nothing about what is in it |
+| `fan.ts` | The geometry of a hand held at a seat, in two shapes. Arced during play: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Cascaded once it is revealed: `cascadeOffset`, `cascadeFootprint`, `ZONE_CASCADE` (down the sides, across the top) and the `CARD_INDEX_STRIP`/`CASCADE_STEP` pair that keeps a covered card readable. And `seatFootprint` over both — the one box a seat reserves whichever shape is in it, so a round being scored never resizes a seat. Distances in card widths, so the CSS scales it |
+| `score.ts` | `scoreLabel` — a scored round in one line: the total, and what the round added, always signed. Used for every seat's label and the viewer's own footer, so one round cannot read two ways. Pure and total |
 | `settings.ts` | What only a settings *form* knows: `wholeNumber` (a field part-way through being typed) and `sameSettings` (has the room caught up?). Pure and total, `turn.ts`'s counterpart — what a room may be set to is asked of `shared` |
 | `tokens.ts` | `seatStore` — the seat written down where a reload will find it, and the only file here that knows the word `localStorage`. Injected storage, so it is driven under `node:test` with no browser; storage that is off, full or holding junk is answered with "no seat" rather than an error |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
-| `App.tsx` | Which screen: no connection comes first, then a seat being claimed back, then no view is the main menu, then everything else is a function of `view.phase` |
+| `App.tsx` | Which screen: no connection comes first, then a seat being claimed back, then no view is the main menu, then everything else is a function of `view.phase` — with `playing` and `roundEnd` the one branch |
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
-| `Table.tsx` | `phase: 'playing'` — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open |
+| `Table.tsx` | `phase: 'playing'` **and `'roundEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, and the call become the deal |
 | `CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen, and the deck and the seats with them, after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), the `CardsInFlight` overlay they fly across, and `FLIGHT_MS`. The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
-| `Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held, carrying the seat's own `data-flight-box` — the one box in this client drawn to be measured rather than looked at) and `CascadeReveal` (the same hand face up and read). `OpponentSeat` composes the first three for live play; the round end composes its own. Presentational throughout |
-| `RoundEnd.tsx` | `phase: 'roundEnd'` — who called, whether they were Assafed, and the same seated table with every hand face up, each player's round folded onto their own seat's label |
+| `Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held, carrying the seat's own `data-flight-box` — the one box in this client drawn to be measured rather than looked at) and `CascadeReveal` (the same hand face up and read, in the seat's own reserved box). Both take that box from `seatFootprint`, so swapping one for the other moves nothing around them. `OpponentSeat` composes the first three for live play; `Table.tsx` composes the scored seat. Presentational throughout |
 | `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and the same two ways out the lobby offers |
 | `SettingsEditor.tsx` | The host's four controls, in the lobby and nowhere else. Offers exactly what `isValidSettings` accepts, and sends the whole object per change |
 | `SettingsValues.tsx` | The four values as text — the lobby for everyone but the host, and the in-match modal for everyone — plus the box (`SettingsPanel`) and title both lobby listings share |
@@ -159,37 +159,35 @@ closes on the slap or on the next player's `takeTurn`/`callYaniv`, whichever the
 processes first; both assign `round.slapdown` outright rather than merging it, so a stale
 window cannot survive a turn. No lock and no timer — ADR-0005.
 
-The wire keeps that shape: a payload-free `slapDown` — the server already knows which card
-is meant — through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for
-whoever loses the race, and eligibility on `SelfView` alone. Both clients offer it (the
-CLI's `isOurMove`, the browser's under "The turn is two taps" below), and against bots
+The wire keeps that shape: a payload-free `slapDown` — the server already knows which card is
+meant — through the same `act()` helper as `takeTurn`, `SLAPDOWN_NOT_AVAILABLE` for whoever
+loses the race, and eligibility on `SelfView` alone. Both clients offer it, and against bots
 neither can win the race, per ADR-0005 — what it costs, not a defect in either.
 
 ### Round state is nested
 
 `GameState.round: RoundState | null` holds everything that resets between rounds (hands, piles,
-whose turn it is). Starting a round replaces this object wholesale (`dealRound` in `game.ts`),
-so no field can leak from the previous round by omission. Match-scoped data
-(`players[].score`, `roomCode`, `hostId`) lives one level up and persists across rounds.
+whose turn it is). Starting a round replaces this object wholesale (`dealRound` in `game.ts`), so
+no field can leak from the previous round by omission. Match-scoped data (`players[].score`,
+`roomCode`, `hostId`) lives one level up and persists across rounds.
 
 ### The discard pile is two parts, not a flat array
 
 `RoundState.lastDiscard: Card[]` is the most recent discarded set, face up, and which of its
 cards may be taken depends on its shape (`pickupCandidates` in `shared/src/rules.ts`): a run
-exposes **only its two ends**, a same-rank set of any length exposes **every card**, since a
-set has no sequence for a middle position to protect. A slapdown extends that same array, so
-a slapped card is takeable like the rest of the set it joined. `RoundState.buried: Card[]` is
-everything discarded earlier — visible but permanently out of play until the draw pile empties
-and it gets reshuffled. A flat array can't express "only part of the last discard is
-takeable," which is why this is two fields.
+exposes **only its two ends**, a same-rank set of any length exposes **every card**, since a set
+has no sequence for a middle position to protect. A slapdown extends that same array, so a
+slapped card is takeable like the rest of the set it joined. `RoundState.buried: Card[]` is
+everything discarded earlier — visible but out of play until the draw pile empties and it gets
+reshuffled. A flat array can't express "only part of the last discard is takeable," hence two.
 
 ### Wildcard jokers in runs (docs/rules.md §4)
 
 - Jokers are wild **in runs only** — never in same-rank sets (`Jk 7♠ 7♣` is not a set).
 - A run needs **at least 2 real cards** to anchor it (`Jk Jk 5♥` is not a run).
-- `isRun` in `shared/src/rules.ts` checks this via a span test, not a walk: real cards fit in
-  a window of `cards.length` consecutive ranks (`max(rank) - min(rank) + 1 <= cards.length`).
-  No wrap past King/Ace falls out for free, since Ace and King are 12 apart.
+- `isRun` in `shared/src/rules.ts` checks this via a span test, not a walk: real cards fit in a
+  window of `cards.length` consecutive ranks (`max(rank) - min(rank) + 1 <= cards.length`), and
+  no wrap past King/Ace falls out for free, since Ace and King are 12 apart.
 - **Joker placement in a laid-out run is decided by the player.** A joker that fills an
   interior gap has one possible position; one that *extends* the run (`7♥ 8♥ Jk` → 6-7-8 or
   7-8-9) is ambiguous, and `layOutRun` resolves it from the order the player submitted the
@@ -238,9 +236,9 @@ as humans do — it exists so the layer above knows whose turn it has to play. R
 rather than optional so no construction can leave a seat ambiguously controlled.
 
 The integration test's fuzzer (`server/test/integration.test.ts`) has its **own** separate
-discard/draw logic and deliberately does not import from `bot.ts`: it explores weird states
-via randomized draws, and coupling it to the real bot would let a smarter bot silently
-narrow what it covers. It does share `legalDiscards` — a rules query, not a policy.
+discard/draw logic and deliberately does not import from `bot.ts`: it explores weird states via
+randomized draws, and coupling it to the real bot would let a smarter bot silently narrow what
+it covers. It does share `legalDiscards` — a rules query, not a policy.
 
 ### Errors are values
 
@@ -275,7 +273,8 @@ card to everyone off the face-up discard and to the mover alone off the deck. do
 when the round is scored, and the serializer uses that rather than looking the id up in
 `players`. The duplication is deliberate: a seat can be given up once the match ends
 (`exitToMenu`), and resolving names against the live roster left a departed player nameless on
-everyone else's scoreboard. It is also why the round-end reveal seats off `result.players`.
+everyone else's scoreboard. The round-end reveal reads those names, and seats off the live
+roster (issue #78) — the record says *what* to draw at a seat, never which seat.
 
 ### Player identity
 
@@ -408,46 +407,47 @@ error and publishes nothing, so a refused action costs the player nothing.
 
 ### The turn is two taps, and draw targets are inert until legal
 
-A turn on the client is never a button — it is built from two taps. Tapping a card in hand
-adds it to an ordered **selection** (`CONTEXT.md`'s **Selection**); tapping a draw target —
-the deck, or one of the two takeable ends of the last discard — commits it: the selection is
-discarded and the tapped card drawn, in the same action. That mirrors the server's atomic
-`takeTurn` (see "Turn model" above); a "discard" button followed by a "draw" button would
-imply a moment in between that the engine has no state for.
+A turn on the client is never a button — it is built from two taps. Tapping a card in hand adds
+it to an ordered **selection** (`CONTEXT.md`'s **Selection**); tapping a draw target — the deck,
+or a takeable end of the last discard — commits it: the selection is discarded and the tapped
+card drawn, in one action. That mirrors the server's atomic `takeTurn` (above); a "discard"
+button then a "draw" button would imply a moment in between the engine has no state for.
 
 Draw targets stay inert — untappable — until the current selection is a legal discard
 (`isValidSet`, from `@yaniv/shared`'s rulebook). This is the reason the rulebook moved to
-`shared/` at all (ADR-0002): without it on the client, an illegal set could only be caught
-by sending it and being told no — a silent round trip that on a touch screen reads as a tap
-that did not register. `client/src/turn.ts` is the pure module this lives in — `turnFrom`
-takes a selection, the current view and the tapped source and returns a `TurnAction` or
-`null`; `isLegalSelection`, `isLegalCall` and `takeableIds` decide which controls light up.
-It knows nothing of whose turn it is: turn order is the server's alone and comes back as a
-`GameError`, exactly as it does for the CLI.
+`shared/` at all (ADR-0002): without it on the client, an illegal set could only be caught by
+sending it and being told no — a silent round trip that on a touch screen reads as a tap that
+did not register. `client/src/turn.ts` is the pure module this lives in: `turnFrom` takes a
+selection, the view and the tapped source and returns a `TurnAction` or `null`, and
+`isLegalSelection`/`isLegalCall`/`takeableIds` decide which controls light up. It knows nothing
+of whose turn it is — turn order is the server's alone, and comes back as a `GameError`.
 
-An open slapdown window is the one thing that suspends all of it. `isSlapdownTarget` is
-true only while the turn is *elsewhere*, and `Table.tsx` then draws the pile as one
-flashing control instead of a row of draw targets: a tap has to mean one thing, and a draw
-off that pile out of turn is a move the server would refuse anyway. It is also the only
-question in that module the rulebook cannot answer — a window is about a card off a pile
-the server never sends, so `slapdownEligible` *is* the answer.
+An open slapdown window suspends all of it: `Table.tsx` draws the pile as one flashing control
+instead of a row of draw targets, because a tap has to mean one thing. It is also the only
+question in that module the rulebook cannot answer — a window is about a card off a pile the
+server never sends, so `slapdownEligible` *is* the answer.
 
 ### The table is seated, and the scored round is the same table
 
 Opponents are drawn round three sides of the felt (`seatZones`): fans of face-down backs under
 upright labels while the round is played, the same seats cascaded face up once it is scored,
 with each player's numbers on their own label. A hand shrinking is something to watch, and a
-scored one something to read — which is why the two shapes differ. Every decision behind the
-geometry is in `docs/client-table.md` (issues #56, #58, #59, #60, and the flight below);
-`fan.ts`, `seating.ts` and `Seat.tsx` are where it lives.
+scored one something to read — which is why the two shapes differ.
 
-**A move is watched crossing that table, not merely published onto it** (issue #69). The session
-says *what* moved (`flight.ts`), `ghosts.ts` which of it the screen can draw and which way up, and
-`CardsInFlight.tsx` measures where it happens and animates the difference closed (FLIP, `flip.ts`)
-rather than repeating the geometry above. Every move flies both ways, whoever took it: the viewer's
-own between hand and felt (#72, #73), everybody else's between their seat and it (#74) — one box
-for a hand that reaches the screen as a count, and the server's redaction passed through, so their
-draw off the deck flies as a back. Nothing waits on a flight, and reduced motion skips it.
+**And it is one screen, not two** (issue #78): `Table.tsx` renders both phases, so a round
+ending changes what is in three slots and nothing about where anything is. One placement
+(`bySeat` off the live roster) and one reserved box per seat (`seatFootprint`) are what make
+that hold by construction. Every decision behind the geometry is in `docs/client-table.md`
+(issues #56, #58, #59, #60, #78, and the flight below); `fan.ts`, `score.ts`, `seating.ts` and
+`Seat.tsx` are where it lives.
+
+**A move is watched crossing that table, not merely published onto it** (issues #69, #72-#74).
+The session says *what* moved (`flight.ts`), `ghosts.ts` which of it the screen can draw and which
+way up, and `CardsInFlight.tsx` measures where it happens and animates the difference closed (FLIP,
+`flip.ts`) rather than repeating the geometry above. Every move flies both ways, whoever took it —
+one box for a hand that reaches the screen as a count, and the wire's redaction passed through, so
+somebody else's draw off the deck flies as a back. Nothing waits on a flight, reduced motion skips
+it, and it stays scoped to `playing`: a scored round is a table to read, not a move to watch.
 
 ### Settings are edited in one place and shown in another
 
@@ -663,20 +663,20 @@ Split, `shared/src` importing a Node builtin is a typecheck error.
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **What a mid-round seat does while its player is gone.** Reconnect itself is built and
-  whole, so a reload costs a round trip. Nothing pauses, times out, bot-plays or frees a seat
-  whose player never comes back: the table waits on them as on a slow player, and `Player`
-  has no `connected` field for a screen to say so with. The next thing to decide here.
+- **What a mid-round seat does while its player is gone.** Reconnect is built and whole, so a
+  reload costs a round trip. Nothing pauses, times out, bot-plays or frees a seat whose player
+  never comes back: the table waits on them as on a slow player, and `Player` has no `connected`
+  field for a screen to say so with. The next thing to decide here.
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
   spot, so anyone who has not joined by then is playing the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four
   (docs/adr/0006) and the CLI has none, so a room created from `play` plays the defaults.
-- **Persistence, and sweeping abandoned rooms.** Rooms are in-memory only, so a redeploy
-  drops every match in progress — same as a restart, and the reason splitting client and
-  server into two services (giving up same-origin, ADR-0003) would be the fix if that cost
-  ever matters. A room nobody resumes and no host closes leaks until then: no idle sweep.
+- **Persistence, and sweeping abandoned rooms.** Rooms are in-memory only, so a redeploy drops
+  every match in progress — same as a restart, and the reason splitting client and server into
+  two services (giving up same-origin, ADR-0003) would be the fix if that cost ever mattered. A
+  room nobody resumes and no host closes leaks until then: no idle sweep.
 - **Slapdown against a bot.** Both clients offer it, but bots neither slap down for themselves
-  nor can be raced by a human, `playBotTurns` running in the same tick — both per ADR-0005.
+  nor can be raced by a human, `playBotTurns` running in the same tick (ADR-0005).
 - **Disambiguating a joker that extends a run.** The browser sends the selection in tap
   order, so tap order decides where the joker sits (`docs/rules.md` §4) — a deliberate wart.
 

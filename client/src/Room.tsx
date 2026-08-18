@@ -1,11 +1,11 @@
 /**
  * The screen for a position that has none of its own.
  *
- * Every phase a match passes through is built now — `Lobby.tsx`, `Table.tsx`,
- * `RoundEnd.tsx`, `GameEnd.tsx` — so what is left here is the one position the wire type
- * allows and the server does not produce: `roundEnd` with a null `roundResult`, where
- * saying what is happening beats a blank page or a component asserting its way past a
- * result that is not there.
+ * Every phase a match passes through is built now — `Lobby.tsx`, `Table.tsx` (which draws
+ * both the hand being played and the one just scored) and `GameEnd.tsx` — so what is left
+ * here is the one position the wire type allows and the server does not produce: `roundEnd`
+ * with a null `roundResult`, where saying what is happening beats a blank page or a
+ * component asserting its way past a result that is not there.
  *
  * It keeps a `phase` prop, narrowed by `App`'s earlier returns, for what that costs
  * nothing: a phase added to the union with no screen behind it fails to typecheck here

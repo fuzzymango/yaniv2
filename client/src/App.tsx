@@ -17,7 +17,6 @@ import { Lobby } from "./Lobby.tsx";
 import { MainMenu } from "./MainMenu.tsx";
 import { Resuming } from "./Resuming.tsx";
 import { Room } from "./Room.tsx";
-import { RoundEnd } from "./RoundEnd.tsx";
 import { Table } from "./Table.tsx";
 import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
@@ -75,7 +74,18 @@ export function App({ session }: { session: Session }) {
     );
   }
 
-  if (phase === "playing") {
+  /*
+   * One screen for the hand being played and the hand just scored (issue #78): a round
+   * ending is the next moment of the same table, not a different page, so the branch here
+   * is one and `Table` changes what three of its slots mean rather than the phase changing
+   * screens under the player.
+   *
+   * A scored round comes with the round it scored — the serializer populates `roundResult`
+   * at `roundEnd` and `gameEnd` and nowhere else. The wire type still allows a null, so a
+   * `roundEnd` without one falls through to the stand-in below rather than to a table with
+   * nothing to reveal.
+   */
+  if (phase === "playing" || (phase === "roundEnd" && view.roundResult !== null)) {
     return (
       <Table
         view={view}
@@ -86,6 +96,7 @@ export function App({ session }: { session: Session }) {
         onToggleCard={session.toggleCard}
         onCommitTurn={session.commitTurn}
         onCallYaniv={session.callYaniv}
+        onNextRound={session.startNextRound}
         onSlapDown={session.slapDown}
         onCloseRoom={session.closeRoom}
       />
@@ -95,7 +106,7 @@ export function App({ session }: { session: Session }) {
   /*
    * The standings need no round behind them — they are a function of the roster and the
    * scores on it, and the round result only adds back whoever has left since. So this
-   * screen is reached on the phase alone, unlike the one below.
+   * screen is reached on the phase alone, unlike the table above.
    */
   if (phase === "gameEnd") {
     return (
@@ -105,25 +116,6 @@ export function App({ session }: { session: Session }) {
         busy={busy}
         onPlayAgain={session.playAgain}
         onExit={session.exitToMenu}
-        onCloseRoom={session.closeRoom}
-      />
-    );
-  }
-
-  /*
-   * A scored round comes with the round it scored — the serializer populates `roundResult`
-   * at `roundEnd` and `gameEnd` and nowhere else. The wire type still allows a null, so the
-   * screen that needs one is reached only when there is one, and the stand-in below catches
-   * a position that should not exist rather than a component asserting its way past it.
-   */
-  if (phase === "roundEnd" && view.roundResult !== null) {
-    return (
-      <RoundEnd
-        view={view}
-        result={view.roundResult}
-        error={error}
-        busy={busy}
-        onNextRound={session.startNextRound}
         onCloseRoom={session.closeRoom}
       />
     );

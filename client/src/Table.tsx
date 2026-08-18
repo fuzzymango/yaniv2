@@ -1,5 +1,18 @@
 /**
- * The table: enough of the game to play a turn against, and the turn itself.
+ * The table: enough of the game to play a turn against, the turn itself, and the moment
+ * after the last one.
+ *
+ * **One screen for `playing` and `roundEnd`** (issue #78). A round being scored is the next
+ * moment of the hand that was just played, not a different page: the seats stay where they
+ * are, the corner icons stay in the corner, and the felt stays under them. What changes is
+ * only what actually changed — every hand turns face up in the seat it was already in, each
+ * label swaps a running score for what the round made of it, the line above the felt says
+ * how the round ended instead of whose turn it is, and the Yaniv call becomes the deal.
+ * Three slots change meaning with the phase; nothing on the screen moves.
+ *
+ * The seats are placed by the same calculation in both phases — the live roster, sorted by
+ * `bySeat` — and the round's own record is looked up against whoever is already sitting
+ * there. Two placements could disagree; one cannot.
  *
  * A turn is two taps and no button. Cards are tapped to build a selection, and the next
  * tap — on the deck, or on an end of the face-up discard — *is* the commit: the selection
@@ -19,16 +32,24 @@
  * decides nothing — see `CardsInFlight.tsx`.
  */
 
-import type { GameError, PlayerGameView } from "@yaniv/shared";
+import type {
+  GameError,
+  OpponentView,
+  PlayerGameView,
+  PlayerRoundResultView,
+  RoundResultView,
+} from "@yaniv/shared";
 import { handValue } from "@yaniv/shared";
 import { CardsInFlight, useCardFlight } from "./CardsInFlight.tsx";
 import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
-import { OpponentSeat, SeatZone } from "./Seat.tsx";
+import { CascadeReveal, OpponentSeat, Seat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
 import { CloseRoomIcon } from "./WayOut.tsx";
 import type { CardFlight } from "./flight.ts";
 import type { Landing } from "./ghosts.ts";
 import { DECK_BOX } from "./ghosts.ts";
+import { scoreLabel } from "./score.ts";
+import type { Zone } from "./seating.ts";
 import { ZONES, bySeat, seatZones } from "./seating.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
@@ -49,10 +70,40 @@ interface TableProps {
   onCommitTurn: (source: DrawSource) => void;
   /** End the round. Offered only on a hand the rules allow it on — see below. */
   onCallYaniv: () => void;
+  /** Deal the next one. Offered to the host alone, where the Yaniv call sat a moment ago. */
+  onNextRound: () => void;
   /** The tap on the pile that sheds the just-drawn card, while a window is open. */
   onSlapDown: () => void;
   /** End the room. Offered to the host alone — see `WayOut.tsx`. */
   onCloseRoom: () => void;
+}
+
+/**
+ * What a scored round says about one player, beside their own cards: whether they did
+ * anything, and where the round leaves them.
+ *
+ * One component for the seats and for the viewer's own footer, so a player cannot be told
+ * two different things about the same round depending on where they are sitting — the same
+ * reason the lobby and the in-match modal share one settings listing.
+ */
+function ScoredDetail({
+  player,
+  result,
+}: {
+  player: PlayerRoundResultView;
+  result: RoundResultView;
+}) {
+  return (
+    <>
+      {/*
+        The line above the felt says who did what; these say it again where the numbers are,
+        so a seat that gained 30 or nothing can be read without going back up to find out why.
+      */}
+      {player.playerId === result.callerId && <span className="seat__mark">yaniv</span>}
+      {player.playerId === result.assaferId && <span className="seat__mark">assaf</span>}
+      <span className="player__score">{scoreLabel(player.scoreAfter, player.delta)}</span>
+    </>
+  );
 }
 
 export function Table({
@@ -64,11 +115,19 @@ export function Table({
   onToggleCard,
   onCommitTurn,
   onCallYaniv,
+  onNextRound,
   onSlapDown,
   onCloseRoom,
 }: TableProps) {
   const yourTurn = view.currentTurnPlayerId === view.you.id;
   const isHost = view.hostId === view.you.id;
+
+  /**
+   * The round just scored, or null while one is still being played. Read off the view
+   * rather than taken as a prop of its own: the phase and the result would then be two
+   * claims about the same position, and this screen would have to decide which it believed.
+   */
+  const result = view.phase === "roundEnd" ? view.roundResult : null;
 
   /**
    * Whether a draw target does anything. The selection is the whole of it: a tap that
@@ -129,6 +188,85 @@ export function Table({
     (p) => p.id === view.currentTurnPlayerId,
   );
 
+  /** The round's own record for a player, or null while the round is still being played. */
+  const scored = (id: string): PlayerRoundResultView | null =>
+    result?.players.find((player) => player.playerId === id) ?? null;
+
+  /**
+   * One opponent in their zone, in whichever of the two shapes the phase calls for — the
+   * fan they were holding, or the same hand face up in the same seat.
+   *
+   * The seat is chosen before the round is consulted, never the other way round: which zone
+   * anybody is in comes off the live roster in both phases, and the round's record only says
+   * what to draw in it.
+   */
+  const seatFor = (zone: Zone, opponent: OpponentView) => {
+    const row = result === null ? null : scored(opponent.id);
+    if (result === null || row === null) {
+      return (
+        <OpponentSeat
+          zone={zone}
+          opponent={opponent}
+          isTurn={opponent.id === view.currentTurnPlayerId}
+          key={opponent.id}
+        />
+      );
+    }
+    return (
+      <Seat
+        zone={zone}
+        name={opponent.name}
+        detail={<ScoredDetail player={row} result={result} />}
+        key={opponent.id}
+      >
+        <CascadeReveal cards={row.hand} zone={zone} />
+      </Seat>
+    );
+  };
+
+  /** A name off the round's own record, which is the only place a departed seat is left. */
+  const named = (id: string) =>
+    result?.players.find((player) => player.playerId === id)?.name ?? "Somebody";
+
+  /*
+   * The outcome is about somebody, and if that somebody is the viewer it says so — "You
+   * called Yaniv", not their own name back at them. Which it is can only be decided here,
+   * since it depends on whose screen this is.
+   */
+  const subject = (id: string) => (id === view.you.id ? "You" : named(id));
+  const object = (id: string) => (id === view.you.id ? "you" : named(id));
+
+  /** The viewer's own row of the round, for the footer under their revealed hand. */
+  const yourRound = scored(view.you.id);
+
+  /*
+   * What the one line above the felt says, and how loudly. Three things can be true of a
+   * position and only one of them is ever the news: how the round ended, that a window is
+   * open, or whose turn it is. Decided once here rather than nested into the markup, since
+   * the tone follows the sentence and the two must not come apart.
+   */
+  const said =
+    result !== null
+      ? `${subject(result.callerId)} called Yaniv — ${
+          result.assaferId === null ? "it stood." : `Assafed by ${object(result.assaferId)}.`
+        }`
+      : slapdownTarget
+        ? "Slapdown! Tap the pile to send the card you just drew straight back"
+        : yourTurn
+          ? "Your turn — tap cards, then the deck or a face-up card"
+          : `${onTurn?.name ?? "Somebody"} is playing`;
+
+  const tone =
+    result !== null
+      ? result.assaferId === null
+        ? "turn--stood"
+        : "turn--assaf"
+      : slapdownTarget
+        ? "turn--slap"
+        : yourTurn
+          ? "turn--yours"
+          : "";
+
   return (
     <>
       <main className="screen table" ref={rootRef}>
@@ -150,19 +288,13 @@ export function Table({
           number to notice.
 
           Which side anyone is on is `seatZones`, off the seating order the server sends, so
-          the table reads the same way round on everybody's screen.
+          the table reads the same way round on everybody's screen — and off the same list
+          once the round is scored, where the fans turn face up where they already are.
         */}
         <div className="table__seats">
           {ZONES.map((zone) => (
             <SeatZone zone={zone} key={zone}>
-              {zones[zone].map((opponent) => (
-                <OpponentSeat
-                  zone={zone}
-                  opponent={opponent}
-                  isTurn={opponent.id === view.currentTurnPlayerId}
-                  key={opponent.id}
-                />
-              ))}
+              {zones[zone].map((opponent) => seatFor(zone, opponent))}
             </SeatZone>
           ))}
         </div>
@@ -250,45 +382,69 @@ export function Table({
         </section>
 
         {/*
+          One line, three things to say and only ever one of them at a time.
+
           A window says what it is in words as well as in the flashing, because it is the
           one thing on this screen that is not a rule about the cards in front of the
           player: nothing they can see explains why the pile has started asking for a tap.
           It goes above whose turn it is, which is true at the same time and matters less
           for as long as the window lasts.
+
+          And once the round is scored this same line says how it ended, rather than a
+          heading appearing above the seats and pushing every one of them down the page
+          (issue #78). The two facts are one sentence because neither means anything without
+          the other: a call that was Assafed cost the caller 30 and won somebody else the
+          round (docs/rules.md §6).
         */}
-        <p
-          className={`turn ${yourTurn ? "turn--yours" : ""} ${slapdownTarget ? "turn--slap" : ""}`}
-          role="status"
-        >
-          {slapdownTarget
-            ? "Slapdown! Tap the pile to send the card you just drew straight back"
-            : yourTurn
-              ? "Your turn — tap cards, then the deck or a face-up card"
-              : `${onTurn?.name ?? "Somebody"} is playing`}
+        <p className={`turn ${tone}`} role="status">
+          {said}
         </p>
 
         {/*
-          The call that replaces a turn rather than taking one, so it is a button where
-          nothing else on this screen is one — there is no set to choose and nothing to draw.
+          One slot, and whatever this player can do from here.
 
-          Always on the screen and inert until the hand is low enough, rather than appearing
-          when it becomes legal: a control that materialises under a thumb already on its way
-          down is one nobody meant to press, and a permanent one also tells a player what
-          they are playing towards.
+          During play it is the call that replaces a turn rather than taking one, so it is a
+          button where nothing else on this screen is one — there is no set to choose and
+          nothing to draw. Always on the screen and inert until the hand is low enough,
+          rather than appearing when it becomes legal: a control that materialises under a
+          thumb already on its way down is one nobody meant to press, and a permanent one
+          also tells a player what they are playing towards.
+
+          Once the round is scored it is the deal, in the same place rather than as a new
+          control somewhere else (issue #78) — and for everybody but the host it is the
+          reason there is no button, exactly as in the lobby.
         */}
-        <button
-          className={`button call ${canCall ? "call--live" : ""}`}
-          type="button"
-          disabled={!canCall}
-          onClick={onCallYaniv}
-        >
-          Yaniv!
-        </button>
+        {result === null ? (
+          <button
+            className={`button call ${canCall ? "call--live" : ""}`}
+            type="button"
+            disabled={!canCall}
+            onClick={onCallYaniv}
+          >
+            Yaniv!
+          </button>
+        ) : isHost ? (
+          <button
+            className="button button--primary deal"
+            type="button"
+            disabled={busy}
+            onClick={onNextRound}
+          >
+            Deal the next round
+          </button>
+        ) : (
+          // Its own class rather than `notice`, which carries news that has just arrived.
+          // This is a standing fact about the screen, the same way it is in the lobby.
+          <p className="hint">The host deals the next round.</p>
+        )}
 
         {/*
           In the order the server sorted them and in no other: sorting again here would
           rearrange a hand under a player's finger between one move and the next. See
           "Hand display order is presentation only" in CLAUDE.md.
+
+          Face up and untappable once the round is scored — there is no turn left to build,
+          and a card that lifted under a thumb would be offering one.
         */}
         <ul className="hand">
           {view.you.hand.map((card) => {
@@ -298,29 +454,43 @@ export function Table({
               // there — the face only, so it can be tapped into a selection the whole time
               // it is arriving, exactly as it could if nothing were in the air.
               <li className={landingClass(card.id, "hand")} key={card.id}>
-                <button
-                  className={`pick ${chosen ? "pick--chosen" : ""}`}
-                  type="button"
-                  aria-label={cardLabel(card)}
-                  aria-pressed={chosen}
-                  disabled={busy}
-                  onClick={() => onToggleCard(card.id)}
-                >
+                {result === null ? (
+                  <button
+                    className={`pick ${chosen ? "pick--chosen" : ""}`}
+                    type="button"
+                    aria-label={cardLabel(card)}
+                    aria-pressed={chosen}
+                    disabled={busy}
+                    onClick={() => onToggleCard(card.id)}
+                  >
+                    <PlayingCard card={card} />
+                  </button>
+                ) : (
                   <PlayingCard card={card} />
-                </button>
+                )}
               </li>
             );
           })}
         </ul>
 
+        {/*
+          The same row in both phases, in the same place. What it says changes with what is
+          worth knowing: while the hand is being played, what it is worth — the number the
+          Yaniv control turns on, so it is worth knowing without adding the cards up, and
+          what says how far off a call still is. Once the round is scored the cards are face
+          up and that number is there to be read off them, so the row says where the round
+          left this player instead, in the words every seat's label uses.
+        */}
         <footer className="you">
           <span className="player__name">{view.you.name}</span>
-          {/*
-            The number the Yaniv control turns on, so it is worth a player knowing without
-            adding their own hand up — and it is what says how far off a call still is.
-          */}
-          <span className="you__value">{handValue(view.you.hand)} in hand</span>
-          <span className="player__score">{view.you.score} pts</span>
+          {result !== null && yourRound !== null ? (
+            <ScoredDetail player={yourRound} result={result} />
+          ) : (
+            <>
+              <span className="you__value">{handValue(view.you.hand)} in hand</span>
+              <span className="player__score">{view.you.score} pts</span>
+            </>
+          )}
         </footer>
 
         {error && (

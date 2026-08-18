@@ -80,10 +80,11 @@ in the same tick (`docs/adr/0005`), so this is something you will see against ot
 The **Yaniv** button above your hand is the exception — the one control that is not a card.
 It lights up the moment your hand is worth the room's threshold (7 unless the host changed
 it) or less, and is dead until then, and pressing
-it ends the round. Everybody then stays in the seat they were playing from, their hand
-turned face up and spread out to be read, with what the round cost them against their new
-total on their own label — plus who called and whether they were Assafed across the top. The
-host deals the next round from there.
+it ends the round. The table you are looking at does not change: everybody stays in the seat
+they were playing from and their hand simply turns face up in it, spread out to be read,
+with their new total and what the round added on their own label. Who called and whether
+they were Assafed is said on the same line that was telling you whose turn it was, and the
+Yaniv button becomes the host's "deal the next round" in the same place.
 
 Reloading the tab, or backgrounding it and coming back, costs you nothing: the server holds
 your seat through a dropped connection, and the page claims it back with a credential it

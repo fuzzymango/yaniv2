@@ -213,6 +213,38 @@ export function fanOverhang(n: number): number {
 }
 
 /**
+ * The box a seat reserves for its hand at `zone`, whichever of the two shapes is in it —
+ * the arc during play, the cascade once the round is scored (issue #78).
+ *
+ * One box for both, because the two are the same seat a moment apart: a seat sized to its
+ * current shape would resize the instant a round was scored, and every neighbour stacked up
+ * that edge would shift with it. Reserving the larger of the two makes that unrepresentable
+ * rather than something to keep an eye on — and it is the *larger of the two*, not a fixed
+ * maximum, so a small hand still sits in a small seat.
+ *
+ * The overhang is in it on the reveal's side alone, and only along the depth axis it runs
+ * on. A seat hangs off its own edge of the screen by `fanOverhang` in both shapes, which is
+ * right for a fan of backs — a hand is part-hidden by whoever holds it — and wrong for a
+ * hand somebody has to read: what is left on screen has to hold the whole cascade. So the
+ * depth is measured against the cascade *plus* what is hanging off, and the seat's own edge
+ * never moves between the two.
+ */
+export function seatFootprint(n: number, zone: Zone): { width: number; height: number } {
+  const fan = fanFootprint(n, zone);
+  const reveal = cascadeFootprint(n, ZONE_CASCADE[zone]);
+  const overhang = fanOverhang(n);
+  return zone === "top"
+    ? {
+        width: Math.max(fan.width, reveal.width),
+        height: Math.max(fan.height, reveal.height + overhang),
+      }
+    : {
+        width: Math.max(fan.width, reveal.width + overhang),
+        height: Math.max(fan.height, reveal.height),
+      };
+}
+
+/**
  * The fan's own extent about its hinge, before any zone turns it: `across` either side of
  * the hinge, `deep` out from it, in card widths.
  */
