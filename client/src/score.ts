@@ -25,9 +25,14 @@ import type { RoundResultView } from "@yaniv/shared";
  *
  * Used for every seat's label and for the viewer's own footer — one function, so a player
  * cannot be told two different things about the same round depending on where they sit.
+ *
+ * **`milestoneReduction`**, when it is more than zero, is noted alongside the delta: a
+ * total that dropped by more than the round's own delta suggests would otherwise read as
+ * inconsistent (docs/rules.md — landing exactly on a multiple of 50 gives 50 back).
  */
-export function scoreLabel(score: number, delta: number): string {
-  return `${score} pts (${delta < 0 ? delta : `+${delta}`})`;
+export function scoreLabel(score: number, delta: number, milestoneReduction = 0): string {
+  const note = milestoneReduction > 0 ? `, -${milestoneReduction} milestone` : "";
+  return `${score} pts (${delta < 0 ? delta : `+${delta}`}${note})`;
 }
 
 /**
