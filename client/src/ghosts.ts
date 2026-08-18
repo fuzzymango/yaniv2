@@ -48,7 +48,7 @@ export const seatBox = (playerId: string): string => `seat:${playerId}`;
  *
  * It is what a landing place is left empty *by*, and it has to be said rather than assumed
  * from the card, because one card can be in two places at once for as long as a flight
- * lasts: a slapdown inside `FLIGHT_MS` puts the card still flying into the hand onto the
+ * lasts: a slapdown inside a flight puts the card still flying into the hand onto the
  * pile, and the place it has actually reached must not be blanked out waiting for it.
  *
  * A `seat` is the one landing that nothing waits at. An opponent's hand is a fan of backs

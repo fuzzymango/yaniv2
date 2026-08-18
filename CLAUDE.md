@@ -119,7 +119,8 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
 | `Table.tsx` | `phase: 'playing'` **and `'roundEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, and the call become the deal |
-| `CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen, and the deck and the seats with them, after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), the `CardsInFlight` overlay they fly across, and `FLIGHT_MS`. The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
+| `timing.ts` | How long the moving parts of a move last, as one chain: `FLIGHT_MS` → `SLAP_MS` → `SHAKE_MS`, each a fraction of the one above it, so the table is retuned from one number and cannot end up half fast and half slow. `PACE_MS` sits above the chain without being derived from it. Plain arithmetic, so a test with no DOM asserts the derivations |
+| `CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen, and the deck and the seats with them, after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), and the `CardsInFlight` overlay they fly across. Also *how* it flies, which is the one thing here that is not a measurement: a turn crosses in `FLIGHT_MS` and decelerates, a slapdown crosses in `SLAP_MS` on a sharper curve, pops on landing and jolts the table (`.table--jolt`, worn for `SHAKE_MS`). The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
 | `Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held, carrying the seat's own `data-flight-box` — the one box in this client drawn to be measured rather than looked at) and `CascadeReveal` (the same hand face up and read, in the seat's own reserved box). Both take that box from `seatFootprint`, so swapping one for the other moves nothing around them. `OpponentSeat` composes the first three for live play; `Table.tsx` composes the scored seat. Presentational throughout |
 | `GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and the same two ways out the lobby offers |
 | `SettingsEditor.tsx` | The host's four controls, in the lobby and nowhere else. Offers exactly what `isValidSettings` accepts, and sends the whole object per change |
@@ -432,24 +433,23 @@ server never sends, so `slapdownEligible` *is* the answer.
 ### The table is seated, and the scored round is the same table
 
 Opponents are drawn round three sides of the felt (`seatZones`): fans of face-down backs under
-upright labels while the round is played, the same seats cascaded face up once it is scored,
-with each player's numbers on their own label. A hand shrinking is something to watch, and a
-scored one something to read — which is why the two shapes differ.
+upright labels while the round is played, the same seats cascaded face up with each player's
+numbers once it is scored — a hand shrinking is something to watch, a scored one something to read.
 
 **And it is one screen, not two** (issue #78): `Table.tsx` renders both phases, so a round
 ending changes what is in three slots and nothing about where anything is. One placement
 (`bySeat` off the live roster) and one reserved box per seat (`seatFootprint`) are what make
 that hold by construction. Every decision behind the geometry is in `docs/client-table.md`
-(issues #56, #58, #59, #60, #78, and the flight below); `fan.ts`, `score.ts`, `seating.ts` and
-`Seat.tsx` are where it lives.
+(issues #56, #58, #59, #60, #78, and the flight below); it lives in `fan.ts`, `score.ts`,
+`seating.ts` and `Seat.tsx`.
 
 **A move is watched crossing that table, not merely published onto it** (issues #69, #72-#74).
 The session says *what* moved (`flight.ts`), `ghosts.ts` which of it the screen can draw and which
-way up, and `CardsInFlight.tsx` measures where it happens and animates the difference closed (FLIP,
-`flip.ts`) rather than repeating the geometry above. Every move flies both ways, whoever took it —
-one box for a hand that reaches the screen as a count, and the wire's redaction passed through, so
-somebody else's draw off the deck flies as a back. Nothing waits on a flight, reduced motion skips
-it, and it stays scoped to `playing`: a scored round is a table to read, not a move to watch.
+way up, and `CardsInFlight.tsx` measures where and closes the difference (FLIP, `flip.ts`). Every
+move flies both ways, whoever took it, with the wire's redaction passed through. **A slapdown flies
+as its own shape** (#95): faster and sharper, popping on landing and jolting the table, on durations
+derived from a turn's rather than tuned beside them (`timing.ts`). Nothing waits on a flight,
+reduced motion skips all of it, and it is scoped to `playing`.
 
 ### Settings are edited in one place and shown in another
 
@@ -477,9 +477,9 @@ is testability: the session core is driven under `node:test` against a real sock
 with no browser, no jsdom and no React test dependencies. Components are not tested at all,
 a consequence of that split rather than a gap — behaviour worth testing on its own belongs in
 the session core, or in one of the pure modules beside it (`turn.ts`, `seating.ts`, `fan.ts`,
-`flight.ts`, `ghosts.ts`, `flip.ts`, `settings.ts`), where every layout rule with an answer lives.
-`useCardFlight` is the one hook outside `useSession`, and only because a flight is measured
-off rendered elements — it decides nothing the pure modules could have been asked instead.
+`flight.ts`, `ghosts.ts`, `flip.ts`, `timing.ts`, `settings.ts`): every layout rule with an
+answer, and every duration with a derivation. `useCardFlight` is the one hook outside
+`useSession`: a flight is measured off rendered elements, and only its keyframes decided there.
 
 Snapshots are **replaced wholesale, never mutated** — `useSyncExternalStore` compares by
 identity, so a mutated object would leave React rendering a position that has moved on.

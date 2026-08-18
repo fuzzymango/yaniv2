@@ -29,32 +29,22 @@
  * Every move at the table flies, whoever took it (issues #72, #73, #74): the viewer's own
  * between their hand and the felt, everybody else's between their seat and it. Which boxes
  * that means is `ghosts.ts`'s answer, and the measuring below does not know the difference.
+ *
+ * *How* it flies is the one thing decided here that is not a measurement (issue #95): a
+ * slapdown crosses faster, on a sharper curve, lands with a pop and jolts the table, and a
+ * turn does none of those. The kind is carried alongside the ghosts rather than asked of each
+ * one, because it is a fact about the move and not about a card in it.
  */
 
 import type { CSSProperties, RefObject } from "react";
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PlayingCard } from "./PlayingCard.tsx";
 import type { Box } from "./flip.ts";
 import { invert, transformOf } from "./flip.ts";
 import type { CardFlight } from "./flight.ts";
 import type { Ghost, Landing } from "./ghosts.ts";
 import { ghostsFor } from "./ghosts.ts";
-
-/**
- * How long a card is in the air.
- *
- * A sibling of `pacing.ts`'s `PACE_MS` and deliberately not derived from it: how long a
- * card takes to cross the table and how long a position stays on screen are two different
- * questions, and tying them together would mean tuning one by changing the other. What the
- * two owe each other is only this — a flight has to be over with room to spare inside a
- * beat, or a chain of bot turns would replace a position while its own cards were still
- * arriving. At better than twice the margin, it is.
- *
- * Long enough to be seen and short enough that a player who already knows what they played
- * never waits on it. They never wait on it in any case: the turn is sent, acked and drawn
- * regardless of what is in the air.
- */
-export const FLIGHT_MS = 300;
+import { FLIGHT_MS, SHAKE_MS, SLAP_MS } from "./timing.ts";
 
 /**
  * A straight line, decelerating. The path is deliberately plain — no arc, no flip, no
@@ -62,6 +52,27 @@ export const FLIGHT_MS = 300;
  * The curve is only so it arrives rather than stops.
  */
 const EASING = "ease-out";
+
+/**
+ * The same line, accelerating instead: a slapdown leaves the hand rather than being placed,
+ * so it arrives at its fastest rather than settling onto the pile. The mirror of `EASING`
+ * about the middle, which is what makes the pair read as two ways of doing one thing.
+ */
+const SLAP_EASING = "cubic-bezier(0.55, 0, 1, 0.45)";
+
+/**
+ * The pop a slapped card lands on: a twelfth over size, about its own centre, before it
+ * settles onto the pile at the size everything else there is.
+ *
+ * Written as a translate and a scale rather than a `transform-origin` of its own, because the
+ * corner this element scales about is the one the whole flight is arithmetic against
+ * (`flip.ts`) — moving it for one keyframe would move the journey with it. Half the excess
+ * back along each axis, as a proportion of the card, holds the centre still.
+ */
+const POP = "translate(-6%, -6%) scale(1.12)";
+
+/** How much of a slapdown is the journey, the rest of it being the pop at the end. */
+const POP_AT = 0.7;
 
 /**
  * Whether the player has asked for less movement. Read at the moment a flight would start
@@ -72,6 +83,11 @@ const EASING = "ease-out";
  * table looked like before any of this existed. The rest of the client says the same thing
  * in CSS (`prefers-reduced-motion` in `styles.css`); a measured animation cannot be turned
  * off from a stylesheet, so this one is asked in code.
+ *
+ * One gate for all three parts of a slapdown: the flight, the pop it lands on and the jolt
+ * behind it. The pop is a keyframe of the flight and the jolt is triggered by its finishing,
+ * so a flight that never starts takes both with it — the table is left exactly as
+ * `lastDiscard` already shows it, which is a card sitting on the pile.
  */
 const wantsStillness = (): boolean =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -97,6 +113,16 @@ function measure(root: HTMLElement | null): Map<string, Box> {
   return boxes;
 }
 
+/**
+ * What is in the air, and what kind of move put it there — one object, so the two cannot
+ * disagree. A slapdown's ghost is drawn no differently from a turn's; it is flown
+ * differently, and the difference is the whole of what the kind is read for here.
+ */
+export interface Airborne {
+  readonly kind: CardFlight["kind"];
+  readonly ghosts: readonly Ghost[];
+}
+
 export interface InFlight {
   /** The screen the boxes are measured within — every card inside it, and the deck. */
   readonly rootRef: RefObject<HTMLElement | null>;
@@ -105,16 +131,29 @@ export interface InFlight {
    * place that is. Drawing both the card and its ghost would show the same card twice, one of
    * them sitting still at the end of the other's journey.
    *
-   * By place and not by card, because a card can be in two at once: a slapdown inside
-   * `FLIGHT_MS` puts the card still flying into the hand onto the pile, and where it has
-   * actually got to is not a place waiting for it.
+   * By place and not by card, because a card can be in two at once: a slapdown inside a
+   * flight puts the card still flying into the hand onto the pile, and where it has actually
+   * got to is not a place waiting for it.
    *
    * A place, not a control: whatever encloses one of these cards keeps working throughout,
    * because a flight may not cost a player a move (`.landing .card` in `styles.css`).
    */
   readonly landing: ReadonlyMap<string, Landing>;
-  /** Handed straight to `<CardsInFlight>`, which is the only thing that can read them. */
-  readonly ghosts: readonly Ghost[];
+  /**
+   * The cards in the air and the kind of move flying them, handed straight to
+   * `<CardsInFlight>`, which is the only thing that can read either. Null is a still table.
+   */
+  readonly flying: Airborne | null;
+  /**
+   * Whether the table should be ringing from a slapdown just landed — worn by the screen as
+   * a class for `SHAKE_MS` and taken off again (`.table--jolt` in `styles.css`).
+   *
+   * A boolean here and a keyframe there, rather than an animation run against the element:
+   * the jolt moves the whole table, which is the one thing on this screen that is neither a
+   * card nor measured, and the file that owns its layout should be the file that says how far
+   * it moves.
+   */
+  readonly jolt: boolean;
   /** Every ghost has arrived, or been dropped. */
   readonly settle: () => void;
 }
@@ -133,7 +172,8 @@ export function useCardFlight(flight: CardFlight | null, viewerId: string): InFl
   const boxes = useRef<Map<string, Box>>(new Map());
   /** The flight already dealt with, whether it was flown or dropped. */
   const played = useRef<CardFlight | null>(null);
-  const [ghosts, setGhosts] = useState<readonly Ghost[]>([]);
+  const [flying, setFlying] = useState<Airborne | null>(null);
+  const [jolt, setJolt] = useState(false);
 
   /*
    * Deliberately without a dependency list: the measurement has to be taken after *every*
@@ -151,16 +191,36 @@ export function useCardFlight(flight: CardFlight | null, viewerId: string): InFl
     played.current = flight;
     if (wantsStillness()) return;
 
-    const flying = ghostsFor(flight, viewerId, before, boxes.current);
-    if (flying.length > 0) setGhosts(flying);
+    const ghosts = ghostsFor(flight, viewerId, before, boxes.current);
+    if (ghosts.length > 0) setFlying({ kind: flight.kind, ghosts });
   });
 
-  const settle = useCallback(() => setGhosts([]), []);
+  /*
+   * The jolt takes itself off after `SHAKE_MS` — the same length the keyframe runs for, read
+   * from the one place either of them gets it. Nothing waits on the timer, and a screen that
+   * goes while it is pending clears it.
+   */
+  useEffect(() => {
+    if (!jolt) return;
+    const timer = window.setTimeout(() => setJolt(false), SHAKE_MS);
+    return () => window.clearTimeout(timer);
+  }, [jolt]);
+
+  /*
+   * The end of a flight, and — for a slapdown alone — the start of the jolt behind it. Here
+   * rather than beside the animation because this is where the kind of the move is known, and
+   * because a jolt that fired on anything else would make every discard an event.
+   */
+  const settle = useCallback(() => {
+    setFlying(null);
+    if (flying?.kind === "slapdown") setJolt(true);
+  }, [flying]);
 
   return {
     rootRef,
-    landing: new Map(ghosts.map((ghost) => [ghost.id, ghost.into])),
-    ghosts,
+    landing: new Map((flying?.ghosts ?? []).map((ghost) => [ghost.id, ghost.into])),
+    flying,
+    jolt,
     settle,
   };
 }
@@ -191,6 +251,33 @@ const ghostStyle = (ghost: Ghost): CSSProperties =>
 const startOf = ({ from, to }: Ghost): string => transformOf(invert(from, to));
 
 /**
+ * How one card is flown, by what kind of move is flying it.
+ *
+ * A turn is one keyframe to another over `FLIGHT_MS`, decelerating. A slapdown is the same
+ * journey in `SLAP_MS` on the sharper curve, and then a beat of its own: the card overshoots
+ * its size on arrival and settles, which is a second keyframe on the element already moving
+ * rather than anything new to draw or measure. Each stretch carries its own easing, since the
+ * curve the card *travelled* on is not the curve a pop settles on.
+ */
+const flightOf = (
+  ghost: Ghost,
+  kind: CardFlight["kind"],
+): { keyframes: Keyframe[]; timing: KeyframeAnimationOptions } =>
+  kind === "slapdown"
+    ? {
+        keyframes: [
+          { transform: startOf(ghost), easing: SLAP_EASING },
+          { transform: POP, offset: POP_AT, easing: EASING },
+          { transform: "none" },
+        ],
+        timing: { duration: SLAP_MS },
+      }
+    : {
+        keyframes: [{ transform: startOf(ghost) }, { transform: "none" }],
+        timing: { duration: FLIGHT_MS, easing: EASING },
+      };
+
+/**
  * The cards in the air, over the whole screen and under nothing.
  *
  * Fixed to the viewport because that is the frame the boxes were measured in, and inert to
@@ -202,10 +289,10 @@ const startOf = ({ from, to }: Ghost): string => transformOf(invert(from, to));
  * moving.
  */
 export function CardsInFlight({
-  ghosts,
+  flying,
   onSettled,
 }: {
-  ghosts: readonly Ghost[];
+  flying: Airborne | null;
   onSettled: () => void;
 }) {
   /**
@@ -216,13 +303,14 @@ export function CardsInFlight({
   const drawn = useRef(new Map<string, HTMLElement>());
 
   useLayoutEffect(() => {
-    const animations = ghosts.flatMap((ghost) => {
+    if (flying === null) return;
+    const animations = flying.ghosts.flatMap((ghost) => {
       const element = drawn.current.get(ghost.id);
       if (element === undefined) return [];
+      const { keyframes, timing } = flightOf(ghost, flying.kind);
       return [
-        element.animate([{ transform: startOf(ghost) }, { transform: "none" }], {
-          duration: FLIGHT_MS,
-          easing: EASING,
+        element.animate(keyframes, {
+          ...timing,
           // Held at the end rather than handed back to the inline transform below, which is
           // where the card *started*: the ghost is removed a render later, and without this
           // it would spend that frame back at the top of its journey.
@@ -240,13 +328,13 @@ export function CardsInFlight({
     return () => {
       for (const animation of animations) animation.cancel();
     };
-  }, [ghosts, onSettled]);
+  }, [flying, onSettled]);
 
-  if (ghosts.length === 0) return null;
+  if (flying === null) return null;
 
   return (
     <div className="flight" aria-hidden="true">
-      {ghosts.map((ghost) => (
+      {flying.ghosts.map((ghost) => (
         <span
           className="flight__card"
           style={ghostStyle(ghost)}

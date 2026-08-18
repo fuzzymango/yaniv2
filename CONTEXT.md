@@ -141,6 +141,17 @@ drawn the same way and named by the seat it is going to. The flight is over in `
 well inside the pacer's beat, so a chain of moves is one flight per beat. Every move at the
 table flies, whoever took it (issues #72, #73, #74); `docs/client-table.md` has the decisions.
 
+A **slapdown flies as its own thing** (issue #95), and how it flies is most of what says it is
+not a turn: the one card crosses in `SLAP_MS` rather than `FLIGHT_MS`, on an accelerating curve
+where a discard decelerates, lands with a brief **pop** past its own size, and **jolts the
+whole table** behind it. Those durations are a **chain, not a set of numbers**
+(`client/src/timing.ts`): the slap is a fraction of the flight and the jolt a fraction of the
+slap, so the table is retuned by editing one value and cannot end up half fast and half slow.
+The chain hangs off the pacer's beat without being derived from it — a flight has to finish
+inside a beat, and that is the whole of what the two owe each other. All three parts are one
+thing to a player who has asked for less motion: the flight never starts, so the pop and the
+jolt never happen, and the card is simply on the pile where the position already put it.
+
 ## Slapdown and the slapdown window
 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it
@@ -148,6 +159,14 @@ matches, out of turn and without taking one (`docs/rules.md` §9). It is not a t
 a mode of one: the turn passed to the next player the moment the discard-and-draw resolved,
 and a slapdown leaves it exactly where it is. All it does is take a card off a hand, add it
 to `lastDiscard`, and record itself as the **last slapdown** for a client to watch.
+
+That record is the wire fact behind the flight above (issue #93): **who slapped and which
+card**, sent to everyone unredacted, since the card is face up on the pile by the time it is
+written and the seat it came out of is the part no client could work out for itself
+([ADR-0008](docs/adr/0008-slapdown-on-the-wire.md)). It is the **last move**'s sibling
+rather than a variant of it, and each is left standing by whatever the other records — which
+is what lets a client watch the two facts side by side and always have at most one of them
+change per broadcast.
 
 The **slapdown window** is the state it is available in: the stretch between one player's
 turn resolving and the next player's beginning. It is the only state in this game in which

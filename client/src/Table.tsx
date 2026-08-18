@@ -32,6 +32,7 @@
  * decides nothing — see `CardsInFlight.tsx`.
  */
 
+import type { CSSProperties } from "react";
 import type {
   GameError,
   OpponentView,
@@ -51,6 +52,7 @@ import { DECK_BOX } from "./ghosts.ts";
 import { roundOutcome, scoreLabel } from "./score.ts";
 import type { Zone } from "./seating.ts";
 import { ZONES, bySeat, seatZones } from "./seating.ts";
+import { SHAKE_MS } from "./timing.ts";
 import type { DrawSource } from "./turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
 
@@ -161,7 +163,7 @@ export function Table({
    * their place can be left empty, and the layer draws them. See `CardsInFlight.tsx` — it is
    * decorative from end to end, and no control below waits on it.
    */
-  const { rootRef, landing, ghosts, settle } = useCardFlight(flight, view.you.id);
+  const { rootRef, landing, flying, jolt, settle } = useCardFlight(flight, view.you.id);
 
   /**
    * A place whose card is still in the air. Said once here and worn by whatever encloses the
@@ -254,7 +256,24 @@ export function Table({
 
   return (
     <>
-      <main className="screen table" ref={rootRef}>
+      {/*
+        The table, and — for the length of a slapdown's aftershock — the table being knocked
+        (issue #95). The class is worn by the whole felt rather than by the pile, because what
+        a slapdown is worth showing is the room reacting to it, and it is taken off again by
+        the layer that put it on. The keyframe is transform-only and the element it moves is
+        the one every control here is already inside, so a tap during it lands exactly where
+        it looks like it lands, and the jolt costs nobody a move.
+
+        How long it lasts comes down from the timing chain (`timing.ts`) rather than being a
+        number in the stylesheet: the shake is the last link of it, and a keyframe tuned to a
+        flight it no longer matches is exactly what deriving the lot was for. The stylesheet
+        keeps what it is better at — how far the table moves, and in which directions.
+      */}
+      <main
+        className={`screen table${jolt ? " table--jolt" : ""}`}
+        style={{ "--jolt-ms": `${SHAKE_MS}ms` } as CSSProperties}
+        ref={rootRef}
+      >
         {/*
           The corner every in-match screen carries. The room's locked settings, one tap away
           and nowhere on the table itself — what a Yaniv may be called on is worth being able
@@ -494,7 +513,7 @@ export function Table({
         measured screen would answer for the card it copies. See `measure` in
         `CardsInFlight.tsx`.
       */}
-      <CardsInFlight ghosts={ghosts} onSettled={settle} />
+      <CardsInFlight flying={flying} onSettled={settle} />
     </>
   );
 }
