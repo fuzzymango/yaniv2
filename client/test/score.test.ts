@@ -45,6 +45,17 @@ describe("scoreLabel", () => {
       assert.ok(scoreLabel(score, delta).includes(`${score}`));
     }
   });
+
+  it("notes a milestone reduction beside the raw delta, so the total doesn't look wrong", () => {
+    // 200 + 55 landed on 255, which crossed a milestone and gave back 50 — the total
+    // reads as 50 lower than the raw delta alone would suggest, so the note has to say why.
+    assert.equal(scoreLabel(205, 55, 50), "205 pts (+55, -50 milestone)");
+  });
+
+  it("adds no note at all when nothing was reduced", () => {
+    assert.equal(scoreLabel(32, 21, 0), scoreLabel(32, 21));
+    assert.equal(scoreLabel(32, 21), "32 pts (+21)");
+  });
 });
 
 /** A round, cut down to the fields `roundOutcome` reads. Hands and numbers play no part. */
@@ -63,6 +74,7 @@ const round = (
     hand: [],
     handValue: 0,
     delta: 0,
+    milestoneReduction: 0,
     scoreAfter: 0,
   })),
 });

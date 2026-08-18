@@ -1100,6 +1100,110 @@ describe("callYaniv — scoring", () => {
   });
 });
 
+describe("callYaniv — milestone reduction", () => {
+  it("reduces a score landing exactly on 50", () => {
+    const state = makeState({
+      players: [{ id: "p1", score: 0 }, { id: "p2", score: 42 }],
+      hands: { p1: ["hearts-A"], p2: ["clubs-8"] },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+    const p2 = after.lastRoundResult!.players.find((p) => p.playerId === "p2")!;
+
+    assert.equal(p2.delta, 8);
+    assert.equal(p2.milestoneReduction, 50);
+    assert.equal(p2.scoreAfter, 0);
+    assert.equal(after.players.find((p) => p.id === "p2")!.score, 0);
+  });
+
+  it("reduces a score landing on 100, not just the first multiple of 50", () => {
+    const state = makeState({
+      players: [{ id: "p1", score: 0 }, { id: "p2", score: 142 }],
+      hands: { p1: ["hearts-A"], p2: ["clubs-8"] },
+      settings: { maxScore: 200 },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+    const p2 = after.lastRoundResult!.players.find((p) => p.playerId === "p2")!;
+
+    assert.equal(p2.milestoneReduction, 50);
+    assert.equal(p2.scoreAfter, 100);
+  });
+
+  it("triggers nothing when a delta overshoots a multiple without landing on it", () => {
+    const state = makeState({
+      players: [{ id: "p1", score: 0 }, { id: "p2", score: 45 }],
+      hands: { p1: ["hearts-A"], p2: ["clubs-8"] },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+    const p2 = after.lastRoundResult!.players.find((p) => p.playerId === "p2")!;
+
+    assert.equal(p2.scoreAfter, 53);
+    assert.equal(p2.milestoneReduction, 0);
+  });
+
+  it("does not re-trigger for a round winner already sitting on a multiple", () => {
+    const state = makeState({
+      players: [{ id: "p1", score: 50 }, { id: "p2", score: 10 }],
+      hands: { p1: ["hearts-A"], p2: ["spades-K"] },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+    const p1 = after.lastRoundResult!.players.find((p) => p.playerId === "p1")!;
+
+    assert.equal(p1.delta, 0);
+    assert.equal(p1.milestoneReduction, 0);
+    assert.equal(p1.scoreAfter, 50);
+  });
+
+  it("pulls a player back under maxScore when the reduced score no longer busts", () => {
+    const state = makeState({
+      players: [{ id: "p1", score: 0 }, { id: "p2", score: 90 }],
+      hands: { p1: ["hearts-A"], p2: ["clubs-10"] },
+      settings: { maxScore: 90 },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+    const p2 = after.lastRoundResult!.players.find((p) => p.playerId === "p2")!;
+
+    assert.equal(p2.milestoneReduction, 50);
+    assert.equal(p2.scoreAfter, 50);
+    assert.equal(after.phase, "roundEnd");
+    assert.equal(after.winnerIds, null);
+  });
+
+  it("still busts when the reduced score remains past maxScore", () => {
+    const state = makeState({
+      players: [{ id: "p1", score: 0 }, { id: "p2", score: 90 }],
+      hands: { p1: ["hearts-A"], p2: ["clubs-10"] },
+      settings: { maxScore: 40 },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+    const p2 = after.lastRoundResult!.players.find((p) => p.playerId === "p2")!;
+
+    assert.equal(p2.milestoneReduction, 50);
+    assert.equal(p2.scoreAfter, 50);
+    assert.equal(after.phase, "gameEnd");
+  });
+
+  it("triggers independently for multiple players in the same round", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 0 },
+        { id: "p2", score: 42 },
+        { id: "p3", score: 92 },
+      ],
+      hands: { p1: ["hearts-A"], p2: ["clubs-8"], p3: ["diamonds-8"] },
+      settings: { maxScore: 200 },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+    const result = after.lastRoundResult!.players;
+    const p2 = result.find((p) => p.playerId === "p2")!;
+    const p3 = result.find((p) => p.playerId === "p3")!;
+
+    assert.equal(p2.milestoneReduction, 50);
+    assert.equal(p2.scoreAfter, 0);
+    assert.equal(p3.milestoneReduction, 50);
+    assert.equal(p3.scoreAfter, 50);
+  });
+});
+
 describe("callYaniv — ending the match", () => {
   it("ends the match once a score passes 100", () => {
     const state = makeState({
@@ -1112,14 +1216,14 @@ describe("callYaniv — ending the match", () => {
     assert.deepEqual(after.winnerIds, ["p1"]);
   });
 
-  it("keeps playing at exactly 100", () => {
+  it("keeps playing at exactly 100, milestone-reduced to 50", () => {
     const state = makeState({
       players: [{ id: "p1", score: 10 }, { id: "p2", score: 90 }],
       hands: { p1: ["hearts-A"], p2: ["spades-K"] },
     });
     const after = unwrap(callYaniv(state, "p1"));
 
-    assert.equal(after.players.find((p) => p.id === "p2")!.score, 100);
+    assert.equal(after.players.find((p) => p.id === "p2")!.score, 50);
     assert.equal(after.phase, "roundEnd");
     assert.equal(after.winnerIds, null);
   });

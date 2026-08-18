@@ -103,7 +103,10 @@ function ScoredDetail({
       */}
       {player.playerId === result.callerId && <span className="seat__mark">yaniv</span>}
       {player.playerId === result.assaferId && <span className="seat__mark">assaf</span>}
-      <span className="player__score">{scoreLabel(player.scoreAfter, player.delta)}</span>
+      {player.milestoneReduction > 0 && <span className="seat__mark">milestone</span>}
+      <span className="player__score">
+        {scoreLabel(player.scoreAfter, player.delta, player.milestoneReduction)}
+      </span>
     </>
   );
 }

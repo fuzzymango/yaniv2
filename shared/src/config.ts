@@ -20,5 +20,11 @@ export const ASSAF_PENALTY = 30;
 /** The match ends once any player's total is strictly greater than this. §7. */
 export const MAX_SCORE = 100;
 
+/** A running total landing exactly on a multiple of this triggers a reduction. §7. */
+export const MILESTONE_INTERVAL = 50;
+
+/** Subtracted from a score that lands exactly on a `MILESTONE_INTERVAL` multiple. §7. */
+export const MILESTONE_REDUCTION = 50;
+
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 6;

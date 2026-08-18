@@ -484,6 +484,28 @@ describe("serializeStateForPlayer — round end", () => {
     assert.deepEqual(ids(caller.hand), ["hearts-A", "hearts-2"]);
     assert.equal(caller.handValue, 3);
     assert.equal(caller.delta, 0);
+    assert.equal(caller.milestoneReduction, 0);
+  });
+
+  it("passes a milestone reduction through to the wire unchanged", () => {
+    const state = unwrap(
+      callYaniv(
+        makeState({
+          players: [
+            { id: "p1", name: "Ada", score: 0 },
+            { id: "p2", name: "Grace", score: 42 },
+          ],
+          hands: { p1: ["hearts-A"], p2: ["clubs-8"] },
+        }),
+        "p1",
+      ),
+    );
+    const view = serializeStateForPlayer(state, "p1");
+
+    const grace = view.roundResult!.players.find((p) => p.playerId === "p2")!;
+    assert.equal(grace.delta, 8);
+    assert.equal(grace.milestoneReduction, 50);
+    assert.equal(grace.scoreAfter, 0);
   });
 
   it("stops highlighting a current turn", () => {
