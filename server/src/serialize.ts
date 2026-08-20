@@ -1,12 +1,20 @@
 import type {
+  Card,
+  DrawSource,
   LastMoveView,
+  MoveHistoryEntryView,
   OpponentView,
   PlayerGameView,
   RoundResultView,
   SelfView,
 } from "@yaniv/shared";
 import { sortHand } from "@yaniv/shared";
-import type { GameState, LastMove, RoundResult } from "./state.ts";
+import type {
+  GameState,
+  LastMove,
+  MoveHistoryEntry,
+  RoundResult,
+} from "./state.ts";
 
 /**
  * Names come from the result itself, not from the roster: a player may have given their
@@ -31,22 +39,60 @@ function toRoundResultView(result: RoundResult): RoundResultView {
 }
 
 /**
- * Redact the move that just resolved for one viewer.
+ * What one viewer may be told about a drawn card: the card itself, or nothing.
  *
  * Whose turn it was and where they drew from are public — a table can watch both happen.
  * Which card it was is not, when it came off the deck: that card is now part of a hidden
- * hand, and naming it here would leak through the back door what `OpponentView` is shaped
- * to keep out. A card taken off the pile was face up a moment earlier, so there is
- * nothing left to hide about it.
+ * hand, and naming it would leak through the back door what `OpponentView` is shaped to
+ * keep out. A card taken off the pile was face up a moment earlier, so there is nothing
+ * left to hide about it.
+ *
+ * One function rather than the same condition written out at each of its two call sites:
+ * the last move and the round's log are the same fact a moment apart, so a rule that could
+ * drift between them is a rule the older of the two would quietly relax.
  */
-function toLastMoveView(move: LastMove, viewerPlayerId: string): LastMoveView {
+function drawnCardFor(
+  move: { playerId: string; drawSource: DrawSource; drawnCard: Card },
+  viewerPlayerId: string,
+): Card | null {
   const revealed =
     move.drawSource === "discard" || move.playerId === viewerPlayerId;
+  return revealed ? move.drawnCard : null;
+}
+
+/** The move that just resolved, redacted for one viewer. */
+function toLastMoveView(move: LastMove, viewerPlayerId: string): LastMoveView {
   return {
     playerId: move.playerId,
     drawSource: move.drawSource,
-    drawnCard: revealed ? move.drawnCard : null,
+    drawnCard: drawnCardFor(move, viewerPlayerId),
   };
+}
+
+/**
+ * The round's log, redacted for one viewer entry by entry, on the same rule and not a
+ * looser one: a card that was the mover's alone when it was drawn does not become anybody
+ * else's for having scrolled up the list. A slapdown passes through whole, its card having
+ * been face up on the pile since it landed.
+ *
+ * The whole list goes to every viewer in every phase — what varies is only which drawn
+ * cards are named, which is why there is nothing here about `roundEnd`.
+ */
+function toMoveHistoryView(
+  history: MoveHistoryEntry[],
+  viewerPlayerId: string,
+): MoveHistoryEntryView[] {
+  return history.map((entry) =>
+    entry.kind === "slapdown"
+      ? entry
+      : {
+          kind: "turn",
+          playerId: entry.playerId,
+          discarded: entry.discarded,
+          drawSource: entry.drawSource,
+          drawnCard: drawnCardFor(entry, viewerPlayerId),
+        },
+  );
 }
 
 /**
@@ -100,6 +146,7 @@ export function serializeStateForPlayer(
       buriedCount: 0,
       lastMove: null,
       lastSlapdown: null,
+      moveHistory: [],
       roundResult: null,
       winnerIds: null,
     };
@@ -150,6 +197,7 @@ export function serializeStateForPlayer(
     // pile every viewer is sent in full, so there is nothing here for one player to know
     // and another not — and so no per-viewer view of it to build. docs/adr/0008.
     lastSlapdown: round.lastSlapdown,
+    moveHistory: toMoveHistoryView(round.moveHistory, viewer.id),
     roundResult:
       revealing && state.lastRoundResult
         ? toRoundResultView(state.lastRoundResult)

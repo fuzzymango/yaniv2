@@ -82,6 +82,40 @@ export interface LastSlapdown {
 }
 
 /**
+ * One turn, as a line in the round's log: whose it was, the set they laid down, and the
+ * card that came back the other way. The same fact `LastMove` carries, plus the discard —
+ * which the last move leaves to `lastDiscard`, and a history cannot, that field holding
+ * only the most recent lay.
+ *
+ * Fully populated, as `LastMove` is: what one viewer may be told about a drawn card is a
+ * question for `serializeStateForPlayer` and not for the domain model.
+ */
+export interface TurnHistoryEntry {
+  kind: "turn";
+  playerId: string;
+  discarded: Card[];
+  drawSource: DrawSource;
+  drawnCard: Card;
+}
+
+/**
+ * One slapdown, as a line in the same log: whose it was and the card they put down.
+ *
+ * A shape of its own under a tag rather than a turn with its draw fields left empty — the
+ * distinction `TurnFlight`/`SlapdownFlight` already draws on the client, and for the same
+ * reason: a turn's `drawnCard` is nullable on the wire, so "no card came back" would
+ * otherwise be indistinguishable from "you are not entitled to know which card did".
+ */
+export interface SlapdownHistoryEntry {
+  kind: "slapdown";
+  playerId: string;
+  card: Card;
+}
+
+/** One move of a round, whichever kind it was. */
+export type MoveHistoryEntry = TurnHistoryEntry | SlapdownHistoryEntry;
+
+/**
  * Everything that resets between rounds. Replacing this whole object is the only way a
  * round begins, which is what makes "forgot to clear a field" unrepresentable.
  */
@@ -117,6 +151,20 @@ export interface RoundState {
    * exactly as it watches `lastMove`.
    */
   lastSlapdown: LastSlapdown | null;
+  /**
+   * Every move of this round, oldest first — the log `lastMove` and `lastSlapdown`
+   * deliberately are not, appended to by the same two transitions that write them.
+   *
+   * Uncapped: a round is bounded by its own deck, so the list is short by construction,
+   * and a cap would be a rule about how far back a player may look that `docs/rules.md`
+   * does not have. Round-scoped like everything else here, so a fresh deal empties it.
+   *
+   * `lastMove` and `lastSlapdown` are deliberately *not* derived from this, though the
+   * newest entry of each kind would give them: each is a fact a client watches for change
+   * (docs/adr/0007, 0008), and "the last entry tagged `turn`" is a search whose answer
+   * would silently start moving the day a third kind of move joined the log.
+   */
+  moveHistory: MoveHistoryEntry[];
 }
 
 export interface PlayerRoundResult {

@@ -60,6 +60,7 @@ function dealRound(
     slapdown: null,
     lastMove: null,
     lastSlapdown: null,
+    moveHistory: [],
   };
 
   return {
@@ -336,12 +337,14 @@ export function takeTurn(
   const discardedIds = new Set(action.discardCardIds);
   const newHand = [...hand.filter((c) => !discardedIds.has(c.id)), drawnCard];
 
+  const discarded = canonicalizeSet(collected.cards);
+
   const newRound: RoundState = {
     ...round,
     hands: { ...round.hands, [playerId]: newHand },
     drawPile,
     buried: [...buried, ...pickupLeftovers],
-    lastDiscard: canonicalizeSet(collected.cards),
+    lastDiscard: discarded,
     currentTurnPlayerId: nextPlayerId(round),
     // Always assigned, never merged: whatever window the previous player was left with
     // closes here whether or not this turn opens one of its own. docs/rules.md §9.
@@ -352,6 +355,18 @@ export function takeTurn(
     // the only place the identity of the drawn one is still known. What the serializer
     // then tells each viewer about it is a separate question.
     lastMove: { playerId, drawSource: action.draw.source, drawnCard },
+    // The same move again, kept rather than overwritten. The discard is carried here and
+    // not on `lastMove` because `lastDiscard` answers that for the latest move alone.
+    moveHistory: [
+      ...round.moveHistory,
+      {
+        kind: "turn",
+        playerId,
+        discarded,
+        drawSource: action.draw.source,
+        drawnCard,
+      },
+    ],
   };
 
   return ok({ ...state, round: newRound });
@@ -392,6 +407,12 @@ export function slapDown(state: GameState, playerId: string): ActionResult {
     // out of is not otherwise recoverable, an open window being private to its holder.
     // `lastMove` is left standing — this is not a turn and records no draw. docs/adr/0008.
     lastSlapdown: { playerId, card: window.card },
+    // And the same slapdown as a line in the round's log, between the turn that opened
+    // the window and whichever turn closes it.
+    moveHistory: [
+      ...round.moveHistory,
+      { kind: "slapdown", playerId, card: window.card },
+    ],
   };
 
   return ok({ ...state, round: newRound });

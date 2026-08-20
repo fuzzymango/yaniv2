@@ -1520,6 +1520,199 @@ describe("the last slapdown", () => {
   });
 });
 
+/**
+ * `round.moveHistory` is the log the two facts above are deliberately not: every turn and
+ * every slapdown of the round, oldest first, so a player who glanced away can read back
+ * what happened rather than seeing only the move that happened to be last. Issue #90.
+ *
+ * Written by the same two transitions and by nothing else — a Yaniv call is not a move —
+ * and replaced wholesale by the deal, since round state always is.
+ */
+describe("the move history", () => {
+  const base = () =>
+    makeState({
+      hands: {
+        p1: ["hearts-3", "spades-9", "clubs-2"],
+        p2: ["diamonds-8", "clubs-5"],
+      },
+      drawPile: ["spades-A", "hearts-10"],
+      lastDiscard: ["hearts-4", "hearts-5", "hearts-6"],
+    });
+
+  it("records a turn: the mover, what they put down and what they took off the deck", () => {
+    const after = unwrap(
+      takeTurn(
+        base(),
+        "p1",
+        { discardCardIds: ["hearts-3"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round.moveHistory, [
+      {
+        kind: "turn",
+        playerId: "p1",
+        discarded: [card("hearts-3")],
+        drawSource: "deck",
+        drawnCard: card("spades-A"),
+      },
+    ]);
+  });
+
+  /** The discarded set as it was laid out, matching what landed on `lastDiscard`. */
+  it("records the discarded set in the order it was laid out", () => {
+    const after = unwrap(
+      takeTurn(
+        makeState({
+          hands: { p1: ["clubs-4", "clubs-2", "clubs-3"], p2: ["diamonds-8"] },
+          drawPile: ["spades-A"],
+          lastDiscard: ["hearts-4", "hearts-5", "hearts-6"],
+        }),
+        "p1",
+        {
+          discardCardIds: ["clubs-4", "clubs-2", "clubs-3"],
+          draw: { source: "discard", cardId: "hearts-6" },
+        },
+        rng(),
+      ),
+    );
+
+    assert.equal(after.phase, "playing");
+    const entry = after.round.moveHistory[0]!;
+    assert.equal(entry.kind, "turn");
+    assert.deepEqual(ids(entry.discarded), ids(after.round.lastDiscard));
+    assert.deepEqual(entry.drawnCard, card("hearts-6"));
+    assert.equal(entry.drawSource, "discard");
+  });
+
+  it("records a slapdown as its own entry", () => {
+    const state = makeState({
+      hands: { p1: ["spades-7", "clubs-9"], p2: ["clubs-2"] },
+      drawPile: ["hearts-10"],
+      lastDiscard: ["hearts-7", "diamonds-7"],
+      currentTurnPlayerId: "p2",
+      slapdown: { playerId: "p1", cardId: "spades-7" },
+      lastMove: { playerId: "p1", drawSource: "deck", drawnCardId: "spades-7" },
+    });
+
+    const after = unwrap(slapDown(state, "p1"));
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round.moveHistory, [
+      { kind: "slapdown", playerId: "p1", card: card("spades-7") },
+    ]);
+  });
+
+  it("appends in the order the moves were made, oldest first", () => {
+    const first = unwrap(
+      takeTurn(
+        base(),
+        "p1",
+        { discardCardIds: ["hearts-3"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+    const second = unwrap(
+      takeTurn(
+        first,
+        "p2",
+        { discardCardIds: ["diamonds-8"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+
+    assert.equal(second.phase, "playing");
+    assert.deepEqual(
+      second.round.moveHistory.map((entry) => [entry.kind, entry.playerId]),
+      [
+        ["turn", "p1"],
+        ["turn", "p2"],
+      ],
+    );
+  });
+
+  /** A slapdown lands between the turn that opened it and the one that closes it. */
+  it("interleaves a slapdown with the turns around it", () => {
+    const played = unwrap(
+      takeTurn(
+        makeState({
+          hands: { p1: ["hearts-7", "clubs-9"], p2: ["clubs-2", "diamonds-3"] },
+          drawPile: ["spades-7"],
+          lastDiscard: ["hearts-6"],
+        }),
+        "p1",
+        { discardCardIds: ["hearts-7"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+    const slapped = unwrap(slapDown(played, "p1"));
+    const after = unwrap(
+      takeTurn(
+        slapped,
+        "p2",
+        { discardCardIds: ["clubs-2"], draw: { source: "discard", cardId: "spades-7" } },
+        rng(),
+      ),
+    );
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(
+      after.round.moveHistory.map((entry) => entry.kind),
+      ["turn", "slapdown", "turn"],
+    );
+  });
+
+  it("is left exactly as it was by a Yaniv call", () => {
+    const played = unwrap(
+      takeTurn(
+        makeState({
+          hands: { p1: ["hearts-3", "clubs-2"], p2: ["hearts-A", "hearts-2"] },
+          drawPile: ["spades-A"],
+          lastDiscard: ["hearts-6"],
+        }),
+        "p1",
+        { discardCardIds: ["hearts-3"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+    const scored = unwrap(callYaniv(played, "p2"));
+
+    assert.equal(played.phase, "playing");
+    assert.equal(scored.phase, "roundEnd");
+    assert.deepEqual(scored.round.moveHistory, played.round.moveHistory);
+  });
+
+  it("is empty on a freshly dealt match", () => {
+    const state = unwrap(
+      startGame(makeState({ phase: "lobby", roundNumber: 0 }), "p1", rng()),
+    );
+    assert.equal(state.phase, "playing");
+    assert.deepEqual(state.round.moveHistory, []);
+  });
+
+  it("is cleared by the next round, so nothing replays over a fresh deal", () => {
+    const played = unwrap(
+      takeTurn(
+        makeState({
+          hands: { p1: ["hearts-3", "clubs-2"], p2: ["diamonds-4"] },
+          drawPile: ["spades-A"],
+          lastDiscard: ["hearts-6"],
+        }),
+        "p1",
+        { discardCardIds: ["hearts-3"], draw: { source: "deck" } },
+        rng(),
+      ),
+    );
+    const scored = unwrap(callYaniv(played, "p2"));
+    const next = unwrap(startNextRound(scored, "p1", rng()));
+
+    assert.equal(next.phase, "playing");
+    assert.deepEqual(next.round.moveHistory, []);
+  });
+});
+
 describe("startNextRound", () => {
   const finished = () => {
     const state = makeState({

@@ -96,12 +96,13 @@ the screen can actually draw is `ghosts.ts`; where on the screen it happens is
 `CardsInFlight.tsx`, the one file in this client that measures a rendered element. Seven
 decisions, none of them about the rules of anything:
 
-- **It asks the screen, not the geometry.** Every card names itself in the markup
-  (`data-card-id`, on `PlayingCard` itself), every card on screen is measured after each
-  render, and a move is flown by putting the card that has landed back where it was a moment
-  ago and letting go — FLIP, and `flip.ts` is the whole of the arithmetic. Nothing repeats
-  what the CSS worked out, so an arc, a gap or a card size can change underneath it and a
-  card still flies to where it actually lands. Only the destination boxes are trusted to
+- **It asks the screen, not the geometry.** Every card at the table names itself in the
+  markup (`data-card-id`, on `PlayingCard` itself — its mini variant is the one card that
+  does not, being a picture of one; see the drawer below), every card on screen is measured
+  after each render, and a move is flown by putting the card that has landed back where it
+  was a moment ago and letting go — FLIP, and `flip.ts` is the whole of the arithmetic.
+  Nothing repeats what the CSS worked out, so an arc, a gap or a card size can change
+  underneath it and a card still flies to where it actually lands. Only the destination boxes are trusted to
   outlive the animation, which is why the ghost is placed there and moved back rather than
   the other way round.
 - **The deck and every seat are measured as places, being the ends that are not cards.** A
@@ -173,3 +174,31 @@ what answers the complaint this started from, since "did they draw from the deck
 is a question about somebody else's turn. Whose move it is decides only which boxes are asked
 for; nothing downstream of `ghosts.ts` knows the difference, and a chain of bot turns is
 already one position per beat, so each move flies inside its own (`pacing.ts`).
+
+## And the round before that one is read, not watched
+
+A flight shows the move that just happened and is gone; the felt shows one moment of the
+round. A player who looked away, or who dropped and came back, had no way to see the rest of
+it — so the round's log gets a **drawer on the left edge of the table** (issues #89, #91),
+newest move first, in mini cards. `MoveHistory.tsx`, and four decisions:
+
+- **The drawer is a pass-through, and so has no module under it.** The log arrives whole on
+  the view, chronological like every other array on it, and already redacted per entry
+  (ADR-0010): a `drawnCard` of null is not a gap to fill in but the answer, and is drawn face
+  down exactly as an opponent's deck draw flies as a back. Reversing it, and how much of it
+  fits before it scrolls, are presentation — so there is no counterpart here to `flight.ts` or
+  `seating.ts`, nothing at that layer to be got wrong, and correspondingly nothing to test.
+- **Open or closed belongs to the component alone.** No server round trip, nothing else on the
+  screen changing with it, and nothing written down: `useState`, closed on every fresh mount,
+  so a new round, a reconnect and a reload all start with the felt uncovered. It is the one
+  piece of state on this table besides the flight, and like the flight it decides nothing.
+- **A mini card is a picture of a card, and gives up its name for it** (`PlayingCard`'s one
+  variant). The drawer is inside the measured screen and lists cards very likely also sitting
+  on the felt; two elements answering to one `data-card-id` would leave `measure` holding
+  whichever it walked into last. So a mini card carries no id: never measured, never flown,
+  never a place left empty for an arrival.
+- **It is drawn while the round is played and not after it.** At `roundEnd` the same table
+  turns every hand face up and says how the round ended, which is the round's story told at
+  full size in the seats — a drawer of icons over it would be competing with the reveal. The
+  phase is what the check asks, not the presence of a result: `moveHistory` still arrives at
+  `roundEnd`, and this screen simply stops drawing it.

@@ -16,7 +16,16 @@
   --surface: rgb(0 0 0 / 25%);
 
   /* The smallest comfortable tap target, used for every control. */
-  --tap: 2.75rem;
+  --tap: 3.75rem;
+
+  /*
+   * A card drawn as an icon rather than as a card (`.card--mini`, issue #91): the move
+   * history, where a row of them is read at a glance and none of them is ever tapped. Up
+   * here with `--tap` rather than beside the cards, because the drawer sizes itself off it
+   * — how many moves fit before it scrolls is arithmetic on this number.
+   */
+  --mini-w: min(4.0rem, 9vw);  /* scales bigger on larger screens */
+
 
   color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -660,6 +669,19 @@ body {
   background: repeating-linear-gradient(45deg, #1e3a8a 0 6px, #1e40af 6px 12px);
 }
 
+/*
+ * A card at icon size. Every other card on this screen takes `--card-w` from whatever it is
+ * sitting in — the hand, the felt, a seat — because those are places whose card size is a
+ * fact about the place. This one carries its own, since a mini card is the same size
+ * wherever it is drawn: it is a picture of a card in a list, not a card at a table.
+ */
+.card--mini {
+  --card-w: var(--mini-w);
+
+  border-radius: 0.2rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+}
+
 /* --- the table --- */
 
 /*
@@ -675,7 +697,7 @@ body {
  * restack pinned the felt to the hand (issue #59) and the two stopped agreeing.
  */
 .table {
-  --card-w: min(3.5rem, 15vw);
+  --card-w: min(4.0rem, 15vw);
 
   position: relative;
   justify-content: flex-start;
@@ -770,13 +792,12 @@ body {
  */
 .table__seats {
   /*
-   * 0.78 of a card on the felt, which is where the prototype's variant D landed (issue
-   * #56) — smaller than that read as cramped at a table of six. The `vh` term is here and
+   * The `vh` term is here and
    * nowhere else cards are sized: a doubled zone stacks two seats up one edge, so on a
    * short screen it is the height that runs out first. Scaling down is the answer at every
    * size rather than reflowing — the table is the same table on a phone as on a monitor.
    */
-  --card-w: calc(min(3.5rem, 15vw, 7.5vh) * 0.78);
+  --card-w: calc(min(4.0rem, 15vw, 7.5vh));
 
   position: absolute;
   inset: 0 0 auto;
@@ -1206,6 +1227,140 @@ body {
   filter: grayscale(0.5);
 }
 
+/* --- the move history --- */
+
+/*
+ * The round read back, on the left edge of the table (issues #89, #91).
+ *
+ * Pinned to the edge and out of the column's flow, like the seats and the corner icons: it
+ * is drawn *over* the felt rather than taking room from it, so opening it never moves a card
+ * anybody is about to tap. Centred on the table's own height rather than hung off the top or
+ * the bottom, which are the two edges already spoken for — the seats take the top of the
+ * screen and the hand the bottom, and the left edge between them is the one place a panel
+ * can sit without covering either.
+ *
+ * Above the felt and the seats (`z-index`), and below the two things that are not the
+ * table's: the settings modal and the flight layer are both drawn outside it, and the flight
+ * layer stays over an open drawer for free — same `z-index`, later in the document. The row is the arrow and then the list, in that order,
+ * so the control is at the screen's own edge whether the drawer is out or not.
+ */
+.history {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  transform: translateY(-50%);
+}
+
+/*
+ * The arrow, and the whole of the control. Deliberately narrow — it sits on the felt for the
+ * whole round whether anybody wants it or not — but full tap height, so a thumb finds it.
+ */
+.history__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  min-height: var(--tap);
+  padding: 0;
+  border: none;
+  border-radius: 0 0.4rem 0.4rem 0;
+  background: var(--surface);
+  color: var(--ink-dim);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/*
+ * The moves themselves. Semi-transparent throughout, so the felt is still a table behind it
+ * rather than a wall over it (issue #89), and narrow: a panel wide enough to be comfortable
+ * would be a panel covering the middle of the table.
+ *
+ * Five moves before it scrolls, which is the "roughly 4-5" the spec asks for — worked out
+ * from the size the icons are actually drawn at (`--mini-w`) rather than typed in as a
+ * height, so a change to one is a change to both. Capped against the viewport as well, since
+ * five entries is a fraction of a tall screen and most of a short one.
+ *
+ * The known overlap: five entries is taller than the gap between the seats and the hand, so
+ * an open drawer reaches up over the bottom of a left-hand seat. Accepted rather than solved
+ * by shrinking it — the felt shows through it, it is only ever there because somebody asked
+ * for it, and a drawer short enough to clear every seat would hold two moves.
+ */
+.history__list {
+  --entry-h: calc(var(--mini-w) * 1.4 + 1.6rem);
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: min(25rem, 40vw);
+  max-height: min(calc(var(--entry-h) * 5), 55dvh);
+  margin: 0;
+  padding: 0.35rem;
+  border-radius: 0.8rem 0.8rem 0.8rem 0.8rem;
+  border: 5px solid rgb(0, 0, 0);
+  background: rgb(0 0 0 / 80%);
+  list-style: none;
+  overflow-y: auto;
+  /* A drawer that has scrolled to its end does not then start scrolling the table. */
+  overscroll-behavior: contain;
+}
+
+/*
+ * One move: who made it, and what it was in cards. The name goes above rather than beside,
+ * because the cards are the row worth scanning and a name of any length would push them
+ * along by a different amount on every line.
+ */
+.history__move {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.25rem 0.35rem;
+  border-left: 2px solid transparent;
+  border-radius: 0.3rem;
+  background: rgb(255 255 255 / 6%);
+}
+
+/*
+ * A slapdown, told apart from a turn at a glance (docs/rules.md §9): the accent this client
+ * already uses for the window itself, so the row and the moment it records are the same
+ * colour. Marked as well as coloured — colour alone would be the only thing saying it.
+ */
+.history__move--slap {
+  border-left-color: var(--accent);
+  background: rgb(253 224 71 / 12%);
+}
+
+.history__who {
+  color: var(--ink-dim);
+  font-size: 0.65rem;
+}
+
+.history__cards {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+/* Where the draw came from — a word, because a pile is not a card. */
+.history__from {
+  padding: 0 0.15rem;
+  color: var(--ink-dim);
+  font-size: 0.6rem;
+}
+
+.history__slap {
+  padding: 0 0.15rem;
+  color: var(--accent);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 /* --- cards in flight --- */
 
 /*
@@ -1263,7 +1418,7 @@ body {
  * exists to avoid (issue #78).
  */
 .hand {
-  --card-w: min(3.75rem, 16vw);
+  --card-w: min(4.0rem, 16vw);
 
   display: flex;
   justify-content: center;

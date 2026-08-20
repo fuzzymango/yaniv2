@@ -80,6 +80,41 @@ export interface LastSlapdownView {
   card: Card;
 }
 
+/**
+ * One turn as a line in the round's log: whose it was, the set they laid down, and the
+ * card that came back — the last move plus the discard, which `LastMoveView` leaves to
+ * `lastDiscard` because it is only ever about the latest move.
+ *
+ * `drawnCard` is redacted exactly as `LastMoveView.drawnCard` is, and for the same reason:
+ * a card off the deck is a card of the mover's hidden hand. The rule matters more here than
+ * it does there — one card is a card, a round of them is an opponent's whole hand.
+ */
+export interface TurnHistoryEntryView {
+  kind: "turn";
+  playerId: string;
+  discarded: Card[];
+  drawSource: DrawSource;
+  /** Null for every viewer but the mover when it came off the deck. See `LastMoveView`. */
+  drawnCard: Card | null;
+}
+
+/**
+ * One slapdown as a line in the same log: whose it was and the card they put down.
+ * Unredacted, as `LastSlapdownView` is — the card was face up on the pile when it landed.
+ *
+ * Tagged rather than told apart by which fields a turn's shape left empty: a turn's
+ * `drawnCard` is already nullable, so "nothing came back" and "you may not know what did"
+ * would be the same absence.
+ */
+export interface SlapdownHistoryEntryView {
+  kind: "slapdown";
+  playerId: string;
+  card: Card;
+}
+
+/** One move of the round, whichever kind it was. */
+export type MoveHistoryEntryView = TurnHistoryEntryView | SlapdownHistoryEntryView;
+
 /** One player's revealed result for a finished round. */
 export interface PlayerRoundResultView {
   playerId: string;
@@ -145,6 +180,13 @@ export interface PlayerGameView {
    * it watches `lastMove`. Told to everyone in full — see `LastSlapdownView`.
    */
   lastSlapdown: LastSlapdownView | null;
+  /**
+   * Every move of the current round, oldest first — the log the two fields above are not,
+   * so a player who looked away can read back what happened rather than only what happened
+   * last. Empty in the lobby and on a freshly dealt round; uncapped, and sent in full in
+   * every phase a round exists in, `roundEnd` included.
+   */
+  moveHistory: MoveHistoryEntryView[];
 
   /** Populated only in `roundEnd` and `gameEnd`, where all hands are revealed. */
   roundResult: RoundResultView | null;

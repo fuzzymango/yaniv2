@@ -38,7 +38,7 @@ React: a framework-free session core plus one component per screen). Every works
 | File | Contents |
 |---|---|
 | `cards.ts` | `Card`/`Suit`/`Rank`, rank ordering, `rankToValue` (the scoring table, `docs/rules.md` §1), and `sortHand`/`compareCards` (display order only — see below) |
-| `views.ts` | `PlayerGameView` and friends — what a client actually receives |
+| `views.ts` | `PlayerGameView` and friends — what a client actually receives, the round's `moveHistory` included |
 | `errors.ts` | `GameErrorCode` union |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and the client |
@@ -57,7 +57,7 @@ this costs `shared` none of its dependency-freedom. See `docs/adr/0002`.
 
 | File | Contents |
 |---|---|
-| `state.ts` | `GameState`, `RoundState`, `Player` — the domain model |
+| `state.ts` | `GameState`, `RoundState`, `Player`, `MoveHistoryEntry` — the domain model |
 | `config.ts` | The operational constants only — `BOT_NAMES` and `ROOM_CODE_*`. The rule constants live in `shared` |
 | `rng.ts` | `Rng` type + `mulberry32` seeded PRNG |
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
@@ -118,7 +118,7 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `App.tsx` | Which screen: no connection comes first, then a seat being claimed back, then no view is the main menu, then everything else is a function of `view.phase` — with `playing` and `roundEnd` the one branch |
 | `MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
-| `Table.tsx` | `phase: 'playing'` **and `'roundEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, and the call become the deal |
+| `Table.tsx` | `phase: 'playing'` **and `'roundEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, the call become the deal, and the history drawer gone |
 | `timing.ts` | How long the moving parts of a move last, as one chain: `FLIGHT_MS` → `SLAP_MS` → `SHAKE_MS`, each a fraction of the one above it, so the table is retuned from one number and cannot end up half fast and half slow. `PACE_MS` sits above the chain without being derived from it. Plain arithmetic, so a test with no DOM asserts the derivations |
 | `CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen, and the deck and the seats with them, after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), and the `CardsInFlight` overlay they fly across. Also *how* it flies, which is the one thing here that is not a measurement: a turn crosses in `FLIGHT_MS` and decelerates, a slapdown crosses in `SLAP_MS` on a sharper curve, pops on landing and jolts the table (`.table--jolt`, worn for `SHAKE_MS`). The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
 | `Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held, carrying the seat's own `data-flight-box` — the one box in this client drawn to be measured rather than looked at) and `CascadeReveal` (the same hand face up and read, in the seat's own reserved box). Both take that box from `seatFootprint`, so swapping one for the other moves nothing around them. `OpponentSeat` composes the first three for live play; `Table.tsx` composes the scored seat. Presentational throughout |
@@ -130,7 +130,8 @@ either. It imports `@yaniv/shared` and nothing from `server/src`.
 | `Modal.tsx` | The panel the settings and the close-room question are both asked behind — shared for the half nobody can see: announced as a dialog, and dismissed by backdrop, control and Escape |
 | `Resuming.tsx` | A seat being claimed back — the third screen with no view behind it, drawn where the main menu otherwise would be so a reload never flashes it |
 | `Disconnected.tsx` | No socket — the screen above every other. One screen for a connection that went and one that never arrived, since neither leaves anything to tap |
-| `PlayingCard.tsx` | One card, drawn in CSS, and named in the markup (`data-card-id`, which is how `CardsInFlight.tsx` finds a card to measure). Presentational only — it does not know what a card means where it sits |
+| `PlayingCard.tsx` | One card, drawn in CSS, and named in the markup (`data-card-id`, which is how `CardsInFlight.tsx` finds a card to measure). Presentational only — it does not know what a card means where it sits. `mini` is its one variant, and is two things at once: icon-sized, and nameless — a picture of a card cannot answer for the card it copies when the flight layer measures |
+| `MoveHistory.tsx` | `phase: 'playing'` only — the round's moves behind an arrow on the left edge of the felt, newest first, in mini cards. A pass-through of `view.moveHistory`: the redaction arrived applied, so a null drawn card is drawn face down rather than filled in. Open or closed is `useState`, so every fresh mount starts closed |
 | `Room.tsx` | The fallback for a `roundEnd` with no result behind it — a position the wire type allows and the server does not produce |
 | `styles.css` | Mobile-first. Cards are drawn in CSS — no image assets |
 
@@ -265,12 +266,12 @@ revealed to everyone only at `phase: 'roundEnd'` / `'gameEnd'`, where the rules 
 Tests assert no hidden card id reaches a payload, mutation-tested by breaking the
 serializer on purpose to confirm the leak tests fail.
 
-**The last move is sent with its drawn card redacted.** `RoundState.lastMove` records who just
-took a turn, which pile they drew from and the card itself; the serializer sends that card to
-everyone off the face-up discard and to the mover alone off the deck (docs/adr/0007).
-**`RoundState.lastSlapdown` is its unredacted sibling** — who slapped and which card, written by
-`slapDown` and cleared by `dealRound`, sent whole: the card is face up by then, and the seat it
-came out of is the part no client could infer. docs/adr/0008.
+**The last move is sent with its drawn card redacted.** `RoundState.lastMove` records the mover,
+the pile they drew from and the card itself; the serializer sends that card to everyone off the
+face-up discard and to the mover alone off the deck (docs/adr/0007). **`lastSlapdown` is its
+unredacted sibling** — who slapped and which card, sent whole: the card is face up by then, and
+the seat no client could infer (docs/adr/0008). And **`moveHistory` is the log neither is** —
+the round's turns and slapdowns, redacted per entry on the same rule. docs/adr/0010.
 
 **A finished round names its own players.** `PlayerRoundResult` carries a `name` copied in
 when the round is scored, and the serializer uses that rather than looking the id up in
@@ -571,11 +572,10 @@ the wire. Nothing in the server sends one today; the handler exists because the 
 each of them as a fresh view, and a screen that re-renders in place shows a seat filling or
 emptying by itself. The CLI needs those nudges only because its frames scroll apart.
 
-**The client never enforces a rule the server owns.** Showing the start control — and the
-close-room control, on every screen a room has — to the host alone is a courtesy so a guest
-is not hunting for a button that was never theirs; the rule is `NOT_HOST`, and the server says it. Refusing an empty name locally is the
-one exception, and only because the server enforces the same rule — it is the client
-declining to offer a move it knows will be refused, not a rule of its own.
+**The client never enforces a rule the server owns.** Showing the start and close-room
+controls to the host alone is a courtesy, so a guest is not hunting for a button that was
+never theirs; the rule is `NOT_HOST` and the server says it. Refusing an empty name is the
+one exception — the client declining a move it knows will be refused, not a rule of its own.
 
 ### Claiming a seat back
 

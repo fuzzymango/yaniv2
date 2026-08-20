@@ -42,6 +42,7 @@ import type {
 } from "@yaniv/shared";
 import { handValue } from "@yaniv/shared";
 import { CardsInFlight, useCardFlight } from "./CardsInFlight.tsx";
+import { MoveHistory } from "./MoveHistory.tsx";
 import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
 import { CascadeReveal, OpponentSeat, Seat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
@@ -189,9 +190,15 @@ export function Table({
 
   const zones = seatZones([...view.opponents].sort(bySeat(view)));
 
-  const onTurn = [view.you, ...view.opponents].find(
-    (p) => p.id === view.currentTurnPlayerId,
-  );
+  const seated = [view.you, ...view.opponents];
+
+  /**
+   * Who a player id belongs to, off the live roster. Used by the line above the felt and by
+   * the move history, which names movers and is sent ids — and said once, so a seat nobody
+   * on this screen can account for is called the same thing in both places.
+   */
+  const nameOf = (id: string | null): string =>
+    seated.find((player) => player.id === id)?.name ?? "Somebody";
 
   /** The round's own record for a player, or null while the round is still being played. */
   const scored = (id: string): PlayerRoundResultView | null =>
@@ -255,7 +262,7 @@ export function Table({
               said: "Your turn — tap cards, then the deck or a face-up card",
               tone: "turn--yours",
             }
-          : { said: `${onTurn?.name ?? "Somebody"} is playing`, tone: "" };
+          : { said: `${nameOf(view.currentTurnPlayerId)} is playing`, tone: "" };
 
   return (
     <>
@@ -287,6 +294,18 @@ export function Table({
           {isHost && <CloseRoomIcon busy={busy} onClose={onCloseRoom} />}
           <SettingsDialog settings={view.settings} />
         </div>
+
+        {/*
+          The round so far, behind an arrow on the left edge (issues #89, #91) — and only
+          while it is still being played. A scored round is already the whole story told at
+          full size in the seats, so a drawer listing the same moves in icons would be
+          competing with the reveal rather than adding to it. The phase and not `result`,
+          because it is the phase the rule is about: `moveHistory` still arrives at
+          `roundEnd`, and this screen simply stops drawing it.
+        */}
+        {view.phase === "playing" && (
+          <MoveHistory entries={view.moveHistory} nameOf={nameOf} />
+        )}
 
         {/*
           Everybody else, seated round three sides of the felt with the viewer holding the

@@ -4,6 +4,7 @@ import type { DrawSource } from "@yaniv/shared";
 import { callYaniv, removePlayer, startGame } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
+import type { GameState } from "../src/state.ts";
 import { RESUME_TOKEN_MARK, ids, makeState, unwrap } from "./helpers.ts";
 
 const scenario = () =>
@@ -392,6 +393,215 @@ describe("serializeStateForPlayer — the last slapdown", () => {
     assert.equal(
       serializeStateForPlayer(makeState({ phase: "lobby" }), "p1").lastSlapdown,
       null,
+    );
+  });
+});
+
+/**
+ * The round's whole log, redacted entry by entry on exactly the rule the last move is: a
+ * deck draw is a card of the mover's hidden hand and goes no further than them, a pickup
+ * was face up on the pile a moment earlier and is news to nobody. A history is where that
+ * rule earns its keep — one redacted card is a card, a round of them unredacted is every
+ * opponent's hand. Issue #90.
+ */
+describe("serializeStateForPlayer — the move history", () => {
+  const logged = () =>
+    makeState({
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace" },
+        { id: "p3", name: "Alan" },
+      ],
+      hands: { p1: ["hearts-3", "spades-8"], p2: ["spades-K"], p3: ["clubs-9"] },
+      lastDiscard: ["clubs-7"],
+      currentTurnPlayerId: "p2",
+      moveHistory: [
+        {
+          kind: "turn",
+          playerId: "p1",
+          discardedIds: ["hearts-2"],
+          drawSource: "deck",
+          drawnCardId: "spades-8",
+        },
+        { kind: "slapdown", playerId: "p1", cardId: "spades-8" },
+        {
+          kind: "turn",
+          playerId: "p2",
+          discardedIds: ["diamonds-5"],
+          drawSource: "discard",
+          drawnCardId: "clubs-4",
+        },
+      ],
+    });
+
+  it("delivers every move in the order they were made", () => {
+    for (const viewer of ["p1", "p2", "p3"]) {
+      const view = serializeStateForPlayer(logged(), viewer);
+      assert.deepEqual(
+        view.moveHistory.map((entry) => [entry.kind, entry.playerId]),
+        [
+          ["turn", "p1"],
+          ["slapdown", "p1"],
+          ["turn", "p2"],
+        ],
+        `wrong history for ${viewer}`,
+      );
+    }
+  });
+
+  it("names the discarded set and the source of every turn, for every viewer", () => {
+    for (const viewer of ["p1", "p2", "p3"]) {
+      const view = serializeStateForPlayer(logged(), viewer);
+      const first = view.moveHistory[0]!;
+      assert.equal(first.kind, "turn");
+      assert.deepEqual(ids(first.discarded), ["hearts-2"]);
+      assert.equal(first.drawSource, "deck");
+    }
+  });
+
+  it("passes a slapdown through whole, its card being face up already", () => {
+    for (const viewer of ["p1", "p2", "p3"]) {
+      const entry = serializeStateForPlayer(logged(), viewer).moveHistory[1]!;
+      assert.equal(entry.kind, "slapdown");
+      assert.equal(entry.card.id, "spades-8");
+    }
+  });
+
+  it("shows a card taken off the discard pile to everyone", () => {
+    for (const viewer of ["p1", "p2", "p3"]) {
+      const entry = serializeStateForPlayer(logged(), viewer).moveHistory[2]!;
+      assert.equal(entry.kind, "turn");
+      assert.equal(entry.drawnCard?.id, "clubs-4", `hidden from ${viewer}`);
+    }
+  });
+
+  it("shows a card taken off the deck to the mover alone", () => {
+    const mine = serializeStateForPlayer(logged(), "p1").moveHistory[0]!;
+    assert.equal(mine.kind, "turn");
+    assert.equal(mine.drawnCard?.id, "spades-8");
+
+    for (const viewer of ["p2", "p3"]) {
+      const entry = serializeStateForPlayer(logged(), viewer).moveHistory[0]!;
+      assert.equal(entry.kind, "turn");
+      assert.equal(entry.drawnCard, null, `${viewer} was told what p1 drew`);
+    }
+  });
+
+  /**
+   * The leak test proper: a round of deck draws, none of them the viewer's, greped for
+   * whole rather than read field by field — a history that redacted the drawn card and
+   * carried it somewhere else would pass every assertion above and fail this one.
+   */
+  it("leaks no deck-drawn card of anyone else's into the payload", () => {
+    const drawn = ["spades-8", "hearts-9", "diamonds-J"];
+    const state = makeState({
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace" },
+        { id: "p3", name: "Alan" },
+      ],
+      hands: { p1: ["hearts-3"], p2: ["spades-8", "hearts-9"], p3: ["diamonds-J"] },
+      lastDiscard: ["clubs-7"],
+      moveHistory: [
+        {
+          kind: "turn",
+          playerId: "p2",
+          discardedIds: ["hearts-2"],
+          drawSource: "deck",
+          drawnCardId: "spades-8",
+        },
+        {
+          kind: "turn",
+          playerId: "p3",
+          discardedIds: ["clubs-3"],
+          drawSource: "deck",
+          drawnCardId: "diamonds-J",
+        },
+        {
+          kind: "turn",
+          playerId: "p2",
+          discardedIds: ["clubs-5"],
+          drawSource: "deck",
+          drawnCardId: "hearts-9",
+        },
+      ],
+    });
+
+    const wire = JSON.stringify(serializeStateForPlayer(state, "p1"));
+    for (const cardId of drawn) {
+      assert.ok(!wire.includes(cardId), `the history leaked ${cardId} to p1`);
+    }
+  });
+
+  /**
+   * The same leak test run against a deliberately broken serializer, to prove it can
+   * fail: the convention `CLAUDE.md` records for this boundary, kept in the suite here
+   * rather than as a one-off edit somebody has to remember to make.
+   */
+  it("would catch a serializer that stopped redacting", () => {
+    // The break: the round's own entries, sent as they are. Every field of the real view
+    // is otherwise identical, so the only thing this test can be answering is redaction.
+    const leaky = (state: GameState, viewerId: string) => ({
+      ...serializeStateForPlayer(state, viewerId),
+      moveHistory: state.round?.moveHistory ?? [],
+    });
+    const state = makeState({
+      hands: { p1: ["hearts-3"], p2: ["spades-8"] },
+      lastDiscard: ["clubs-7"],
+      moveHistory: [
+        {
+          kind: "turn",
+          playerId: "p2",
+          discardedIds: ["hearts-2"],
+          drawSource: "deck",
+          drawnCardId: "spades-8",
+        },
+      ],
+    });
+
+    assert.ok(
+      JSON.stringify(leaky(state, "p1")).includes("spades-8"),
+      "the leak test cannot fail, so it proves nothing",
+    );
+    assert.ok(
+      !JSON.stringify(serializeStateForPlayer(state, "p1")).includes("spades-8"),
+      "the real serializer leaked a deck draw",
+    );
+  });
+
+  /** Delivered in full at `roundEnd` — the whole round is there to be read back. */
+  it("stands once the round is scored, still redacted", () => {
+    const scored = unwrap(
+      callYaniv(
+        makeState({
+          hands: { p1: ["hearts-A", "hearts-2"], p2: ["spades-K"] },
+          moveHistory: [
+            {
+              kind: "turn",
+              playerId: "p2",
+              discardedIds: ["hearts-5"],
+              drawSource: "deck",
+              drawnCardId: "spades-K",
+            },
+          ],
+        }),
+        "p1",
+      ),
+    );
+
+    const mover = serializeStateForPlayer(scored, "p2").moveHistory[0]!;
+    const other = serializeStateForPlayer(scored, "p1").moveHistory[0]!;
+    assert.equal(mover.kind, "turn");
+    assert.equal(other.kind, "turn");
+    assert.equal(mover.drawnCard?.id, "spades-K");
+    assert.equal(other.drawnCard, null);
+  });
+
+  it("is empty before a move has been made, and in the lobby", () => {
+    assert.deepEqual(serializeStateForPlayer(scenario(), "p1").moveHistory, []);
+    assert.deepEqual(
+      serializeStateForPlayer(makeState({ phase: "lobby" }), "p1").moveHistory,
+      [],
     );
   });
 });

@@ -120,6 +120,7 @@ export function viewOf(
     buriedCount: 2,
     lastMove: null,
     lastSlapdown: null,
+    moveHistory: [],
     roundResult: null,
     winnerIds: null,
   };

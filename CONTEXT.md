@@ -74,7 +74,8 @@ the tap that produces it rather than the message it sends.
 
 The turn that just resolved, named as a fact rather than reconstructed: who took it, which
 pile they drew from, and which card they drew — `RoundState.lastMove`, and `lastMove` on
-the view. Exactly one move, overwritten by the next — not a history, not a log.
+the view. Exactly one move, overwritten by the next; the log is the **move history**, below,
+and this stays the single fact a client watches for change.
 
 It exists because the drawn card is otherwise **unknowable downstream**: what is left of a
 pile after a pickup reaches a client as a count, so a run's two ends, or a same-rank set,
@@ -100,6 +101,32 @@ holder (see "Slapdown and the slapdown window"), so every other viewer sees a ca
 with no seat attached. Nothing about it is redacted — by the time it is written the card is
 face up on the pile everyone is already sent in full. See
 [ADR-0008](docs/adr/0008-slapdown-on-the-wire.md).
+
+## Move history
+
+Every move of the round in the order they were made — `RoundState.moveHistory`, and
+`moveHistory` on the view (issue #90). A **move** here is a turn or a slapdown, and nothing
+else: a Yaniv call ends the round rather than moving within it, and leaves the log exactly as
+it found it. Each entry is **tagged** by which kind it is, on the same grounds `CardFlight`
+is — a turn's drawn card is nullable, so "nothing came back" cannot be inferred from absence.
+
+Where the last move and the last slapdown are each one fact overwritten by the next, this is
+the **log** they are not: what a player who looked away reads back. Round-scoped like every
+other round fact, so a deal empties it; uncapped, a round being bounded by its own deck.
+
+A turn's entry carries its **discarded set** as well, which the last move leaves to
+`lastDiscard` — a field that only ever holds the latest lay. That is the one thing the wire
+did not previously name: a set that has since been **buried** is named here, which is no
+secret to give away, every player having watched it land face up (`buriedCount` is a count to
+keep payloads small, not to keep anything back). The **drawn card** is redacted per viewer on
+exactly the last move's rule, and it matters more here: one withheld card is a card, a round
+of them is an opponent's whole hand. See [ADR-0007](docs/adr/0007-last-move-on-the-wire.md).
+
+Read on the browser client as the **history drawer**: the same log newest first, in mini
+cards behind an arrow on the left edge of the felt, and drawn **only while the round is being
+played** (issue #91) — a scored round tells its own story at full size in the seats. Which
+end is the interesting one, how many moves fit before it scrolls, and whether the drawer is
+open at all are the client's alone; none of them is a fact about the round.
 
 ## Card flight
 

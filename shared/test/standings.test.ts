@@ -46,6 +46,7 @@ function finishedMatch(options: {
     buriedCount: 0,
     lastMove: null,
     lastSlapdown: null,
+    moveHistory: [],
     roundResult: { roundNumber: 4, callerId: you.id, assaferId: null, winnerId: you.id, players },
     winnerIds: [you.id],
   };
