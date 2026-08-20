@@ -25,8 +25,8 @@ import {
   effectiveBotCount,
   isValidSettings,
 } from "@yaniv/shared";
-import { SettingsPanel } from "./SettingsValues.tsx";
-import { sameSettings, wholeNumber } from "./settings.ts";
+import { SettingsPanel } from "../settings/SettingsPanel.tsx";
+import { sameSettings, wholeNumber } from "../settings.ts";
 
 interface SettingsEditorProps {
   settings: RoomSettings;

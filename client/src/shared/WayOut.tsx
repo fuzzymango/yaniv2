@@ -13,8 +13,14 @@
  * Two shapes for the two kinds of furniture. `CloseRoomIcon` goes in the bar every in-match
  * screen carries, beside the settings, because a table and a scored round are all game and
  * have no row of controls to put a button in; `WayOut` is that row, in the lobby and at a
- * finished match. One file either way, so the wording and the confirmation cannot drift
- * apart between screens the way two copies of them would.
+ * finished match.
+ *
+ * **Two exported components in one file, and the invariant is one question.** The rule
+ * elsewhere in this client is one exported component per file (CLAUDE.md, `client/src/`);
+ * these two are the documented exception: both triggers ask the same question, through the
+ * same `ConfirmClose`, and that question — its wording, and the fact that it is asked at all
+ * — is the whole safeguard. Split apart, it would be two copies free to drift, and one of
+ * them could quietly stop asking.
  *
  * Closing asks first, and it is the only control in this client that does. A tap that lands
  * here ends the match for everyone else and nothing brings it back — the one place in this

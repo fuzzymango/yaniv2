@@ -12,28 +12,7 @@
  * else with `NOT_HOST` or `WRONG_PHASE`.
  */
 
-import type { ReactNode } from "react";
 import type { RoomSettings } from "@yaniv/shared";
-
-/**
- * What the settings are called, wherever they are shown — the lobby's box and the
- * in-match modal's heading. One string, because two would be two things to keep the same.
- */
-export const SETTINGS_TITLE = "Room settings";
-
-/**
- * The box the lobby's settings sit in, whether they are the host's controls or everybody
- * else's read-only copy of them. Both are the same thing in the same place on the screen,
- * so both are the same box.
- */
-export function SettingsPanel({ children }: { children: ReactNode }) {
-  return (
-    <section className="settings">
-      <h2 className="settings__title">{SETTINGS_TITLE}</h2>
-      {children}
-    </section>
-  );
-}
 
 interface SettingsValuesProps {
   settings: RoomSettings;

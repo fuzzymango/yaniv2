@@ -28,7 +28,7 @@ import type {
   SlapdownHistoryEntryView,
   TurnHistoryEntryView,
 } from "@yaniv/shared";
-import { PlayingCard } from "./PlayingCard.tsx";
+import { PlayingCard } from "../shared/PlayingCard.tsx";
 
 interface MoveHistoryProps {
   /** The round's moves, oldest first, as the wire sends them. */
