@@ -10,8 +10,9 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { PlayerGameView } from "@yaniv/shared";
 import { MAX_PLAYERS } from "@yaniv/shared";
-import { ZONES, seatZones } from "../src/seating.ts";
+import { ZONES, byRelativeSeat, seatZones } from "../src/seating.ts";
 
 /** Opponents stand in as names — `seatZones` is generic and never looks inside one. */
 const opponents = (n: number): string[] =>
@@ -83,5 +84,60 @@ describe("seatZones", () => {
       top: [{ playerId: "b" }],
       right: [],
     });
+  });
+});
+
+describe("byRelativeSeat", () => {
+  /** Only `turnOrder` and `you.id` are read — the rest of a view is never looked at. */
+  const view = (turnOrder: string[], youId: string): PlayerGameView =>
+    ({ turnOrder, you: { id: youId } }) as PlayerGameView;
+
+  const seat = (id: string) => ({ id });
+
+  it("orders a single opponent trivially", () => {
+    const opponents = [seat("p2")];
+    assert.deepEqual(
+      [...opponents].sort(byRelativeSeat(view(["p1", "p2"], "p1"))).map((o) => o.id),
+      ["p2"],
+    );
+  });
+
+  it("starts from the next player to act after the viewer, wrapping round", () => {
+    const turnOrder = ["p1", "p2", "p3", "p4"];
+    const opponents = [seat("p4"), seat("p2"), seat("p3")];
+    assert.deepEqual(
+      [...opponents].sort(byRelativeSeat(view(turnOrder, "p1"))).map((o) => o.id),
+      ["p2", "p3", "p4"],
+    );
+  });
+
+  it("wraps the order when the viewer is not first in turnOrder", () => {
+    const turnOrder = ["p1", "p2", "p3", "p4"];
+    const opponents = [seat("p1"), seat("p2"), seat("p4")];
+    assert.deepEqual(
+      [...opponents].sort(byRelativeSeat(view(turnOrder, "p3"))).map((o) => o.id),
+      ["p4", "p1", "p2"],
+    );
+  });
+
+  it("orders a full six-seat room relative to the viewer", () => {
+    const turnOrder = ["p1", "p2", "p3", "p4", "p5", "p6"];
+    const opponents = ["p6", "p1", "p4", "p2", "p5"].map(seat);
+    assert.deepEqual(
+      [...opponents].sort(byRelativeSeat(view(turnOrder, "p3"))).map((o) => o.id),
+      ["p4", "p5", "p6", "p1", "p2"],
+    );
+  });
+
+  it("sorts relative to the viewer whichever seat in turnOrder they hold", () => {
+    const turnOrder = ["p1", "p2", "p3", "p4", "p5"];
+    for (const [i, youId] of turnOrder.entries()) {
+      const opponents = turnOrder.filter((id) => id !== youId).map(seat);
+      const expected = [...turnOrder.slice(i + 1), ...turnOrder.slice(0, i)];
+      assert.deepEqual(
+        [...opponents].sort(byRelativeSeat(view(turnOrder, youId))).map((o) => o.id),
+        expected,
+      );
+    }
   });
 });

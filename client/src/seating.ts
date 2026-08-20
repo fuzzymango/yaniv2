@@ -17,6 +17,24 @@ export function bySeat(
 }
 
 /**
+ * `bySeat`, but relative to the viewer rather than absolute: the next player to act after
+ * them sorts first, wrapping round to whoever sits just before them last. `bySeat` reads
+ * the same way round on every screen, but only *starting from* the same seat on every
+ * screen — for the table, where the viewer's own seat is never one of the zones being
+ * filled, that seat is nowhere to anchor from, so absolute position reads correctly only
+ * for whoever happens to be first in `turnOrder` and scrambles for everyone else.
+ */
+export function byRelativeSeat(
+  view: PlayerGameView,
+): (a: { id: string }, b: { id: string }) => number {
+  const { turnOrder } = view;
+  const you = turnOrder.indexOf(view.you.id);
+  const relative = (id: string): number =>
+    (turnOrder.indexOf(id) - you + turnOrder.length) % turnOrder.length;
+  return (a, b) => relative(a.id) - relative(b.id);
+}
+
+/**
  * The three sides of the felt an opponent can be drawn on, in the order they are dealt.
  * The viewer holds the fourth, and is not a zone: their hand is at the bottom of the
  * screen whoever else is at the table.
@@ -42,8 +60,8 @@ function zoneAt(i: number): Zone {
 /**
  * Deals a turn-ordered opponent list around the table: 1st left, 2nd top, 3rd right, 4th
  * back to left, 5th back to top. Every zone is filled before any is doubled, and a zone
- * that doubles keeps both opponents in turn order, so the table reads the same way round
- * on everybody's screen — the whole point of sorting by `bySeat` in the first place.
+ * that doubles keeps both opponents in turn order — the whole point of sorting the roster
+ * first, whether by `bySeat` or `byRelativeSeat`, before ever handing it to this function.
  *
  * `right` cannot hold two: doubling it needs a 6th opponent, and `MAX_PLAYERS` is 6, so
  * five is all there ever are. That is a fact about the room, not a case handled here.

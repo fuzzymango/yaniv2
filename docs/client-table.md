@@ -61,12 +61,19 @@ the page, and nobody has to be re-found. What changes is what changed:
 - **The Yaniv call becomes the deal** — the host's control, or the reason there is none, in
   the slot the call was in.
 
-Seats are placed by the live roster sorted by `bySeat` in **both** phases, and the round's
-own record is looked up by id against whoever is already in a zone. Two placements could
-disagree; one cannot. (Mid-round leaving is impossible, so the round's recorded order and
-`turnOrder` agree here in every real case — reusing one calculation forecloses the drift by
-construction rather than by invariant.) A `roundEnd` with a null `roundResult` — a wire state
-the server does not produce — still falls through to `Room.tsx`.
+Seats are placed by the live roster sorted by `byRelativeSeat` in **both** phases, and the
+round's own record is looked up by id against whoever is already in a zone. Two placements
+could disagree; one cannot. (Mid-round leaving is impossible, so the round's recorded order
+and `turnOrder` agree here in every real case — reusing one calculation forecloses the drift
+by construction rather than by invariant.) A `roundEnd` with a null `roundResult` — a wire
+state the server does not produce — still falls through to `Room.tsx`.
+
+`byRelativeSeat` sorts turn order relative to the viewer's own seat rather than absolute
+position, so the left-to-right sweep always starts with the next player to act after them —
+`bySeat` reads the same way round on every screen only starting from the same seat on every
+screen, which the table has no use for since the viewer's own seat is never one of the zones.
+The lobby's roster listing (`Lobby.tsx`) is a different case — every seat, the viewer's own
+included, is listed in one place — and keeps the absolute `bySeat`.
 
 Three things still separate the revealed hand from the played one (issues #56, #60):
 
