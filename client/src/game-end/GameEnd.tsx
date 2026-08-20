@@ -16,8 +16,8 @@
 
 import type { GameError, PlayerGameView } from "@yaniv/shared";
 import { standings } from "@yaniv/shared";
-import { SettingsDialog } from "./SettingsDialog.tsx";
-import { WayOut } from "./WayOut.tsx";
+import { SettingsDialog } from "../settings/SettingsDialog.tsx";
+import { WayOut } from "../shared/WayOut.tsx";
 
 interface GameEndProps {
   view: PlayerGameView;

@@ -11,13 +11,13 @@
  * and then the main menu itself.
  */
 
-import { Disconnected } from "./Disconnected.tsx";
-import { GameEnd } from "./GameEnd.tsx";
-import { Lobby } from "./Lobby.tsx";
-import { MainMenu } from "./MainMenu.tsx";
-import { Resuming } from "./Resuming.tsx";
-import { Room } from "./Room.tsx";
-import { Table } from "./Table.tsx";
+import { Disconnected } from "./connection/Disconnected.tsx";
+import { Resuming } from "./connection/Resuming.tsx";
+import { GameEnd } from "./game-end/GameEnd.tsx";
+import { Lobby } from "./lobby/Lobby.tsx";
+import { MainMenu } from "./main-menu/MainMenu.tsx";
+import { Room } from "./table/Room.tsx";
+import { Table } from "./table/Table.tsx";
 import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
 

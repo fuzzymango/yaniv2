@@ -26,8 +26,9 @@
 
 import { useState } from "react";
 import type { RoomSettings } from "@yaniv/shared";
-import { Modal } from "./Modal.tsx";
-import { SETTINGS_TITLE, SettingsValues } from "./SettingsValues.tsx";
+import { Modal } from "../shared/Modal.tsx";
+import { SETTINGS_TITLE } from "./SettingsPanel.tsx";
+import { SettingsValues } from "./SettingsValues.tsx";
 
 /**
  * Drawn rather than loaded, like the cards: two sliders, which is what a settings icon

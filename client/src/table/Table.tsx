@@ -43,19 +43,19 @@ import type {
 import { handValue } from "@yaniv/shared";
 import { CardsInFlight, useCardFlight } from "./CardsInFlight.tsx";
 import { MoveHistory } from "./MoveHistory.tsx";
-import { PlayingCard, cardLabel } from "./PlayingCard.tsx";
+import { PlayingCard, cardLabel } from "../shared/PlayingCard.tsx";
 import { CascadeReveal, OpponentSeat, Seat, SeatZone } from "./Seat.tsx";
-import { SettingsDialog } from "./SettingsDialog.tsx";
-import { CloseRoomIcon } from "./WayOut.tsx";
-import type { CardFlight } from "./flight.ts";
-import type { Landing } from "./ghosts.ts";
-import { DECK_BOX } from "./ghosts.ts";
-import { roundOutcome, scoreLabel } from "./score.ts";
-import type { Zone } from "./seating.ts";
-import { ZONES, bySeat, seatZones } from "./seating.ts";
-import { SHAKE_MS } from "./timing.ts";
-import type { DrawSource } from "./turn.ts";
-import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "./turn.ts";
+import { SettingsDialog } from "../settings/SettingsDialog.tsx";
+import { CloseRoomIcon } from "../shared/WayOut.tsx";
+import type { CardFlight } from "../flight.ts";
+import type { Landing } from "../ghosts.ts";
+import { DECK_BOX } from "../ghosts.ts";
+import { roundOutcome, scoreLabel } from "../score.ts";
+import type { Zone } from "../seating.ts";
+import { ZONES, bySeat, seatZones } from "../seating.ts";
+import { SHAKE_MS } from "../timing.ts";
+import type { DrawSource } from "../turn.ts";
+import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "../turn.ts";
 
 interface TableProps {
   view: PlayerGameView;

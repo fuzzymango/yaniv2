@@ -2,6 +2,16 @@
  * An opponent, sitting somewhere round the felt: their cards, and a label saying who they
  * are.
  *
+ * **Five exported components in one file, and the invariant is one box per seat.** The rule
+ * elsewhere in this client is one exported component per file (CLAUDE.md, `client/src/`);
+ * these five are the documented exception, because a seat's size is one fact and splitting
+ * them would make it several. `CardFan` and `CascadeReveal` are two shapes of the *same* box
+ * and take it from the same `seatFootprint` call, which is what lets a round being scored
+ * swap one for the other and move nothing around them — a seat that resized at the reveal is
+ * exactly what issue #78 fixed. `SeatZone` and `Seat` are the frame that box is measured and
+ * placed against, and `OpponentSeat` the composition that puts a live hand in it; in another
+ * file each would be reading that same size back out of this one.
+ *
  * The three pieces are kept apart on purpose. `SeatZone` is a side of the table and knows
  * only how many seats it has been dealt; `Seat` is one player's place at it, cards above
  * and label below; the hand held there is `CardFan` during play and `CascadeReveal` once
@@ -37,10 +47,10 @@ import {
   fanAngles,
   fanOverhang,
   seatFootprint,
-} from "./fan.ts";
-import { PlayingCard } from "./PlayingCard.tsx";
-import { seatBox } from "./ghosts.ts";
-import type { Zone } from "./seating.ts";
+} from "../fan.ts";
+import { PlayingCard } from "../shared/PlayingCard.tsx";
+import { seatBox } from "../ghosts.ts";
+import type { Zone } from "../seating.ts";
 
 /** One side of the felt, holding the seats `seatZones` dealt it, in turn order. */
 export function SeatZone({ zone, children }: { zone: Zone; children: ReactNode }) {

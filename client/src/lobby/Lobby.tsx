@@ -15,9 +15,10 @@
 import type { GameError, PlayerGameView, RoomSettings } from "@yaniv/shared";
 import { effectiveBotCount } from "@yaniv/shared";
 import { SettingsEditor } from "./SettingsEditor.tsx";
-import { SettingsPanel, SettingsValues } from "./SettingsValues.tsx";
-import { WayOut } from "./WayOut.tsx";
-import { bySeat } from "./seating.ts";
+import { SettingsPanel } from "../settings/SettingsPanel.tsx";
+import { SettingsValues } from "../settings/SettingsValues.tsx";
+import { WayOut } from "../shared/WayOut.tsx";
+import { bySeat } from "../seating.ts";
 
 interface LobbyProps {
   view: PlayerGameView;

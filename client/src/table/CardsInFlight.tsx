@@ -38,13 +38,13 @@
 
 import type { CSSProperties, RefObject } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { PlayingCard } from "./PlayingCard.tsx";
-import type { Box } from "./flip.ts";
-import { invert, transformOf } from "./flip.ts";
-import type { CardFlight } from "./flight.ts";
-import type { Ghost, Landing } from "./ghosts.ts";
-import { ghostsFor } from "./ghosts.ts";
-import { FLIGHT_MS, SHAKE_MS, SLAP_MS } from "./timing.ts";
+import { PlayingCard } from "../shared/PlayingCard.tsx";
+import type { Box } from "../flip.ts";
+import { invert, transformOf } from "../flip.ts";
+import type { CardFlight } from "../flight.ts";
+import type { Ghost, Landing } from "../ghosts.ts";
+import { ghostsFor } from "../ghosts.ts";
+import { FLIGHT_MS, SHAKE_MS, SLAP_MS } from "../timing.ts";
 
 /**
  * A straight line, decelerating. The path is deliberately plain — no arc, no flip, no
