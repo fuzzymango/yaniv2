@@ -16,7 +16,7 @@
   --surface: rgb(0 0 0 / 25%);
 
   /* The smallest comfortable tap target, used for every control. */
-  --tap: 2.75rem;
+  --tap: 3.75rem;
 
   /*
    * A card drawn as an icon rather than as a card (`.card--mini`, issue #91): the move
@@ -24,7 +24,8 @@
    * here with `--tap` rather than beside the cards, because the drawer sizes itself off it
    * — how many moves fit before it scrolls is arithmetic on this number.
    */
-  --mini-w: min(1.55rem, 6.5vw);
+  --mini-w: min(4.0rem, 9vw);  /* scales bigger on larger screens */
+
 
   color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -696,7 +697,7 @@ body {
  * restack pinned the felt to the hand (issue #59) and the two stopped agreeing.
  */
 .table {
-  --card-w: min(3.5rem, 15vw);
+  --card-w: min(4.0rem, 15vw);
 
   position: relative;
   justify-content: flex-start;
@@ -791,13 +792,12 @@ body {
  */
 .table__seats {
   /*
-   * 0.78 of a card on the felt, which is where the prototype's variant D landed (issue
-   * #56) — smaller than that read as cramped at a table of six. The `vh` term is here and
+   * The `vh` term is here and
    * nowhere else cards are sized: a doubled zone stacks two seats up one edge, so on a
    * short screen it is the height that runs out first. Scaling down is the answer at every
    * size rather than reflowing — the table is the same table on a phone as on a monitor.
    */
-  --card-w: calc(min(3.5rem, 15vw, 7.5vh) * 0.78);
+  --card-w: calc(min(4.0rem, 15vw, 7.5vh));
 
   position: absolute;
   inset: 0 0 auto;
@@ -1295,12 +1295,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  width: min(10rem, 42vw);
+  width: min(25rem, 40vw);
   max-height: min(calc(var(--entry-h) * 5), 55dvh);
   margin: 0;
   padding: 0.35rem;
-  border-radius: 0 0.5rem 0.5rem 0;
-  background: rgb(0 0 0 / 45%);
+  border-radius: 0.8rem 0.8rem 0.8rem 0.8rem;
+  border: 5px solid rgb(0, 0, 0);
+  background: rgb(0 0 0 / 80%);
   list-style: none;
   overflow-y: auto;
   /* A drawer that has scrolled to its end does not then start scrolling the table. */
@@ -1417,7 +1418,7 @@ body {
  * exists to avoid (issue #78).
  */
 .hand {
-  --card-w: min(3.75rem, 16vw);
+  --card-w: min(4.0rem, 16vw);
 
   display: flex;
   justify-content: center;

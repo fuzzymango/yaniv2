@@ -66,7 +66,7 @@ function TurnEntry({ entry, who }: { entry: TurnHistoryEntryView; who: string })
           <PlayingCard card={card} mini key={card.id} />
         ))}
         <span className="history__from">
-          {entry.drawSource === "deck" ? "↞ deck" : "↞ pile"}
+          {"▹"}
         </span>
         {entry.drawnCard === null ? <FaceDown /> : <PlayingCard card={entry.drawnCard} mini />}
       </span>
