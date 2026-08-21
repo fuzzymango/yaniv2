@@ -11,8 +11,9 @@
  * Three slots change meaning with the phase; nothing on the screen moves.
  *
  * The seats are placed by the same calculation in both phases — the live roster, sorted by
- * `bySeat` — and the round's own record is looked up against whoever is already sitting
- * there. Two placements could disagree; one cannot.
+ * `byRelativeSeat` so the sweep always starts from the next player after the viewer, not
+ * absolute turn order — and the round's own record is looked up against whoever is already
+ * sitting there. Two placements could disagree; one cannot.
  *
  * A turn is two taps and no button. Cards are tapped to build a selection, and the next
  * tap — on the deck, or on an end of the face-up discard — *is* the commit: the selection
@@ -52,7 +53,7 @@ import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
 import { roundOutcome, scoreLabel } from "../score.ts";
 import type { Zone } from "../seating.ts";
-import { ZONES, bySeat, seatZones } from "../seating.ts";
+import { ZONES, byRelativeSeat, seatZones } from "../seating.ts";
 import { SHAKE_MS } from "../timing.ts";
 import type { DrawSource } from "../turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "../turn.ts";
@@ -188,7 +189,7 @@ export function Table({
    */
   const pileLanding = view.lastDiscard.some((card) => landing.get(card.id) === "pile");
 
-  const zones = seatZones([...view.opponents].sort(bySeat(view)));
+  const zones = seatZones([...view.opponents].sort(byRelativeSeat(view)));
 
   const seated = [view.you, ...view.opponents];
 
@@ -313,9 +314,10 @@ export function Table({
           they are holding — so a hand shrinking or growing is something to see rather than a
           number to notice.
 
-          Which side anyone is on is `seatZones`, off the seating order the server sends, so
-          the table reads the same way round on everybody's screen — and off the same list
-          once the round is scored, where the fans turn face up where they already are.
+          Which side anyone is on is `seatZones`, off the server's turn order rebased on the
+          viewer's own seat (`byRelativeSeat`), so the sweep always starts with the next
+          player to act — and off the same list once the round is scored, where the fans
+          turn face up where they already are.
         */}
         <div className="table__seats">
           {ZONES.map((zone) => (

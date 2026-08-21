@@ -52,7 +52,10 @@ import { PlayingCard } from "../shared/PlayingCard.tsx";
 import { seatBox } from "../ghosts.ts";
 import type { Zone } from "../seating.ts";
 
-/** One side of the felt, holding the seats `seatZones` dealt it, in turn order. */
+/**
+ * One side of the felt, holding the seats `seatZones` dealt it, in the order it dealt them —
+ * which is turn order read the way that side is drawn, the left column bottom-up included.
+ */
 export function SeatZone({ zone, children }: { zone: Zone; children: ReactNode }) {
   return <div className={`table-zone table-zone--${zone}`}>{children}</div>;
 }
