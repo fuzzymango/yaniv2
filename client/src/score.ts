@@ -13,26 +13,34 @@
 import type { RoundResultView } from "@yaniv/shared";
 
 /**
- * A player's total after the round, and what the round added to it.
+ * A round as the equation it is: `${scoreBefore} ${op} ${Math.abs(netDelta)} = ${scoreAfter} pts`.
  *
- * The whole of what a label needs. Two numbers rather than the three a seat used to carry —
- * a delta, a total and the hand's own value — because the hand is face up beside the label
- * by then, and adding it up is what the cards are for (issue #78).
+ * The label is handed the two numbers the wire carries — the total the round left the player
+ * on, and the delta it applied to get there — and derives the other two itself, since a
+ * player reading a seat cannot: **`scoreBefore = score - delta + milestoneReduction`**, where
+ * they stood when the round was dealt, and **`netDelta = delta - milestoneReduction`**, what
+ * the round is actually worth once the milestone has given back whatever it gave back. Both
+ * fall out of the same identity, so the line always adds up: nothing here is an annotation
+ * that a reader has to reconcile against the numbers beside it.
  *
- * **Signed even at zero**, and that is not a flourish: these two numbers sit next to each
- * other in a label a few characters wide, and a bare `0` beside `0 pts` is two numbers nobody
- * can tell apart. The sign is what says which of them is the round.
+ * **The milestone is folded into the delta rather than noted apart** (docs/rules.md §7 —
+ * landing exactly on a multiple of 50 gives 50 back). Annotated, it asked a player to do the
+ * arithmetic that made the total believable; absorbed, there is no arithmetic left to do — a
+ * round that took 195 to 250 and gave 50 back gained 5, and that is the only figure worth
+ * reading in a label a few characters wide.
+ *
+ * **The operator carries the sign, never the number.** `18 + -12 = 6` is a true sentence and
+ * an unreadable one, and it is `-` in front of a magnitude that a player recognizes as points
+ * coming off. A round that changed nothing takes the same shape as every other (`32 + 0 = 32
+ * pts`) — no case for the winner, because the equation is what says a round happened at all.
  *
  * Used for every seat's label and for the viewer's own footer — one function, so a player
  * cannot be told two different things about the same round depending on where they sit.
- *
- * **`milestoneReduction`**, when it is more than zero, is noted alongside the delta: a
- * total that dropped by more than the round's own delta suggests would otherwise read as
- * inconsistent (docs/rules.md — landing exactly on a multiple of 50 gives 50 back).
  */
 export function scoreLabel(score: number, delta: number, milestoneReduction = 0): string {
-  const note = milestoneReduction > 0 ? `, -${milestoneReduction} milestone` : "";
-  return `${score} pts (${delta < 0 ? delta : `+${delta}`}${note})`;
+  const scoreBefore = score - delta + milestoneReduction;
+  const netDelta = delta - milestoneReduction;
+  return `${scoreBefore} ${netDelta < 0 ? "-" : "+"} ${Math.abs(netDelta)} = ${score} pts`;
 }
 
 /**

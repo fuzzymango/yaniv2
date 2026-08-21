@@ -52,10 +52,12 @@ the page, and nobody has to be re-found. What changes is what changed:
 - **Every hand turns face up where it already is.** An in-place content swap and no
   repositioning — instantaneous, since a player reaching a scored round is reading it, not
   waiting on it. Animating the flip is deferred.
-- **Each label swaps a running score for `scoreLabel`** — the total and what the round added,
-  the delta always signed so a `+0` and a gain are never confusable in a label a few
-  characters wide. One function for every seat and for the viewer's own footer, which drops
-  its hand value: the cards are face up by then, and adding them up is what they are for.
+- **Each label swaps a running score for `scoreLabel`** — the round as an equation the reader
+  can check, `195 + 5 = 200 pts`: where they started, what the round was actually worth once
+  any milestone reduction is folded in, and where it left them, with the operator carrying the
+  sign so nothing reads as `+ -12`. One function for every seat and for the viewer's own
+  footer, which drops its hand value: the cards are face up by then, and adding them up is
+  what they are for.
 - **The turn line says how the round ended**, in place. A heading above the seats would push
   every one of them down the page at the one moment they must not move.
 - **The Yaniv call becomes the deal** — the host's control, or the reason there is none, in
