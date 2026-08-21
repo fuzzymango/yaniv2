@@ -825,6 +825,11 @@ body {
   gap: 0.5rem;
 }
 
+/*
+ * Both columns are drawn top-down, and `seatZones` reverses the left column's own list to
+ * suit it — so a `column-reverse` here would seat the left side backwards with nothing said
+ * about it. The direction of a column is a fact the two files share; keep them in step.
+ */
 .table-zone--left,
 .table-zone--right {
   flex-direction: column;

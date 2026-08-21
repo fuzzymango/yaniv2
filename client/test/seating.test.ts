@@ -53,28 +53,42 @@ describe("seatZones", () => {
     });
   });
 
-  it("doubles left first, behind the opponent already sitting there", () => {
+  it("doubles left first, and keeps the soonest to act at the bottom of it", () => {
     assert.deepEqual(seatZones(opponents(4)), {
-      left: ["opponent-1", "opponent-4"],
-      top: ["opponent-2"],
-      right: ["opponent-3"],
+      left: ["opponent-2", "opponent-1"],
+      top: ["opponent-3"],
+      right: ["opponent-4"],
     });
   });
 
   it("doubles top second, at a full table", () => {
     assert.deepEqual(seatZones(opponents(5)), {
-      left: ["opponent-1", "opponent-4"],
-      top: ["opponent-2", "opponent-5"],
-      right: ["opponent-3"],
+      left: ["opponent-2", "opponent-1"],
+      top: ["opponent-3", "opponent-4"],
+      right: ["opponent-5"],
     });
   });
 
-  it("never doubles right, since the player cap is what stops it", () => {
-    const rightSeats = Array.from(
-      { length: MAX_PLAYERS },
-      (_, n) => seatZones(opponents(n)).right.length,
-    );
-    assert.deepEqual(rightSeats, [0, 0, 0, 1, 1, 1]);
+  it("fills every zone before doubling any, and never doubles right", () => {
+    const counts = Array.from({ length: MAX_PLAYERS }, (_, n) => {
+      const zones = seatZones(opponents(n));
+      return ZONES.map((zone) => zones[zone].length);
+    });
+    assert.deepEqual(counts, [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [1, 1, 1],
+      [2, 1, 1],
+      [2, 2, 1],
+    ]);
+  });
+
+  it("seats contiguous runs, so a doubled zone holds consecutive players", () => {
+    for (let n = 0; n < MAX_PLAYERS; n += 1) {
+      const { left, top, right } = seatZones(opponents(n));
+      assert.deepEqual([...left].reverse().concat(top, right), opponents(n));
+    }
   });
 
   it("zones whatever it is given, since a revealed hand is not a live opponent", () => {

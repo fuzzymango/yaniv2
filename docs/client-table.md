@@ -69,11 +69,24 @@ by construction rather than by invariant.) A `roundEnd` with a null `roundResult
 state the server does not produce — still falls through to `Room.tsx`.
 
 `byRelativeSeat` sorts turn order relative to the viewer's own seat rather than absolute
-position, so the left-to-right sweep always starts with the next player to act after them —
+position, so the sweep round the felt always starts with the next player to act after them —
 `bySeat` reads the same way round on every screen only starting from the same seat on every
 screen, which the table has no use for since the viewer's own seat is never one of the zones.
 The lobby's roster listing (`Lobby.tsx`) is a different case — every seat, the viewer's own
 included, is listed in one place — and keeps the absolute `bySeat`.
+
+`seatZones` then fills the zones in **contiguous runs**, not round-robin (issue #116): the
+first opponents go to the left column, the next to the top, the last to the right, so a
+doubled zone holds two players who act one after the other. The per-zone counts are still the
+round-robin's — every zone filled before any doubles, `right` never doubling at all — and only
+which opponents land in each changes. A round-robin fed a viewer-relative order seated the 1st
+and 4th opponents side by side, which is turn order in neither direction.
+
+The **left column alone is reversed**. The DOM draws a column top-down and the viewer's own
+hand sits at the bottom of the screen, so the earliest of the two has to be the lower for the
+path to stay continuous: viewer → bottom of the left column → up it → left-to-right across the
+top → down the right → back to the viewer. `top` and `right` already run that way round, so
+neither is touched.
 
 Three things still separate the revealed hand from the played one (issues #56, #60):
 
