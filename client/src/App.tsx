@@ -9,6 +9,9 @@
  * phase is: a lost connection, which makes every control on every other screen a lie; a
  * seat being claimed back, which is what an empty screen means before it means the menu;
  * and then the main menu itself.
+ *
+ * One branch renders two screens rather than one: a finished match is `Table` with `GameEnd`
+ * drawn over it (issue #130). Everywhere else a phase picks exactly one component.
  */
 
 import { Disconnected } from "./connection/Disconnected.tsx";
@@ -75,22 +78,37 @@ export function App({ session }: { session: Session }) {
   }
 
   /*
-   * One screen for the hand being played and the hand just scored (issue #78): a round
-   * ending is the next moment of the same table, not a different page, so the branch here
-   * is one and `Table` changes what three of its slots mean rather than the phase changing
-   * screens under the player.
+   * One screen for the hand being played, the hand just scored (issue #78) and the match
+   * they ended (issue #130): a round ending is the next moment of the same table and a match
+   * ending is the moment after that, not a different page either time. So the branch here is
+   * one, and `Table` changes what its slots say — and which of them it offers at all — rather
+   * than the phase changing screens under the player.
    *
    * A scored round comes with the round it scored — the serializer populates `roundResult`
    * at `roundEnd` and `gameEnd` and nowhere else. The wire type still allows a null, so a
    * `roundEnd` without one falls through to the stand-in below rather than to a table with
-   * nothing to reveal.
+   * nothing to reveal. `gameEnd` is reached on the phase alone all the same: the standings
+   * are a function of the roster and the scores on it, so the panel still says who won over
+   * a table with nothing revealed under it.
+   *
+   * One `Table` for the three, and not one per branch: it is the same table, and a second
+   * call site is a second list of props to keep in step with it.
    */
-  if (phase === "playing" || (phase === "roundEnd" && view.roundResult !== null)) {
-    return (
+  if (
+    phase === "playing" ||
+    phase === "gameEnd" ||
+    (phase === "roundEnd" && view.roundResult !== null)
+  ) {
+    const table = (
       <Table
         view={view}
         selection={selection}
-        error={error}
+        /*
+         * A finished match reports through the panel over the table, which is what every
+         * action left on this screen is asked through: one message, in the one place a
+         * player is looking.
+         */
+        error={phase === "gameEnd" ? null : error}
         busy={busy}
         flight={flight}
         onToggleCard={session.toggleCard}
@@ -101,23 +119,27 @@ export function App({ session }: { session: Session }) {
         onCloseRoom={session.closeRoom}
       />
     );
-  }
 
-  /*
-   * The standings need no round behind them — they are a function of the roster and the
-   * scores on it, and the round result only adds back whoever has left since. So this
-   * screen is reached on the phase alone, unlike the table above.
-   */
-  if (phase === "gameEnd") {
+    if (phase !== "gameEnd") return table;
+
+    /*
+     * The finished match: the table it finished on, with the standings floating over it.
+     * The two are siblings — `GameEnd` is fixed to the viewport and drawn over `Table`, the
+     * same shape `Table` already uses for the flight layer — rather than one being composed
+     * inside the other, which would make the panel part of a column it is floating above.
+     */
     return (
-      <GameEnd
-        view={view}
-        error={error}
-        busy={busy}
-        onPlayAgain={session.playAgain}
-        onExit={session.exitToMenu}
-        onCloseRoom={session.closeRoom}
-      />
+      <>
+        {table}
+        <GameEnd
+          view={view}
+          error={error}
+          busy={busy}
+          onPlayAgain={session.playAgain}
+          onExit={session.exitToMenu}
+          onCloseRoom={session.closeRoom}
+        />
+      </>
     );
   }
 

@@ -2,13 +2,20 @@
  * The table: enough of the game to play a turn against, the turn itself, and the moment
  * after the last one.
  *
- * **One screen for `playing` and `roundEnd`** (issue #78). A round being scored is the next
- * moment of the hand that was just played, not a different page: the seats stay where they
- * are, the corner icons stay in the corner, and the felt stays under them. What changes is
- * only what actually changed — every hand turns face up in the seat it was already in, each
- * label swaps a running score for what the round made of it, the line above the felt says
- * how the round ended instead of whose turn it is, and the Yaniv call becomes the deal.
- * Three slots change meaning with the phase; nothing on the screen moves.
+ * **One screen for `playing`, `roundEnd` and `gameEnd`** (issues #78, #130). A round being
+ * scored is the next moment of the hand that was just played, not a different page: the
+ * seats stay where they are, the corner icons stay in the corner, and the felt stays under
+ * them. What changes is only what actually changed — every hand turns face up in the seat it
+ * was already in, each label swaps a running score for what the round made of it, the line
+ * above the felt says how the round ended instead of whose turn it is, and the Yaniv call
+ * becomes the deal. Three slots change meaning with the phase; nothing on the screen moves.
+ *
+ * A match ending is the same table again, once more: the last round stays revealed exactly
+ * as it was a moment before, and `GameEnd` is drawn over it as a panel (issue #130). What
+ * this screen does there is *stop offering things* — the topbar and the bottom slot are the
+ * controls a finished match has no use for, and every one of them the panel either carries
+ * itself or has replaced. The felt keeps rendering: the deck count, the last discard and the
+ * line saying how the final round ended are what the panel is floating over.
  *
  * The seats are placed by the same calculation in both phases — the live roster, sorted by
  * `byRelativeSeat` so the sweep always starts from the next player after the viewer, not
@@ -130,18 +137,36 @@ export function Table({
   const isHost = view.hostId === view.you.id;
 
   /**
+   * Whether there is still a turn to build here, and whether the match this table belongs
+   * to is over — the phase asked once each, since every branch below is one of the two.
+   *
+   * A card is tappable, a draw target is a control and the Yaniv call exists while `live`;
+   * `over` is what `GameEnd` is floating on top of, and costs this screen its controls and
+   * nothing else (issue #130). Asked of the phase rather than inferred from the round
+   * result: the wire type allows a scored phase with no result behind it, and a table that
+   * read that as "still playing" would go live again under the panel.
+   */
+  const live = view.phase === "playing";
+  const over = view.phase === "gameEnd";
+
+  /**
    * The round just scored, or null while one is still being played. Read off the view
    * rather than taken as a prop of its own: the phase and the result would then be two
    * claims about the same position, and this screen would have to decide which it believed.
+   *
+   * `gameEnd` reads the same field as `roundEnd` because it *is* the same field — the
+   * serializer populates `roundResult` in both, and the last round of a match is revealed
+   * the way every other one was rather than by a second codepath that could reveal it
+   * differently (issue #130).
    */
-  const result = view.phase === "roundEnd" ? view.roundResult : null;
+  const result = live ? null : view.roundResult;
 
   /**
-   * Whether a draw target does anything. The selection is the whole of it: a tap that
-   * would be refused for any *other* reason is still offered, because those reasons are
-   * the server's and a second opinion here could only ever disagree with it.
+   * Whether a draw target does anything. The selection is the whole of it, once the round
+   * itself is: a tap that would be refused for any *other* reason is still offered, because
+   * those reasons are the server's and a second opinion here could only ever disagree.
    */
-  const canDraw = !busy && isLegalSelection(selection, view.you.hand);
+  const canDraw = live && !busy && isLegalSelection(selection, view.you.hand);
   const takeable = takeableIds(view.lastDiscard);
 
   /**
@@ -150,7 +175,7 @@ export function Table({
    * `NOT_YOUR_TURN`, the same way a draw target is: this screen enforces the rules of the
    * cards and none of the rules about whose go it is.
    */
-  const canCall = !busy && isLegalCall(view.you.hand, view.settings.yanivThreshold);
+  const canCall = live && !busy && isLegalCall(view.you.hand, view.settings.yanivThreshold);
 
   /**
    * Whether the pile is a slapdown target rather than a row of draw targets
@@ -290,11 +315,17 @@ export function Table({
           and nowhere on the table itself — what a Yaniv may be called on is worth being able
           to check, and worth nothing at all in front of a player who is looking at their
           hand — and, for the host, the only thing that ends a room mid-round.
+
+          Gone once the match is over: the panel over this table carries its own settings
+          icon and its own way out, and two of each on one screen would be two answers to
+          the same tap (issue #130).
         */}
-        <div className="topbar">
-          {isHost && <CloseRoomIcon busy={busy} onClose={onCloseRoom} />}
-          <SettingsDialog settings={view.settings} />
-        </div>
+        {!over && (
+          <div className="topbar">
+            {isHost && <CloseRoomIcon busy={busy} onClose={onCloseRoom} />}
+            <SettingsDialog settings={view.settings} />
+          </div>
+        )}
 
         {/*
           The round so far, behind an arrow on the left edge (issues #89, #91) — and only
@@ -304,9 +335,7 @@ export function Table({
           because it is the phase the rule is about: `moveHistory` still arrives at
           `roundEnd`, and this screen simply stops drawing it.
         */}
-        {view.phase === "playing" && (
-          <MoveHistory entries={view.moveHistory} nameOf={nameOf} />
-        )}
+        {live && <MoveHistory entries={view.moveHistory} nameOf={nameOf} />}
 
         {/*
           Everybody else, seated round three sides of the felt with the viewer holding the
@@ -441,8 +470,12 @@ export function Table({
           Once the round is scored it is the deal, in the same place rather than as a new
           control somewhere else (issue #78) — and for everybody but the host it is the
           reason there is no button, exactly as in the lobby.
+
+          Empty once the match is over: both things this slot can say are about a round that
+          is coming, and there is not one. Dealing again is a whole match and is asked for on
+          the panel, beside leaving (issue #130).
         */}
-        {result === null ? (
+        {over ? null : live ? (
           <button
             className={`button call ${canCall ? "call--live" : ""}`}
             type="button"
@@ -482,7 +515,7 @@ export function Table({
               // there — the face only, so it can be tapped into a selection the whole time
               // it is arriving, exactly as it could if nothing were in the air.
               <li className={landingClass(card.id, "hand")} key={card.id}>
-                {result === null ? (
+                {live ? (
                   <button
                     className={`pick ${chosen ? "pick--chosen" : ""}`}
                     type="button"

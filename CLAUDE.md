@@ -130,16 +130,16 @@ size from one `seatFootprint` call, so a round-end swap costs no layout) and `sh
 | `tokens.ts` | `seatStore` — the seat written down where a reload will find it, and the only file here that knows the word `localStorage`. Injected storage, so it is driven under `node:test` with no browser; storage that is off, full or holding junk is answered with "no seat" rather than an error |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
 | `timing.ts` | How long the moving parts of a move last, as one chain: `FLIGHT_MS` → `SLAP_MS` → `SHAKE_MS`, each a fraction of the one above it, so the table is retuned from one number and cannot end up half fast and half slow. `PACE_MS` sits above the chain without being derived from it. Plain arithmetic, so a test with no DOM asserts the derivations |
-| `App.tsx` | Which screen: no connection comes first, then a seat being claimed back, then no view is the main menu, then everything else is a function of `view.phase` — with `playing` and `roundEnd` the one branch |
+| `App.tsx` | Which screen: no connection comes first, then a seat being claimed back, then no view is the main menu, then everything else is a function of `view.phase` — with `playing` and `roundEnd` the one branch, and `gameEnd` the one branch rendering two things: `Table` with `GameEnd` drawn over it |
 | `main-menu/MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `lobby/Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
 | `lobby/SettingsEditor.tsx` | The host's four controls, in the lobby and nowhere else. Offers exactly what `isValidSettings` accepts, and sends the whole object per change |
-| `table/Table.tsx` | `phase: 'playing'` **and `'roundEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, the call become the deal, and the history drawer gone |
+| `table/Table.tsx` | `phase: 'playing'`, **`'roundEnd'` and `'gameEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, the call become the deal, and the history drawer gone. Once the *match* is over it is that same scored table with its controls given up — no topbar and no bottom slot — for `GameEnd` to float over |
 | `table/Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held, carrying the seat's own `data-flight-box` — the one box in this client drawn to be measured rather than looked at) and `CascadeReveal` (the same hand face up and read, in the seat's own reserved box). Both take that box from `seatFootprint`, so swapping one for the other moves nothing around them. `OpponentSeat` composes the first three for live play; `Table.tsx` composes the scored seat. Presentational throughout |
 | `table/CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen, and the deck and the seats with them, after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), and the `CardsInFlight` overlay they fly across. Also *how* it flies, which is the one thing here that is not a measurement: a turn crosses in `FLIGHT_MS` and decelerates, a slapdown crosses in `SLAP_MS` on a sharper curve, pops on landing and jolts the table (`.table--jolt`, worn for `SHAKE_MS`). The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
 | `table/MoveHistory.tsx` | `phase: 'playing'` only — the round's moves behind an arrow on the left edge of the felt, newest first, in mini cards. A pass-through of `view.moveHistory`: the redaction arrived applied, so a null drawn card is drawn face down rather than filled in. Open or closed is `useState`, so every fresh mount starts closed |
 | `table/Room.tsx` | The fallback for a `roundEnd` with no result behind it — a position the wire type allows and the server does not produce |
-| `game-end/GameEnd.tsx` | `phase: 'gameEnd'` — the final standings lowest-first, who won, play again (host only), and the same two ways out the lobby offers |
+| `game-end/GameEnd.tsx` | `phase: 'gameEnd'` — a panel over the table the match ended on, not a screen of its own (issue #130): the final standings lowest-first as a name/score grid, who won, play again (host only) beside the same two ways out the lobby offers, and its own settings icon above it. No scrim — the hands revealed behind it are half of what there is to look at |
 | `connection/Resuming.tsx` | A seat being claimed back — the third screen with no view behind it, drawn where the main menu otherwise would be so a reload never flashes it |
 | `connection/Disconnected.tsx` | No socket — the screen above every other. One screen for a connection that went and one that never arrived, since neither leaves anything to tap |
 | `settings/SettingsDialog.tsx` | The settings icon every in-match screen carries, and the modal behind it. The only place a setting is shown once the match is running. The bar it sits in belongs to the screen, since the host has a second icon in it |
@@ -437,11 +437,11 @@ server never sends, so `slapdownEligible` *is* the answer.
 ### The table is seated, and the scored round is the same table
 
 Opponents are drawn round three sides of the felt (`seatZones`): fans of face-down backs while
-the round is played, the same seats cascaded face up once it is scored — a hand shrinking is
-something to watch, a scored one something to read. **And it is one screen, not two** (issue
-#78): `Table.tsx` renders both phases, so a round ending changes what is in three slots and
-nothing about where anything is, held by construction by one placement (`byRelativeSeat` off
-the live roster) and one reserved box per seat (`seatFootprint`).
+the round is played, the same seats cascaded face up once it is scored, and the same again with
+the standings floating over them once the match is. **One screen, not three** (issues #78,
+#130): `Table.tsx` renders every phase off one placement (`byRelativeSeat` off the live roster)
+and one reserved box per seat (`seatFootprint`) — a scored round changes three slots, a finished
+match costs the table its controls, and `App.tsx` draws `GameEnd` over it rather than instead.
 
 **A move is watched crossing that table, not merely published onto it** (issues #69, #72-#74).
 The session says *what* moved (`flight.ts`), `ghosts.ts` which of it the screen can draw and
@@ -452,7 +452,7 @@ and jolting the table, on durations derived from a turn's (`timing.ts`). Nothing
 flight, reduced motion skips all of it, and it is scoped to `playing`.
 
 Every decision behind the geometry and the flight is in **`docs/client-table.md`** (issues
-#56, #58, #59, #60, #78); the code is `fan.ts`, `score.ts`, `seating.ts` and `table/`.
+#56, #58, #59, #60, #78, #130); the code is `fan.ts`, `score.ts`, `seating.ts` and `table/`.
 
 ### Settings are edited in one place and shown in another
 
