@@ -1,7 +1,8 @@
 # The seated table
 
-How the browser client arranges a table on a phone: opponents round the felt during play,
-and the same seats read back once the round is scored. Extracted from `CLAUDE.md` when it
+How the browser client arranges a table on a phone: opponents round the felt during play, the
+same seats read back once the round is scored, and the same again under the standings once the
+match is. Extracted from `CLAUDE.md` when it
 reached its length cap; the decisions are unchanged, and `CLAUDE.md` points here.
 
 ## The table is seated, and part of every seat is off the screen
@@ -31,7 +32,9 @@ had to give up to make room for the lot:
 - **The table's settings icon is pinned out of flow too** (`.table > .topbar`), since the
   band covers the top of the screen the column's first row would sit in: it belongs to the
   table's corner, above the band. That is now the corner in both phases (issue #78) — the
-  lobby and `GameEnd` have no band and keep theirs in flow.
+  lobby and `GameEnd` have no band and keep theirs in the flow of their own column. At
+  `gameEnd` the table has no icon at all (issue #130): the panel over it carries the only
+  one, so the corner holds one control rather than two stacked in the same place.
 - **The felt gave way to the seats** (issue #59, `.felt`): the deck stacks above the discard
   and the pair is pinned against the hand, not centred in a height the seats are out of the
   flow of and float up into — and side by side at the card size the ticket keeps, the two of
@@ -106,8 +109,38 @@ Three things still separate the revealed hand from the played one (issues #56, #
   a fixed maximum, so a small hand still sits in a small seat. The overhang counts on the
   cascade's side of that max and along its axis alone: the seat hangs off its edge of the
   screen in both shapes, which is right for a fan of backs, so what is left on screen has to
-  hold the whole of a hand somebody must read. `GameEnd` is untouched — `standings` carries no
-  hands, so it stays a plain scoreboard.
+  hold the whole of a hand somebody must read. `GameEnd` reuses none of this and needs to:
+  since issue #130 it is a panel floating over the same seated table, which reveals the final
+  round through the codepath above while the standings sit in front of it.
+
+## And the finished match is that table with the standings over it
+
+**The same table once more** (issue #130). A match ending used to replace the felt with a bare
+list of scores: the last hand ever played in it simply vanished, at the one moment everybody
+wants to see what the other hands actually held. So `Table.tsx` renders `gameEnd` as well,
+reading the same `roundResult` the serializer already populates there — no second reveal
+codepath, and therefore no way for the final round to be revealed differently from every other
+one. `GameEnd` is drawn over it.
+
+- **The table gives up its controls, and only those.** The topbar (settings, and the host's
+  close-room icon) and the bottom slot (the Yaniv call, or the host's deal) do not render at
+  `gameEnd`: the panel carries a settings icon and both ways out itself, and two of each on one
+  screen would be two answers to the same tap. The felt keeps rendering — the deck count, the
+  last discard and the line saying how the final round ended are the context the panel floats
+  over, and all three are inert already. The hand and the seats are the scored round's, which is
+  untappable by the same branch that makes it untappable at `roundEnd`.
+- **Siblings, not composition.** `App.tsx` returns `Table` and `GameEnd` next to each other, the
+  shape `Table` already uses for `CardsInFlight`: the panel is fixed to the viewport, so putting
+  it *inside* the table's column would place a thing that is deliberately floating above one.
+  The table underneath is passed no error — one message, in the one place a player is looking.
+- **No scrim.** The panel is opaque, like the settings modal, because there are cards behind it;
+  the layer holding it is not, because those cards are half of what there is to look at, and
+  dimming them would dim the very thing the standings are about.
+- **The standings became a grid** rather than a row per player laid out on its own width, so
+  every score starts in the same place and the column is compared by looking down it. Rows are
+  still `li`s, spanning both tracks with `subgrid`, so each keeps its background and the
+  winner's ring. Playing again and leaving sit side by side: two answers to one question, where
+  stacked made the second read as a consequence of the first.
 
 ## A move is watched crossing that table
 
