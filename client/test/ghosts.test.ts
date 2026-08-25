@@ -101,10 +101,11 @@ describe("ghostsFor", () => {
     assert.equal(flying.length, 2, "the discard goes one way and the draw comes back the other");
   });
 
-  it("flies a card off the deck from the deck, face down the whole way", () => {
+  it("flies the mover's own deck draw face up from the deck (issue #123)", () => {
     // It has no box of its own to leave from — a moment ago it was somewhere in a pile the
-    // client is only ever told the size of — so the deck is where its journey starts, and it
-    // is a back until it lands, where the hand underneath it is already showing its face.
+    // client is only ever told the size of — so the deck is where its journey starts. But the
+    // mover's own deck draw is never redacted (ADR-0007), so it flies face up rather than
+    // turning over once it lands.
     const before = boxes({ "hearts-5": HAND, [DECK_BOX]: DECK });
     const after = boxes({ "hearts-5": PILE, "diamonds-4": HAND });
 
@@ -112,7 +113,7 @@ describe("ghostsFor", () => {
 
     assert.deepEqual(flying.at(-1), {
       id: "diamonds-4",
-      face: null,
+      face: card("diamonds-4"),
       from: DECK,
       to: HAND,
       into: "hand",
