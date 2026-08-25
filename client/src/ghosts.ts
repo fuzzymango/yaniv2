@@ -69,10 +69,12 @@ export interface Ghost {
   /**
    * The face to draw, or null for a back.
    *
-   * Null is a card off the **deck**, whoever drew it: it was face down where it started, and
-   * it turns over nowhere — the drawer's own hand is already showing it where it lands, and
-   * anybody else's never will, the wire having redacted it (ADR-0007). A card off the discard
-   * pile has been public all along and flies as itself, into a hand or into a seat alike.
+   * Null is a card off the **deck**, drawn by somebody other than the viewer: the wire
+   * redacts it (ADR-0007), so there is no face here to fly. The drawer's own deck draw is the
+   * one exception — the wire tells the mover their own card outright, so it flies face up from
+   * the moment it leaves the deck rather than turning over once it lands (issue #123). A card
+   * off the discard pile has been public all along and flies as itself, into a hand or into a
+   * seat alike.
    */
   readonly face: Card | null;
   readonly from: Box;
@@ -169,8 +171,10 @@ function ghostsOfTurn(
     ontoPile(card, mine ? card.id : seat, before, after),
   );
 
-  // Where it came from is also how it is drawn, and for the same reason: a card off the pile
-  // was face up in a place of its own a moment ago, and a card off the deck was neither.
+  // Where it came from decides how it is drawn for anyone but the mover: a card off the pile
+  // was face up in a place of its own a moment ago, and a card off the deck was neither — but
+  // the mover's own deck draw is never redacted (ADR-0007), so it is shown to them regardless
+  // of where it came from (issue #123).
   const drawn = flight.drawnCard;
   const fromDeck = flight.drawSource === "deck";
   /** Where the drawn card is, if this viewer has been told which card it is at all. */
@@ -180,7 +184,11 @@ function ghostsOfTurn(
   return [
     ...discarded,
     ...flown(
-      { id: drawn?.id ?? seat, face: fromDeck ? null : drawn, into: mine ? "hand" : "seat" },
+      {
+        id: drawn?.id ?? seat,
+        face: fromDeck && !mine ? null : drawn,
+        into: mine ? "hand" : "seat",
+      },
       fromDeck ? before.get(DECK_BOX) : boxOfDrawn(before),
       mine ? boxOfDrawn(after) : after.get(seat),
     ),
