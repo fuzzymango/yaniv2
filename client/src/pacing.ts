@@ -1,12 +1,13 @@
 /**
  * Pacing: turning a burst of arrivals into something a person can watch.
  *
- * The server sends a run of bot turns as one broadcast per move, in seating order, with
- * no delay between them — deliberately, because how fast a chain reads is a question
- * about a screen and the server has none (see "Broadcasting" in CLAUDE.md). So the whole
- * chain lands within a few milliseconds, and a client that drew each one as it arrived
- * would show only the last: the table would jump from the player's own move to their next
- * turn, with everything the opponents did in between invisible.
+ * **Inert as of bot think time, and going with issue #135.** The server used to send a run
+ * of bot turns as one broadcast per move with no delay between them, so the whole chain
+ * landed within a few milliseconds and a client that drew each one as it arrived would
+ * show only the last: the table jumping from the player's own move to their next turn,
+ * with everything the opponents did in between invisible. Bots now pause before every
+ * move (see "Bots think before they move" in CLAUDE.md), which is longer than a beat, so
+ * every arrival is a lone one and nothing queues. What follows is what it did.
  *
  * The rule is: the first arrival goes straight through, and anything that lands in the
  * beat behind it queues and is let go one per beat. A move of the player's own — the

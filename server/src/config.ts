@@ -18,6 +18,18 @@ export const BOT_NAMES = [
   "Tony (bot)",
 ];
 
+/**
+ * **Bot think time**: how long a bot waits before taking its turn, uniform across bots
+ * and every turn alike.
+ *
+ * Long enough that a human who has just drawn a matching card can see the slapdown
+ * window and win it over a round trip, short enough that a lap of five bots is a rhythm
+ * rather than a wait. A property of this server rather than of a room — not a setting,
+ * not on the wire, not locked at the first deal — which is why it sits here with the
+ * other operational constants and not with the rules in `@yaniv/shared`.
+ */
+export const BOT_THINK_MS = 1500;
+
 export const ROOM_CODE_LENGTH = 4;
 
 /** Room code alphabet, with visually ambiguous characters (O/0, I/1) removed. */

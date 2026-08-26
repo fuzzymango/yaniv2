@@ -28,11 +28,18 @@ import {
 } from "@yaniv/shared";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
 import { decideTurn } from "../src/bot.ts";
+import { BOT_THINK_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
+import type { SocketServerOptions } from "../src/socketServer.ts";
 import { createSocketServer } from "../src/socketServer.ts";
-import { RESUME_TOKEN_MARK, markedResumeTokens } from "./helpers.ts";
+import {
+  RESUME_TOKEN_MARK,
+  markedResumeTokens,
+  testClock,
+  type TestClock,
+} from "./helpers.ts";
 
 /** The ack shape every request/response event replies with. Mirrors `Ack<T>`. */
 type AckResult<T> = { ok: true; value: T } | { ok: false; error: GameError };
@@ -56,10 +63,17 @@ interface Harness {
  * defaulting to zero (docs/adr/0006) — seeding it keeps the tables below the size their
  * tests were written against without an `updateSettings` call in front of every one of
  * them. Suites about the seating rule itself, or about that event, pass their own.
+ *
+ * `timing` switches bot think time off by default. Every suite here but the one about the
+ * pause itself is about something else, and none of them should have to learn about a
+ * clock — nor spend real seconds waiting on a bot. Bot turns are still scheduled rather
+ * than played in the handler's own tick, so a test that wants one waits for its broadcast
+ * whatever the interval is set to.
  */
 async function startServer(
   seed?: number,
   botCount = MAX_PLAYERS - 1,
+  timing: SocketServerOptions = { thinkTimeMs: 0 },
 ): Promise<Harness> {
   const httpServer = createServer();
   // Every seat this server issues holds a marked token, so a leak test can grep a payload
@@ -74,7 +88,7 @@ async function startServer(
           newRoomRng: () => mulberry32(seed + 1),
           defaultSettings: { botCount },
         });
-  const io = createSocketServer(httpServer, rooms);
+  const io = createSocketServer(httpServer, rooms, timing);
 
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
   const { port } = httpServer.address() as AddressInfo;
@@ -673,7 +687,6 @@ describe("playing a match", () => {
     assert.equal(view.currentTurnPlayerId, me, "the host takes the first turn");
 
     watcher.reset();
-    const startedAt = Date.now();
     expectOk(
       await ask(client, "takeTurn", {
         // A single card is always a legal discard, whatever was dealt.
@@ -691,13 +704,9 @@ describe("playing a match", () => {
       [...view.turnOrder.slice(1), me],
     );
 
-    // The server never pauses between bot moves; making a chain watchable is the
-    // client's job. The bound is loose enough to survive a slow machine, and far under
-    // any pause worth calling a pause.
-    assert.ok(
-      Date.now() - startedAt < 1000,
-      `the whole chain resolved without pauses (took ${Date.now() - startedAt}ms)`,
-    );
+    // How long the chain takes is not this test's subject: this server is built with
+    // think time off, and the pause each bot waits out is asserted on a clock of its own
+    // further down. What has to hold at any interval is that the moves are separate.
   });
 
   /*
@@ -1368,10 +1377,10 @@ describe("play again and exit to menu", () => {
 /**
  * Slapping down, and the race for the window it opens.
  *
- * Two humans seated next to each other is the only arrangement in which that race is
- * real: `startGame` fills the rest of the table with bots, and a bot seated after the
- * slapper takes its turn synchronously, closing the window before any human could reach
- * it (ADR-0005). So Ada acts, Grace is next, and the window stays open until she moves.
+ * Two humans seated next to each other is the arrangement this suite races in, because it
+ * is the one that does not depend on a clock: Ada acts, Grace is next, and the window stays
+ * open until she moves, whatever the server's bot think time is set to. Racing a bot is a
+ * race against that pause, and is asserted on a clock of its own in "bot think time" below.
  *
  * The window itself cannot be arranged — it is opened by drawing blind off the deck —
  * so the table is played on a seeded server until one appears, and every test here
@@ -1677,6 +1686,342 @@ describe("slapping down", () => {
     const result = await ask(stranger, "slapDown");
 
     assert.equal(expectError(result).code, "PLAYER_NOT_FOUND");
+  });
+});
+
+/**
+ * The pause a bot takes before its turn, and what a human can do inside it.
+ *
+ * Every server here is built with a clock the test drives by hand, which is the only way
+ * to assert a turn has *not* happened yet as precisely as that it has — a suite that
+ * waited on real time could only ever say "not for a while yet". Each test gets its own
+ * server, since a clock with somebody else's timer on it is a clock that ticks the wrong
+ * one.
+ *
+ * Nothing here reaches for the runner. What is under test is what a client can see: when
+ * a position arrives relative to the clock, and what is in it.
+ */
+describe("bot think time", () => {
+  /** A lone human at a table of bots, on a clock nothing moves but this test. */
+  interface Table {
+    close: () => Promise<void>;
+    clock: TestClock;
+    client: ClientSocket;
+    watcher: Watcher;
+    me: string;
+    /** The opening position: the deal, whoever it landed on. */
+    view: PlayerGameView;
+  }
+
+  async function sitDown(seed?: number): Promise<Table> {
+    const clock = testClock();
+    const harness = await startServer(seed, MAX_PLAYERS - 1, {
+      clock,
+      thinkTimeMs: BOT_THINK_MS,
+    });
+    const client = await harness.connect();
+    const watcher = watch(client);
+    const { playerId } = expectOk(
+      await ask<{ playerId: string }>(client, "createRoom", "Ada"),
+    );
+    expectOk(await ask(client, "startGame"));
+    const view = await watcher.until((v) => v.phase === "playing", "the deal");
+    return { close: harness.close, clock, client, watcher, me: playerId, view };
+  }
+
+  /**
+   * A full round trip through the server, so "nothing was published" is a fact rather
+   * than a guess: a socket delivers in order, so anything broadcast before this ack was
+   * sent has already arrived by the time it comes back.
+   */
+  async function roundTrip(t: Table): Promise<void> {
+    // Refused, and deliberately: a rejection publishes nothing of its own.
+    expectError(await ask(t.client, "startNextRound"));
+  }
+
+  /**
+   * Let the thinking bot play, and answer the position it produced.
+   *
+   * The interval it asked for is checked on every tick, which is where "every bot waits
+   * the same interval, every time" is actually asserted — a chain that hurried its later
+   * moves would look identical from the outside.
+   */
+  async function think(t: Table): Promise<PlayerGameView> {
+    const before = t.watcher.seen.length;
+    assert.equal(t.clock.pending(), 1, "exactly one bot was thinking");
+    assert.equal(t.clock.tick(), BOT_THINK_MS, "the interval every bot waits");
+
+    const deadline = Date.now() + 2000;
+    while (t.watcher.seen.length === before) {
+      if (Date.now() > deadline) assert.fail("no move arrived once think time elapsed");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    return t.watcher.seen[before]!;
+  }
+
+  /** Play every bot the table is waiting on, back round to the human or the score. */
+  async function advanceBots(t: Table): Promise<void> {
+    while (t.clock.pending() > 0) await think(t);
+  }
+
+  /** The host's turn, taken by shedding one card and drawing blind. */
+  async function takeATurn(t: Table, from: PlayerGameView): Promise<void> {
+    expectOk(
+      await ask(t.client, "takeTurn", {
+        discardCardIds: [fishingDiscard(from)],
+        draw: { source: "deck" },
+      }),
+    );
+  }
+
+  /**
+   * A card worth discarding to fish for a window: one whose rank the player holds only
+   * once, since every copy still in hand is a copy that cannot come back off the deck.
+   */
+  function fishingDiscard(view: PlayerGameView): string {
+    const hand = view.you.hand;
+    const lonely = hand.find(
+      (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
+    );
+    return (lonely ?? hand[0]!).id;
+  }
+
+  it("leaves a bot's turn unplayed in the tick that handed it over", async () => {
+    const t = await sitDown(4242);
+    try {
+      assert.equal(t.view.currentTurnPlayerId, t.me, "the host takes the first turn");
+      t.watcher.reset();
+
+      await takeATurn(t, t.view);
+
+      const handedOver = await t.watcher.until(
+        (v) => v.currentTurnPlayerId !== t.me,
+        "the turn to pass to the bot behind me",
+      );
+      await roundTrip(t);
+      assert.equal(
+        t.watcher.seen.length,
+        1,
+        "the bot moved in the same tick as the turn that handed it over",
+      );
+      assert.equal(handedOver.currentTurnPlayerId, t.view.turnOrder[1]);
+    } finally {
+      await t.close();
+    }
+  });
+
+  it("plays it once think time has elapsed", async () => {
+    const t = await sitDown(4242);
+    try {
+      t.watcher.reset();
+      await takeATurn(t, t.view);
+      await t.watcher.until((v) => v.currentTurnPlayerId !== t.me, "the handover");
+
+      const played = await think(t);
+
+      assert.equal(
+        played.currentTurnPlayerId,
+        t.view.turnOrder[2],
+        "the first bot played and handed on to the second",
+      );
+    } finally {
+      await t.close();
+    }
+  });
+
+  it("advances a chain one turn per interval, in seating order", async () => {
+    const t = await sitDown(4242);
+    try {
+      t.watcher.reset();
+      await takeATurn(t, t.view);
+      await t.watcher.until((v) => v.currentTurnPlayerId !== t.me, "the handover");
+
+      // Every seat behind the host, one tick at a time. `think` asserts a single timer
+      // was waiting for each, so nothing here can be two moves in one beat.
+      const seats: (string | null)[] = [];
+      for (let i = 0; i < MAX_PLAYERS - 1; i++) {
+        const played = await think(t);
+        assert.equal(t.watcher.seen.length, i + 2, "one broadcast per beat");
+        seats.push(played.currentTurnPlayerId);
+      }
+
+      assert.deepEqual(
+        seats,
+        [...t.view.turnOrder.slice(2), t.me],
+        "each bot in turn, and the turn back to the human",
+      );
+      assert.equal(t.clock.pending(), 0, "nothing is left thinking behind the human");
+    } finally {
+      await t.close();
+    }
+  });
+
+  /**
+   * The pause is a property of a bot's turn, not of a turn following a human's. An
+   * unseeded server is dealt until the opening seat is a bot — which is most of them,
+   * five in six — because the same seed always opens on the same seat.
+   */
+  it("pauses before the first move of a round that opens on a bot", async () => {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const t = await sitDown();
+      try {
+        if (t.view.currentTurnPlayerId === t.me) continue;
+
+        t.watcher.reset();
+        await roundTrip(t);
+        assert.equal(t.watcher.seen.length, 0, "the opening bot has not moved");
+
+        const opener = t.view.turnOrder.indexOf(t.view.currentTurnPlayerId!);
+        const opened = await think(t);
+        assert.equal(
+          opened.currentTurnPlayerId,
+          t.view.turnOrder[(opener + 1) % t.view.turnOrder.length],
+          "the opening bot played, once it had thought about it, and handed on",
+        );
+        return;
+      } finally {
+        await t.close();
+      }
+    }
+    assert.fail("no deal ever opened on a bot");
+  });
+
+  /**
+   * The whole of what makes slapdown against a bot winnable, and the reason this and
+   * #125 were one change: there is no window timer, only the pause the next bot takes.
+   *
+   * The window cannot be arranged — it is opened by drawing blind — so the table is
+   * fished until one appears, the bots played out by hand along the way.
+   */
+  describe("the window it holds open", () => {
+    /** Play until the host draws a card they may slap down, and stop exactly there. */
+    async function fishForAWindow(t: Table): Promise<PlayerGameView> {
+      for (let step = 0; step < 400; step++) {
+        // A deal that opened on a bot, or a chain still owed a beat: the loop below only
+        // ever waits on a position, so nothing may be left waiting on the clock.
+        await advanceBots(t);
+        const at = await t.watcher.until(
+          // The lobby is still in the watcher on the first pass through, and is not a
+          // position anybody is being asked to act on.
+          (v) =>
+            v.phase !== "lobby" &&
+            (v.phase !== "playing" || v.currentTurnPlayerId === t.me),
+          "the host to be needed",
+        );
+        t.watcher.reset();
+
+        if (at.phase === "gameEnd") {
+          expectOk(await ask(t.client, "playAgain"));
+          continue;
+        }
+        if (at.phase === "roundEnd") {
+          expectOk(await ask(t.client, "startNextRound"));
+          continue;
+        }
+
+        await takeATurn(t, at);
+        const landed = await t.watcher.until(
+          (v) => v.phase !== "playing" || v.currentTurnPlayerId !== t.me,
+          "the host's own move to land",
+        );
+        if (landed.phase === "playing" && landed.you.slapdownEligible) return landed;
+      }
+      assert.fail("no slapdown window ever opened");
+    }
+
+    it("lets a human win a window the bot behind them is still thinking in", async () => {
+      const t = await sitDown(20250811);
+      try {
+        const open = await fishForAWindow(t);
+        t.watcher.reset();
+
+        expectOk(await ask(t.client, "slapDown"));
+
+        const after = await t.watcher.until(
+          (v) => v.lastSlapdown !== null,
+          "the slap to land",
+        );
+        assert.equal(after.lastSlapdown!.playerId, t.me);
+        assert.equal(
+          after.you.hand.length,
+          open.you.hand.length - 1,
+          "the drawn card went back down",
+        );
+        assert.equal(
+          after.currentTurnPlayerId,
+          open.currentTurnPlayerId,
+          "and the bot it beat has still not moved",
+        );
+      } finally {
+        await t.close();
+      }
+    });
+
+    it("neither hurries the pending turn nor schedules a second", async () => {
+      const t = await sitDown(20250811);
+      try {
+        await fishForAWindow(t);
+        t.watcher.reset();
+
+        expectOk(await ask(t.client, "slapDown"));
+        await roundTrip(t);
+
+        assert.equal(t.watcher.seen.length, 1, "only the slap itself was published");
+        assert.equal(t.clock.pending(), 1, "one pending turn, not two");
+        const played = await think(t);
+        assert.equal(t.watcher.seen.length, 2, "and the beat played exactly one move");
+        assert.notEqual(played.lastMove, null, "which was a turn, taken by the bot");
+      } finally {
+        await t.close();
+      }
+    });
+
+    it("plays the bot's turn against the position the slap produced", async () => {
+      const t = await sitDown(20250811);
+      try {
+        const open = await fishForAWindow(t);
+        const slapped = open.you.hand.find((c) => c.rank === open.lastDiscard[0]!.rank);
+        assert.ok(slapped, "the window is over a card matching the set it would join");
+        t.watcher.reset();
+
+        expectOk(await ask(t.client, "slapDown"));
+        await t.watcher.until((v) => v.lastSlapdown !== null, "the slap to land");
+        const played = await think(t);
+
+        // The round's own log, which the bot's turn is written into after the slap: the
+        // card was on the pile, in front of it, when it decided.
+        const since = played.moveHistory.slice(-2);
+        assert.deepEqual(
+          since.map((entry) => entry.kind),
+          ["slapdown", "turn"],
+          "the bot moved after the slap, not around it",
+        );
+        assert.equal(since[0]!.playerId, t.me);
+        assert.equal(
+          since[0]!.kind === "slapdown" && since[0]!.card.id,
+          slapped.id,
+          "and it is the slapped card the bot was looking at",
+        );
+      } finally {
+        await t.close();
+      }
+    });
+  });
+
+  it("abandons a pending turn when the host closes the room", async () => {
+    const t = await sitDown(4242);
+    try {
+      t.watcher.reset();
+      await takeATurn(t, t.view);
+      await t.watcher.until((v) => v.currentTurnPlayerId !== t.me, "the handover");
+      assert.equal(t.clock.pending(), 1, "a bot is thinking");
+
+      expectOk(await ask(t.client, "closeRoom"));
+
+      assert.equal(t.clock.pending(), 0, "the pending turn was called off with the room");
+    } finally {
+      await t.close();
+    }
   });
 });
 

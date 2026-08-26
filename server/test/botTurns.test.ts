@@ -4,11 +4,17 @@
  * Scenarios are pinned by writing an exact state into a real room, rather than dealing
  * and hoping: whose turn it is and what they are holding is the entire subject here, so
  * both need to be stated outright.
+ *
+ * One turn at a time, which is the shape the module now has: the pause each one waits out
+ * first, and the chain that walks from one to the next, belong to the bot turn runner and
+ * are asserted where a client can see them — over the wire, in `socketServer.test.ts`. A
+ * chain is written out here as the loop it is, since walking consecutive bot seats is what
+ * each call has to leave possible.
  */
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { playBotTurns, type DecideTurn } from "../src/botTurns.ts";
+import { playBotTurn, type DecideTurn } from "../src/botTurns.ts";
 import { ok } from "../src/result.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
@@ -25,7 +31,7 @@ function room(options: StateOptions): { rooms: RoomManager; roomCode: string } {
   return { rooms, roomCode };
 }
 
-describe("playBotTurns", () => {
+describe("playBotTurn", () => {
   it("plays the turn when it belongs to a bot", () => {
     const { rooms, roomCode } = room({
       players: [{ id: "human" }, { id: "bot", isBot: true }],
@@ -35,7 +41,7 @@ describe("playBotTurns", () => {
       currentTurnPlayerId: "bot",
     });
 
-    playBotTurns(rooms, roomCode, () => {});
+    assert.equal(playBotTurn(rooms, roomCode), "bot", "the bot is who played");
 
     const state = rooms.getState(roomCode)!;
     assert.equal(state.phase, "playing");
@@ -45,11 +51,11 @@ describe("playBotTurns", () => {
   });
 
   /**
-   * The chain has to be reported move by move. A client showing a table of bots needs
-   * to replay what each one did in turn; a single update at the end would only ever
-   * show the final position.
+   * A move at a time is what the runner has to be able to walk: it plays one turn, waits
+   * out another think time, and asks again. Each call has to name the seat it played, in
+   * seating order, and stop of its own accord once the turn reaches the human.
    */
-  it("plays every consecutive bot turn, reporting each one separately in order", () => {
+  it("names each consecutive bot seat in turn, and stops at the human", () => {
     const { rooms, roomCode } = room({
       players: [
         { id: "human" },
@@ -67,7 +73,11 @@ describe("playBotTurns", () => {
     });
 
     const played: string[] = [];
-    playBotTurns(rooms, roomCode, (playerId) => played.push(playerId));
+    for (;;) {
+      const playerId = playBotTurn(rooms, roomCode);
+      if (playerId === null) break;
+      played.push(playerId);
+    }
 
     assert.deepEqual(played, ["bot-1", "bot-2"]);
     const state = rooms.getState(roomCode)!;
@@ -84,13 +94,16 @@ describe("playBotTurns", () => {
       currentTurnPlayerId: "bot",
     });
 
-    const played: string[] = [];
-    playBotTurns(rooms, roomCode, (playerId) => played.push(playerId));
+    assert.equal(playBotTurn(rooms, roomCode), "bot");
 
     const state = rooms.getState(roomCode)!;
-    assert.deepEqual(played, ["bot"]);
     assert.equal(state.phase, "roundEnd");
     assert.equal(state.lastRoundResult!.callerId, "bot");
+    assert.equal(
+      playBotTurn(rooms, roomCode),
+      null,
+      "a scored round leaves nothing to chain on to",
+    );
   });
 
   it("does nothing at all when the turn belongs to a human", () => {
@@ -103,10 +116,7 @@ describe("playBotTurns", () => {
     });
     const before = rooms.getState(roomCode);
 
-    const played: string[] = [];
-    playBotTurns(rooms, roomCode, (playerId) => played.push(playerId));
-
-    assert.deepEqual(played, []);
+    assert.equal(playBotTurn(rooms, roomCode), null);
     assert.equal(rooms.getState(roomCode), before, "the state was left untouched");
   });
 
@@ -128,7 +138,7 @@ describe("playBotTurns", () => {
       currentTurnPlayerId: "bot",
     });
 
-    playBotTurns(rooms, roomCode, () => {});
+    playBotTurn(rooms, roomCode);
 
     const state = rooms.getState(roomCode)!;
     assert.equal(state.phase, "playing");
@@ -167,9 +177,6 @@ describe("playBotTurns", () => {
       action: { discardCardIds: ["spades-A"], draw: { source: "deck" } },
     });
 
-    assert.throws(
-      () => playBotTurns(rooms, roomCode, () => {}, brokenBot),
-      /CARD_NOT_IN_HAND/,
-    );
+    assert.throws(() => playBotTurn(rooms, roomCode, brokenBot), /CARD_NOT_IN_HAND/);
   });
 });

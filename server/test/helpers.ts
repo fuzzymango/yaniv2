@@ -7,6 +7,7 @@ import type {
   RoomSettings,
 } from "@yaniv/shared";
 import { HAND_SIZE, MAX_SCORE, YANIV_THRESHOLD } from "@yaniv/shared";
+import type { Clock } from "../src/clock.ts";
 import { createDeck } from "../src/deck.ts";
 import type { Result } from "../src/result.ts";
 import type { GameState, GameStateActive, Player, RoundState } from "../src/state.ts";
@@ -186,4 +187,41 @@ export function expectErr<T>(result: Result<T>, code: GameErrorCode): void {
 
 export function ids(list: readonly Card[]): string[] {
   return list.map((c) => c.id);
+}
+
+/**
+ * A clock a test drives by hand, so bot think time is asserted without waiting out
+ * seconds of it.
+ *
+ * Everything set on it waits, which is the whole point: a suite can assert a bot's turn
+ * has *not* happened as precisely as it asserts that it has. A suite about anything else
+ * switches think time off instead of taking one of these.
+ */
+export interface TestClock extends Clock {
+  /** How many timers are waiting. */
+  pending: () => number;
+  /** Run the timer that has been waiting longest, and answer the delay it asked for. */
+  tick: () => number;
+}
+
+export function testClock(): TestClock {
+  const waiting: { ms: number; run: () => void }[] = [];
+
+  return {
+    after: (ms, run) => {
+      const timer = { ms, run };
+      waiting.push(timer);
+      return () => {
+        const at = waiting.indexOf(timer);
+        if (at !== -1) waiting.splice(at, 1);
+      };
+    },
+    pending: () => waiting.length,
+    tick: () => {
+      const timer = waiting.shift();
+      if (!timer) throw new Error("nothing is waiting on the clock");
+      timer.run();
+      return timer.ms;
+    },
+  };
 }

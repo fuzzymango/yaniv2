@@ -145,6 +145,10 @@ async function startServer(
       // it yet, so this keeps the tables the size these tests were written against.
       defaultSettings: { botCount },
     }),
+    // Bot think time off. This suite is about a client, and a bot pausing before every
+    // turn would cost it real seconds per fished window without telling it anything new —
+    // the pause is the server's, and is asserted at the server's own seam.
+    { thinkTimeMs: 0 },
   );
 
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
@@ -1127,10 +1131,11 @@ describe("taking a turn", () => {
  * Slapping down (docs/rules.md §9): the one action taken while the turn belongs to
  * somebody else.
  *
- * Every test here needs two humans. `startGame` seats bots behind the two of them and
- * `playBotTurns` runs the seat after ours in the same tick, so a window opened in front
- * of a bot is shut before the broadcast announcing it has been drawn (ADR-0005) — the
- * guest sitting directly behind the host is what holds one open long enough to tap.
+ * Every test here needs two humans. `startGame` seats bots behind the two of them, and
+ * this suite's server is built with bot think time off — so a bot plays as soon as the
+ * event loop lets it, and a window opened in front of one is shut before the broadcast
+ * announcing it has been drawn. The guest sitting directly behind the host is what holds
+ * one open long enough to tap.
  */
 describe("slapping down", () => {
   /**
@@ -1152,8 +1157,8 @@ describe("slapping down", () => {
    * stopping exactly there: the window open, the turn with the guest, nothing else moved.
    *
    * Only the host's windows count. The roster is seated in join order, so the guest is
-   * behind the host and a bot is behind the guest — a window of the guest's own is shut
-   * again in the same tick it opened.
+   * behind the host and a bot is behind the guest — and with think time off, a window of
+   * the guest's own is shut as soon as that bot gets a turn of the event loop.
    */
   async function playToAnOpenWindow(server: Harness): Promise<[Session, Session]> {
     const [host, guest] = await hostAndGuest(server);
