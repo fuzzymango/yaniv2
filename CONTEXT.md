@@ -234,6 +234,57 @@ discarded, which nothing else on the wire reveals, so it reaches the client as
 — the counterpart of a draw target, except that it is the whole pile rather than a card,
 since a player draws one card a turn and so at most one card is ever eligible.
 
+## Out of the match
+
+**Out of the match** is a player who was in a match and is no longer playing it, with the
+consequences `docs/rules.md` §7 gives that. It is a fact about a *match*, not about a room
+or a connection — someone out of the match is still a player of it, listed and scored, and
+the match's record is incomplete without them.
+
+There are exactly two ways to be out, and they are **causes** rather than states of their
+own:
+
+- **Eliminated** — out because their total passed the room's max score when a round was
+  scored (`docs/rules.md` §7). They are still in the room.
+- **Left** — out because they gave up their seat. Leaving is final: there is no way back
+  into a match once out of it. This is the same seat the **standings** call *departed*
+  (below), named from the match's side rather than the scoreboard's.
+
+The two are disjoint, and provably so rather than by convention: a player who left cannot
+also be over the line, because crossing it would have taken them out at that round's
+scoring, before they had anything to leave. So "out, and over the max score" and "out, and
+departed" name the same players they would if each were stored, which is why neither is.
+
+**Spectator** is what elimination leaves a human doing: out of the match, still in the
+room, still connected. They see the table they saw while playing, with exactly what was
+hidden from them still hidden — being knocked out is not a promotion — and the only action
+left to them is leaving. Bots are never spectators: nothing is watching behind the seat. A
+player who has **left** is not a spectator either, having no connection to the room to
+watch it over; the word names the ones who stayed.
+
+The cause is always **derived**, never a state of its own: out-ness is the one fact about a
+seat, and which of the two put it there follows from the score and from whether the seat was
+given up — as spectating follows from that and a live connection. One fact, and no second
+source of truth to disagree with it.
+
+## Turn order vs. seating
+
+One list until elimination, because until then they were equal, and two things that were
+always distinct:
+
+- **Turn order** is the sequence play moves in — who acts after whom, within a round. It
+  holds only the players still in the match, so a player going out comes out of it and the
+  rest keep their relative order (`docs/rules.md` §2, §7). It is a fact about the round.
+- **Seating** is where a player is drawn at the table: their position in the roster, which
+  a room only ever appends to once it has dealt. It is fixed for the life of the room, so
+  a seat holds its place whether its player is out, gone, or still playing, and the table
+  does not rearrange itself around whoever is left.
+
+Which is why a client seats off the roster and not off turn order: a table redrawn from
+turn order would shuffle every remaining player one place along each time somebody was
+knocked out. Turn order still decides who the *next* player to act is, which is what a
+viewer-relative sweep of the seats reads from.
+
 ## Standings
 
 The final table of a finished match: every player who played it, ordered lowest score
