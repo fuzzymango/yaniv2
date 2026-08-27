@@ -132,9 +132,9 @@ open at all are the client's alone; none of them is a fact about the round.
 
 One move as something to *watch*: the cards leaving a hand for the discard pile, and the card
 coming back the other way from wherever it was drawn (issue #69). A flight belongs to the
-move that produced a position, not to the position — it is over in well under the beat the
-next move waits out, and a table showing the same position a second later is showing nothing
-in flight at all.
+move that produced a position, not to the position — it is over in well under the think time
+the next move waits out, and a table showing the same position a second later is showing
+nothing in flight at all.
 
 Which is why the client treats it as an **event** rather than table state: it is decided once,
 as a position reaches the screen (`flightFrom` in `client/src/flight.ts`, published as
@@ -165,8 +165,9 @@ off the **deck** is drawn as a back, and has no box of its own to have come from
 where its journey starts, and it turns over at neither end, because the hand it lands in is
 already showing its face; a ghost with no face at all, flying into somebody else's hand, is
 drawn the same way and named by the seat it is going to. The flight is over in `FLIGHT_MS`,
-well inside the pacer's beat, so a chain of moves is one flight per beat. Every move at the
-table flies, whoever took it (issues #72, #73, #74); `docs/client-table.md` has the decisions.
+well inside the pause a bot takes before its move, so a chain of turns is one flight apiece.
+Every move at the table flies, whoever took it (issues #72, #73, #74);
+`docs/client-table.md` has the decisions.
 
 A **slapdown flies as its own thing** (issue #95), and how it flies is most of what says it is
 not a turn: the one card crosses in `SLAP_MS` rather than `FLIGHT_MS`, on an accelerating curve
@@ -174,10 +175,33 @@ where a discard decelerates, lands with a brief **pop** past its own size, and *
 whole table** behind it. Those durations are a **chain, not a set of numbers**
 (`client/src/timing.ts`): the slap is a fraction of the flight and the jolt a fraction of the
 slap, so the table is retuned by editing one value and cannot end up half fast and half slow.
-The chain hangs off the pacer's beat without being derived from it — a flight has to finish
-inside a beat, and that is the whole of what the two owe each other. All three parts are one
+The chain is derived from nothing outside itself: what keeps a flight from being replaced
+before it finishes is the **bot think time** the server spaces moves out by, which is several
+times a flight and is a fact about the game rather than about the animation (issue #135). A
+network that bunches two broadcasts can cut a flight short — cosmetic, accepted, and only on a
+connection that has already stuttered. All three parts are one
 thing to a player who has asked for less motion: the flight never starts, so the pop and the
 jolt never happen, and the card is simply on the pile where the position already put it.
+
+## Bot think time and the beat
+
+**Bot think time** is the pause a bot takes before its turn — uniform across bots and every
+turn alike, a round opening on a bot included. It is a fact about the server, not the table:
+what a bot waits out before deciding, not a duration anything is drawn over. See
+[ADR-0011](docs/adr/0011-bot-think-time-paces-the-server.md).
+
+**The beat** is the informal word for what a table of bots *reads as* because of it: a chain
+of turns landing one think time apart rather than all at once, so a run of moves looks played
+rather than announced. Where think time is the cause, the beat is what a player sees — the
+two stay distinct on purpose, since only one of them is a number anywhere in the code. The
+beat used to be produced twice, once server-side by the spacing between bot turns and again
+client-side by a queue that re-paced a burst back out to the same rhythm; the second was
+retired as redundant once the first existed to depend on (ADR-0011) — the beat itself is
+unchanged, only which side produces it.
+
+It is also what a **slapdown window** races inside of: the only reason a human's client has a
+round trip to win that race in at all is that the bot behind them is paused rather than
+moving in the same tick (ADR-0011, superseding part of [ADR-0005](docs/adr/0005-slapdown-race-by-event-order.md)).
 
 ## Slapdown and the slapdown window
 

@@ -28,8 +28,6 @@ import type {
 import type { Socket } from "socket.io-client";
 import type { CardFlight } from "./flight.ts";
 import { flightFrom } from "./flight.ts";
-import type { Clock } from "./pacing.ts";
-import { createPacer, systemClock } from "./pacing.ts";
 import type { DrawSource } from "./turn.ts";
 import {
   isLegalCall,
@@ -295,23 +293,8 @@ const EMPTY_NAME: GameError = {
  */
 const UNAVAILABLE = "That game is no longer available.";
 
-/**
- * A position as it arrived, and how many had arrived when it did.
- *
- * The same pair the CLI keeps, and for the same reason — but the two halves are now used
- * a moment apart: positions are queued on the way in and drawn on a beat (see
- * `pacing.ts`), so "is this newer than the move we sent?" has to be asked of when it
- * *landed*, not of when it reached the screen. A view drawn out of a chain that was
- * already in flight when the move went out is not an answer to it.
- */
-interface Position {
-  readonly view: PlayerGameView;
-  readonly version: number;
-}
-
 export function createSession(
   socket: YanivClientSocket,
-  clock: Clock = systemClock,
   tokens: TokenStore = NO_STORE,
 ): Session {
   let snapshot: SessionSnapshot = {
@@ -338,7 +321,7 @@ export function createSession(
   };
 
   /**
-   * How many positions have arrived, and which one a turn is waiting to be played past.
+   * How many positions have been drawn, and which one a turn is waiting to be played past.
    *
    * The counter is the CLI's `Position` and `actedOn` watermark, kept here rather than in
    * a component because it is the same fact about the same wire: the
@@ -346,10 +329,13 @@ export function createSession(
    * the last view still shows the mover's own turn and their discarded cards in hand.
    * Controls released on the ack would come back to life over that stale position.
    *
+   * Arriving and being drawn are the same instant — a position goes to the screen off the
+   * wire, with nothing in between — so there is one count and not two.
+   *
    * *Any* newer position releases it, not only the one the turn caused — which is the
    * same thing wherever it matters, since nobody else can move while the turn is ours.
-   * Off turn it lets go a beat early, on a broadcast from whoever is actually playing;
-   * the turn being sent again from there is refused either way.
+   * Off turn it lets go early, on a broadcast from whoever is actually playing; the turn
+   * being sent again from there is refused either way.
    */
   let version = 0;
   let committedAt: number | null = null;
@@ -371,18 +357,20 @@ export function createSession(
     view.phase === "playing" ? retainSelection(snapshot.selection, view.you.hand) : [];
 
   /**
-   * A position reaching the screen.
+   * A position reaching the screen, which is the moment it reaches the client: there is no
+   * queue between the socket and the snapshot (issue #135). A run of bot turns is spaced
+   * out by the server, a think time apart, so the rhythm a player watches is a fact about
+   * when the moves happened rather than one the client manufactures.
    *
    * A committed turn's lock is released here and only here, on a strictly newer position
    * than the one it was played from.
    *
    * It is also the one place that holds the outgoing position and the arriving one at the
-   * same time, which is what a move to animate is read from — and it is asked here rather
-   * than on arrival because a chain of bot turns is drawn a beat apart: a card flies as its
-   * move reaches the screen, not as it lands on the wire.
+   * same time, which is what a move to animate is read from.
    */
-  const show = ({ view, version: arrivedAt }: Position): void => {
-    const played = committedAt !== null && arrivedAt > committedAt;
+  const show = (view: PlayerGameView): void => {
+    version += 1;
+    const played = committedAt !== null && version > committedAt;
     if (played) committedAt = null;
 
     publish({
@@ -393,17 +381,7 @@ export function createSession(
     });
   };
 
-  /**
-   * The queue between the wire and the screen. A run of bot turns arrives as one update
-   * per move with no delay behind it, so drawing each on arrival would show only the last
-   * — see `pacing.ts` for why the pacing is the client's job and not the server's.
-   */
-  const paced = createPacer(show, clock);
-
-  socket.on("gameStateUpdate", (view) => {
-    version += 1;
-    paced.offer({ view, version });
-  });
+  socket.on("gameStateUpdate", show);
 
   /**
    * The seat this session can sit back down in, or null when it holds none.
@@ -438,9 +416,7 @@ export function createSession(
    * a connection that came back holding nothing to claim with.
    *
    * A turn in flight is one nobody will answer now, and a selection is a tap or two made in
-   * front of a table that is no longer there. Neither goes to the next room — and neither
-   * does whatever the chain still had left to show, which would otherwise draw the departed
-   * room back over the menu, one beat at a time.
+   * front of a table that is no longer there. Neither goes to the next room.
    *
    * `reconnected` rides along rather than being published beside this, because a screen
    * that saw `connected` come back a moment before the view went would draw the dead table
@@ -448,7 +424,6 @@ export function createSession(
    */
   const leaveTable = (notice: string | null, reconnected = false): void => {
     forget();
-    paced.reset();
     committedAt = null;
     publish({
       connected: reconnected || snapshot.connected,
@@ -497,10 +472,10 @@ export function createSession(
       }
 
       // The position comes back in the ack rather than as a broadcast — it is the answer
-      // to this call and to nobody else's — so it is counted in as an arrival like any
-      // other, and drawn at once rather than queued: there is no chain behind it. Nothing
-      // flies on it either: a table being sat back down at is a position landing, not a
-      // move anybody watched, and whatever last happened at it may be several turns old.
+      // to this call and to nobody else's — so it is counted in like any other position,
+      // and published here rather than through `show`: nothing flies on it, since a table
+      // being sat back down at is a position landing rather than a move anybody watched,
+      // and whatever last happened at it may be several turns old.
       version += 1;
       const { view } = result.value;
       // Re-stored rather than merely kept, so a page that came up on a credential leaves
@@ -562,8 +537,6 @@ export function createSession(
    */
   socket.on("disconnect", () => {
     lostARoom = snapshot.view !== null && seat === null;
-    // Whatever the chain still had left to show belongs to a table nobody is at.
-    paced.reset();
     committedAt = null;
     publish({ connected: false, busy: false, resuming: false });
   });
@@ -703,13 +676,9 @@ export function createSession(
         refuse(result.error);
         return;
       }
-      // Anything still queued belongs to a table this player has got up from, and a beat
-      // later would sit them back down at it — as would a credential kept for a seat they
-      // have just given away.
-      if (leavesRoom) {
-        forget();
-        paced.reset();
-      }
+      // A credential kept for a seat this player has just given away would only sit them
+      // back down at a table they have got up from.
+      if (leavesRoom) forget();
       publish({
         error: null,
         busy: false,
@@ -856,13 +825,11 @@ export function createSession(
      * strictly newer than the one it was sent from, and by either of them the window is
      * spent.
      *
-     * A window drawn a beat behind the position that closed it is offered anyway, and
-     * refused. Pacing arms a beat on the window's own arrival (see `pacing.ts`), so the
-     * next player's move can be queued behind it for up to `PACE_MS` — the pile is still
-     * flashing over a window the server has already shut. That is the same shape as
-     * tapping a draw target out of turn: whether the window is still open is the
-     * server's to say, it says `SLAPDOWN_NOT_AVAILABLE`, and a refusal costs the player
-     * nothing. Only what the rulebook can answer is withheld ahead of it.
+     * A window the server has already shut is still offered until the position that
+     * closed it arrives, and the tap is refused. That is the same shape as tapping a draw
+     * target out of turn: whether the window is still open is the server's to say, it says
+     * `SLAPDOWN_NOT_AVAILABLE`, and a refusal costs the player nothing. Only what the
+     * rulebook can answer is withheld ahead of it.
      */
     slapDown: () => {
       if (snapshot.busy || snapshot.view === null) return;

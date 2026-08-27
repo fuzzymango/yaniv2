@@ -68,14 +68,14 @@ either the deck or one of the two end cards of the face-up discard. That second 
 move — the chosen cards are discarded and the tapped card drawn, in one action. The deck
 and the face-up cards do nothing until what you have chosen is a legal discard, so a move
 the rules refuse is never offered in the first place. Your own move lands immediately; the
-opponents' then play out one at a time, so you can see what each of them discarded rather
-than the table jumping straight back to your turn.
+opponents' then play out one at a time — each bot thinks for a second and a half before it
+moves — so you see what each of them discarded rather than the table jumping back to you.
 
 Once in a while the discard pile starts flashing on somebody else's turn: you discarded a
 same-rank set (or a lone card) and drew that same rank off the deck, so the card can go
 straight back down (`docs/rules.md` §9). One tap on the pile sheds it, and the window shuts the moment the
-next player moves — against a bot-controlled seat that is immediate, since bot turns play
-in the same tick (`docs/adr/0005`), so this is something you will see against other people.
+next player moves — so against a bot it is open for as long as that bot takes to think,
+which is a second and a half, and against a person for as long as they do.
 
 The **Yaniv** button above your hand is the exception — the one control that is not a card.
 It lights up the moment your hand is worth the room's threshold (7 unless the host changed
@@ -153,9 +153,8 @@ the final scores still add up.
 
 `slap` is the one input offered when the turn is not yours: discard a same-rank set or a
 lone card, draw its rank off the deck, and the frame says a slapdown is open until the next
-player moves (`docs/rules.md` §9). Against bots you will not get there — the seat after yours is played
-in the same tick, so the window is already shut by the time the frame lands. Another human
-sitting behind you is what makes it winnable; see `docs/adr/0005`.
+player moves (`docs/rules.md` §9). Against a bot that is the second and a half it takes to think, and
+against a person however long they take, so it is winnable either way — type it quickly.
 
 Leaving with `menu` is not quitting: the connection stays up and you land back at the main
 menu, free to create or join another room. It works the same way from the lobby and from a
@@ -168,8 +167,8 @@ has no host control to close the room either.
 
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot
-move arrives as its own update, so a chain of five bot turns prints as five positions
-rather than one jump. Requires `-- --name <name>`; also accepts `--url <url>`,
+move arrives as its own update and a beat apart, so a chain of five bot turns prints as
+five positions rather than one jump. Requires `-- --name <name>`; also accepts `--url <url>`,
 `--join <code>`, and `--create`. The room code is case-insensitive when joining, whether
 given as a flag or typed at the main menu.
 
@@ -218,8 +217,8 @@ automatically as part of the build phase.
 
 Persistence (rooms are in-memory, so a restart or redeploy drops games in progress), and any
 policy for a seat whose player never comes back. A match plays end to end in the browser now:
-create or join, set the room up, deal, take turns, watch a paced run of bot turns, call
-Yaniv, and finish on the standings with another match one tap away. Reconnect is whole — a
+create or join, set the room up, deal, take turns, watch a run of bot turns a move at a time,
+call Yaniv, and finish on the standings with another match one tap away. Reconnect is whole — a
 drop leaves the room and the seat alone, and the page presents the seat's token and picks up
 where it left off, whether the socket came back or the whole tab did — and the host can end a
 room outright from any phase. What is missing is what a table does about a player who is

@@ -103,10 +103,10 @@ export function SettingsEditor({
    *
    * This is what makes four controls out of one whole-object event. A second tap builds on
    * what the first one asked for rather than on the position on screen, which may still be
-   * the one before it: an edit is acked as soon as the server has it, but the view behind
-   * it arrives separately and can be held back a beat by the pacer (see `pacing.ts`). Two
-   * quick taps read from the screen would send the second with the first still undone in
-   * it, and the room would land on hand size 5 a moment after the host asked for 6.
+   * the one before it: an edit is acked as soon as the server has it, and the view behind it
+   * arrives separately. Two quick taps read from the screen would send the second with the
+   * first still undone in it, and the room would land on hand size 5 a moment after the host
+   * asked for 6.
    *
    * It is a draft of a form and nothing more, which is why it lives here rather than in the
    * session core: nothing outside this screen has any use for a setting nobody has been

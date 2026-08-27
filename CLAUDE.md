@@ -58,14 +58,14 @@ this costs `shared` none of its dependency-freedom. See `docs/adr/0002`.
 |---|---|
 | `state.ts` | `GameState`, `RoundState`, `Player`, `MoveHistoryEntry` — the domain model |
 | `config.ts` | The operational constants only — `BOT_NAMES` and `ROOM_CODE_*`. The rule constants live in `shared` |
-| `rng.ts` | `Rng` type + `mulberry32` seeded PRNG |
+| `rng.ts`, `clock.ts` | The two ambient capabilities, injected rather than reached for: `Rng` + `mulberry32` (a seeded PRNG), and `Clock` + `systemClock` (the one thing scheduling a bot's turn needs from outside) |
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
 | `deck.ts` | `createDeck`, `shuffle`, `deal` — pure functions, no class |
 | `game.ts` | `updateSettings`, `startGame`, `takeTurn`, `callYaniv`, `slapDown`, `startNextRound`, `playAgain`, `removePlayer` — the pure state transitions |
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
 | `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
-| `botTurns.ts` | `playBotTurns` — runs the seats the server owns until the turn returns to a human |
+| `botTurns.ts` | `playBotTurn` — takes the turn in front of a room when it belongs to a bot — and `createBotTurnRunner`, which waits out **bot think time** before each one and so walks a chain a move at a time. One pending run per room |
 | `socketServer.ts` | `createSocketServer` — wires the event contract onto an `io` instance. Never calls `listen` |
 | `staticServer.ts` | `serveStatic` — serves the built client (`client/dist`) same-origin alongside Socket.io, per ADR-0003. Hand-rolled, no framework |
 | `index.ts` | The entrypoint. Binds a port and composes the above. `npm run serve` |
@@ -122,14 +122,13 @@ size from one `seatFootprint` call, so a round-end swap costs no layout) and `sh
 | `flight.ts` | `flightFrom` — the position on the screen and the one arriving in, and either the move between them or nothing. Two facts watched, `lastMove` and `lastSlapdown`, and at most one changes per arrival; `CardFlight` is tagged by which (`TurnFlight`: mover, discarded cards, draw source, drawn card where the viewer may know it — `SlapdownFlight`: mover and the one card, never redacted). Pure and total, `turn.ts`'s counterpart on the way in |
 | `ghosts.ts` | `ghostsFor` — a move and the boxes on the screen in, the cards actually in the air out (`Ghost`: what it answers to, the face to draw or none, from where, to where and into which place), dropping whatever the screen cannot place at both ends. Branches on the flight's tag — a slapdown is one card out of a hand or a seat onto the pile and nothing back, in the same box vocabulary. `DECK_BOX` and `seatBox` are the boxes that are not cards' — the deck a drawn card starts from, and the seat somebody else's hand is one place at, both ends the client is never told a card id for |
 | `flip.ts` | `invert` and `transformOf` — where a card has landed and where it came from, as the transform that puts it back. The arithmetic of the flight, and all of it: measured boxes in, one CSS transform out. Pure and total |
-| `pacing.ts` | `createPacer` and the `Clock` it takes — the queue that spaces a run of bot turns out into moves a person can watch. Injected clock, so tests drive it a beat at a time |
 | `seating.ts` | `bySeat` — the absolute `turnOrder` comparator, used by the lobby's roster listing — and `byRelativeSeat`, the same ordering rebased on the viewer's own seat (the next player to act sorts first), used by the table so the zone sweep reads correctly from whoever is looking rather than only from whoever is first in `turnOrder`. `seatZones` deals whichever ordered list it is given round the three sides of the felt (`ZONES`: `left`/`top`/`right`) in **contiguous runs**, `left` alone reversed, so the sweep reads in turn order at a doubled zone too (`right` never doubles, since 6 players is 5 opponents) — why, in `docs/client-table.md`. One placement for the table in both its phases: a scored round is seated by the same call off the same roster, so the two cannot disagree. Generic over the opponent, since seating is a fact about a list's order and nothing about what is in it |
 | `fan.ts` | The geometry of a hand held at a seat, in two shapes. Arced during play: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Cascaded once it is revealed: `cascadeOffset`, `cascadeFootprint`, `ZONE_CASCADE` (down the sides, across the top) and the `CARD_INDEX_STRIP`/`CASCADE_STEP` pair that keeps a covered card readable. And `seatFootprint` over both — the one box a seat reserves whichever shape is in it, so a round being scored never resizes a seat. Distances in card widths, so the CSS scales it |
 | `score.ts` | What a scored round says: `scoreLabel` (the round as one checkable equation — where the player started, what it was net worth once any milestone reduction is folded in, and the total it left them on; every seat's label and the viewer's own footer, so one round cannot read two ways) and `roundOutcome` (the call and the verdict as one sentence, addressed to the viewer, named off the round's own record). Pure and total |
 | `settings.ts` | What only a settings *form* knows: `wholeNumber` (a field part-way through being typed) and `sameSettings` (has the room caught up?). Pure and total, `turn.ts`'s counterpart — what a room may be set to is asked of `shared` |
 | `tokens.ts` | `seatStore` — the seat written down where a reload will find it, and the only file here that knows the word `localStorage`. Injected storage, so it is driven under `node:test` with no browser; storage that is off, full or holding junk is answered with "no seat" rather than an error |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
-| `timing.ts` | How long the moving parts of a move last, as one chain: `FLIGHT_MS` → `SLAP_MS` → `SHAKE_MS`, each a fraction of the one above it, so the table is retuned from one number and cannot end up half fast and half slow. `PACE_MS` sits above the chain without being derived from it. Plain arithmetic, so a test with no DOM asserts the derivations |
+| `timing.ts` | How long the moving parts of a move last, as one chain: `FLIGHT_MS` → `SLAP_MS` → `SHAKE_MS`, each a fraction of the one above it, so the table is retuned from one number and cannot end up half fast and half slow. Nothing above the chain: what a flight has to finish inside is the server's bot think time. Plain arithmetic, so a test with no DOM asserts the derivations |
 | `App.tsx` | Which screen: no connection comes first, then a seat being claimed back, then no view is the main menu, then everything else is a function of `view.phase` — with `playing` and `roundEnd` the one branch, and `gameEnd` the one branch rendering two things: `Table` with `GameEnd` drawn over it |
 | `main-menu/MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `lobby/Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
@@ -228,17 +227,17 @@ Split deliberately across three layers:
 - **`server/src/bot.ts`** owns *judgement* — `shouldCallYaniv`, `chooseDiscard`, `chooseDraw`,
   composed by `decideTurn`. It takes a `PlayerGameView`, never raw `GameState`, so it cannot
   cheat by construction.
-- **`server/src/botTurns.ts`** owns *execution* — `playBotTurns` loops while the current seat
-  is bot-controlled, applying each decision through the same transitions a human goes through
-  and calling back once per action. It knows nothing about sockets, so it is testable without
-  one, and takes its decision function as an argument (defaulting to `decideTurn`) so a test
-  can drive a deliberately broken bot.
+- **`server/src/botTurns.ts`** owns *execution* — `playBotTurn` applies one bot's decision
+  through the same transitions a human goes through, and the runner around it schedules each
+  turn a think time apart. It knows nothing about sockets, so it is testable without one, and
+  takes its clock and its decision function as arguments (real time and `decideTurn` by
+  default) so a test can drive a deliberately broken bot.
 
 The bot is intentionally weak: it calls Yaniv the instant it is legal, and judges an exposed
 card by face value in isolation. A known limitation — future work, not a defect to fix here.
 
 **A bot's decision being rejected by the engine is a defect, not a rule violation.**
-`playBotTurns` throws when `apply` refuses a bot's own move: there is no client at fault to
+`playBotTurn` throws when `apply` refuses a bot's own move: there is no client at fault to
 report it to, and swallowing it would wedge the table on a turn nobody can take. The one
 place in the server where a failed `Result` becomes a thrown error rather than an ack.
 
@@ -330,28 +329,24 @@ check counts every seat, bots included, so a lone host who asked for none is tur
 
 **The host edits all four settings from the lobby and nowhere else** (`updateSettings`,
 docs/adr/0006): the whole object at once, never a patch, so a room never plays under half of
-one set of choices and half of another. Refused outside `lobby` (`WRONG_PHASE`), from anyone
-but the host (`NOT_HOST`), and for a field outside its range or enum (`INVALID_SETTINGS`) — the
-last of which a typed client cannot produce, and which stops an off-contract one asking for a
-state the engine assumes away, like a hand size 54 cards cannot deal. The payload stays
-`unknown` until `isValidSettings` says otherwise: its wire type is a claim by whoever sent it,
-like a client-supplied player id, and the guard lives in `shared` on the rulebook's own grounds
-(ADR-0002). The first deal locks the lot; `playAgain` never returns to the lobby.
+one set of choices and half of another. Refused outside `lobby` (`WRONG_PHASE`), from anyone but
+the host (`NOT_HOST`), and for a field outside its range or enum (`INVALID_SETTINGS`). The
+payload stays `unknown` until `isValidSettings` says otherwise: its wire type is a claim by
+whoever sent it, and the guard lives in `shared` on the rulebook's own grounds (ADR-0002). The
+first deal locks the lot; `playAgain` never returns to the lobby.
 
-`RoomManager.seatBots(state)` is **pure** — it returns a filled state and stores nothing.
-The socket handler folds it into the `startGame` transition passed to `apply`, so a start
-that is then rejected (by someone who is not the host, say) discards the seating along with
-everything else, rather than filling a table off the back of a refused call.
+`RoomManager.seatBots(state)` is **pure** — it returns a filled state and stores nothing. The
+socket handler folds it into the `startGame` transition passed to `apply`, so a start that is
+then rejected discards the seating with everything else rather than filling a table anyway.
 
 **A disconnect costs the room nothing** — there is deliberately no `disconnect` handler. The
 seat, the player and the room are left as they were, and whoever dropped comes back through
 **`resumeSeat({ roomCode, playerId, resumeToken })`**: session rebound, room rejoined, the
-current position answered in the ack alone and broadcast to nobody, since nothing about the
-table changed and the rest of it is never told who is connected. The token is the whole of the
-check — a player id is public enough to appear in every opponent's view — and a wrong token and
-an unknown player share `INVALID_RESUME_TOKEN`, or a room code would be a way of fishing for
-the seats behind it. One live connection per seat: a resume disconnects whatever socket still
-held it, so two tabs cannot disagree about a table both think they are at.
+position answered in the ack alone and broadcast to nobody, since nothing about the table
+changed. The token is the whole of the check — a player id appears in every opponent's view —
+and a wrong token and an unknown player share `INVALID_RESUME_TOKEN`, or a room code would be a
+way of fishing for the seats behind it. One live connection per seat: a resume disconnects
+whatever socket still held it, so two tabs cannot disagree about one table.
 
 ### Leaving a room without dropping the connection
 
@@ -383,34 +378,46 @@ that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS` rather than q
 
 ### Socket layer: wiring is separate from listening
 
-`createSocketServer(httpServer, rooms)` attaches handlers and returns the `io` instance; it
-never calls `listen`, and `index.ts` does that and nothing else. The split exists so tests can
-stand up a real server on an ephemeral port (`listen(0)`) without duplicating handler logic or
-racing for a fixed port — `socketServer.test.ts` drives real `socket.io-client` connections
-rather than a stub, since this layer's whole job *is* its wire behaviour, and observes
-server-side facts through the socket rather than by asking `RoomManager`.
+`createSocketServer(httpServer, rooms, options?)` attaches handlers and returns the `io`
+instance; it never calls `listen`, and `index.ts` does that and nothing else. The split exists
+so tests can stand up a real server on an ephemeral port (`listen(0)`) without duplicating
+handler logic — `socketServer.test.ts` drives real `socket.io-client` connections rather than a
+stub, since this layer's whole job *is* its wire behaviour, and observes server-side facts
+through the socket rather than by asking `RoomManager`. `options` carries the clock and the bot
+think time, both defaulted, so production construction is unchanged.
 
 ### Broadcasting: one send per socket, one broadcast per move
 
-`broadcastState(roomCode)` loops the room's sockets and emits `serializeStateForPlayer`
-per connection. Never `io.to(room).emit(state)` — raw state holds every hand and the draw
-pile order (see "Serialization is the security boundary"). A wire-level test asserts that
-no card id outside the viewer's own hand and the face-up discard appears anywhere in a
-mid-round payload, and it has been mutation-tested by breaking the boundary on purpose.
+`broadcastState(roomCode)` loops the room's sockets and emits `serializeStateForPlayer` per
+connection. Never `io.to(room).emit(state)` — raw state holds every hand and the draw pile
+order (see "Serialization is the security boundary"). A wire-level test asserts no card id
+outside the viewer's own hand and the face-up discard appears anywhere in a mid-round payload,
+and it has been mutation-tested by breaking the boundary on purpose.
 
 It is **deliberately synchronous**, walking `io.sockets.adapter.rooms` rather than the
-idiomatic `await io.in(room).fetchSockets()`: it has to be callable from inside a run of bot
-turns, and by the time a promise resolved the position it meant to publish would already have
-been played past.
+idiomatic `await io.in(room).fetchSockets()`: it must publish the position that stood when it
+was called — it is called from a bot's timer and from handlers racing one, so a promise
+resolving a tick later would publish whatever the room had become by then.
 
-**Each bot action gets its own broadcast.** `playBotTurns` calls back per move and each callback
-publishes, so a chain of five bot turns is five updates in seating order rather than one
-collapsed jump. There is **no artificial delay** between them: pacing a chain for a human is
-the client's job, asserted by a test.
+**Each bot action gets its own broadcast**, and they are **spaced out by the server**: five bot
+turns are five updates in seating order, one every `BOT_THINK_MS`, because each waits that long
+before it is decided (see below). The rhythm is a fact about when the moves *happen*.
 
 Every in-game handler shares one `act(ack, transition)` helper: identify the caller from their
 session, apply, and on success ack, broadcast, then run any bot turns. A rejection acks the
 error and publishes nothing, so a refused action costs the player nothing.
+
+### Bots think before they move
+
+A bot's turn is **scheduled, not played in the tick that handed it over**: the runner in
+`botTurns.ts` waits out `BOT_THINK_MS` (1500ms) — uniform across bots and every turn alike, a
+round opening on a bot included — then decides from the position in front of it. This is the
+codebase's one timer, and two things follow as one fact from two ends: a table of bots reads as
+a game being played, and **a human can win the slapdown window their own turn opened**, which a
+same-tick bot turn made unreachable (ADR-0005) — there is no window timer, only the pause the
+next bot takes. **At most one pending run per room** keeps a timer nobody awaits tractable, and
+closing a room cancels its pending turn; the reasoning, and the alternatives the no-op guard
+rules out, are in `botTurns.ts`'s header. Asserted at the socket seam alone.
 
 ### The turn is two taps, and draw targets are inert until legal
 
@@ -463,10 +470,10 @@ worth nothing standing over a hand being played. Both read-only listings are one
 so a value cannot be worded two ways.
 
 **The editor keeps the last settings it sent until the room says the same thing back**
-(`sameSettings`). An edit is acked as soon as the server has it, but the position behind it
-arrives separately and can be held a beat by the pacer — so a second tap read off the screen
-would send the first one's change still undone in it, and hand size 6 would snap back to 5 a
-moment after the host asked for it. That draft stays in the component, as does whether the
+(`sameSettings`). An edit is acked as soon as the server has it, and the position behind it
+arrives separately — so a second tap read off the screen would send the first one's change
+still undone in it, and hand size 6 would snap back to 5 a moment after the host asked for it.
+That draft stays in the component, as does whether the
 modal is open: a form half-filled in is no use outside the screen holding it, and no arriving
 view can contradict either.
 
@@ -534,19 +541,13 @@ and the turn is still theirs. The ordering trap, plainly: the first snapshot car
 after entering a room is one the player still cannot act from — tests wait on
 `view !== null && !busy` rather than on the view alone.
 
-**Positions are drawn on a clock, not on arrival.** A run of bot turns lands as one broadcast
-per move within a few milliseconds of itself (see "Broadcasting" above), so a session that
-published each on arrival would show only the last. `pacing.ts` queues them instead: **the
-first arrival goes straight through, and anything landing in the beat behind it is let go one
-per `PACE_MS` (700ms)** — a move of the player's own is a lone arrival and so never delayed,
-which is why the rule is "first one free" rather than "one every beat". The queue is
-phase-blind, and a round a bot's Yaniv ends is *why*: the scored position is the last link of
-the chain. The accepted cost is set out in full in `pacing.ts`. Two things fall out of it.
-**The watermark counts arrivals, not drawings** — a queued position carries the `version` it
-*landed* on, or one already in flight when a move went out could pass for an answer to it.
-And **a room that has gone takes its queue with it**: `roomClosed` and a successful
-`exitToMenu` both `reset` the pacer, or the next beat would draw a table the player has left
-back over the main menu.
+**A position is drawn the moment it arrives.** There is no queue between the socket and the
+snapshot: the server spaces a run of bot turns out itself (above), so there is no burst left
+for the client to smooth, and the pacer that used to do it went with issue #135 — along with
+the session core's clock and everything the queue dragged behind it. No move is held back to
+protect a beat, and a stuttering connection is given no client-side latency on top. What
+guarantees a flight finishes before the next position replaces it is bot think time; a network
+that bunches two broadcasts can cut one short, which is cosmetic and accepted.
 
 **A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
 `null`, `commitTurn` returns, and no error is published — the screen should not have offered a
@@ -606,12 +607,11 @@ emits only if `socket.connected`, and `connect` does the sending for a claim mad
 there was a socket to make it on; `resuming` and `connected` go up in one publish, or a
 screen would read the moment between them as the main menu.
 
-A refused claim clears the credential, empties the pacer and lands on `view: null` with one
-`notice` — the same sentence a room that has gone gets, since which of the two it was is a
-distinction the server deliberately does not draw. A successful one publishes the acked view
-directly rather than through the pacer, and with nothing in flight: it answers this call and
-nobody else's, has no chain behind it to spread out, and is a table sat back down at rather
-than a move anybody watched.
+A refused claim clears the credential and lands on `view: null` with one `notice` — the same
+sentence a room that has gone gets, since which of the two it was is a distinction the server
+deliberately does not draw. A successful one publishes the acked view with nothing in flight:
+it answers this call and nobody else's, and is a table sat back down at rather than a move
+anybody watched.
 
 ### A session that loses its socket
 
@@ -623,7 +623,7 @@ what is emitted before then, and a page that announced a lost connection for the
 moment of every load would be crying wolf.
 
 **A drop leaves the player on the disconnected screen, and the connection coming back sits
-them straight back down.** `disconnect` resets the pacer, drops the watermark and releases
+them straight back down.** `disconnect` drops the watermark and releases
 `busy` — nothing is in flight over a socket that is not there, a claim included — but leaves
 the view alone, since that screen is over it anyway and is very likely the position still
 there when the socket returns. The *reconnect* claims the seat rather than clearing anything:
@@ -668,17 +668,17 @@ Node builtin is a typecheck error.
 Not oversights — deferred on purpose, in this order of likely next work:
 
 - **What a mid-round seat does while its player is gone.** Reconnect is whole, so a reload
-  costs a round trip; but nothing pauses, times out, bot-plays or frees a seat whose player
-  never comes back, and `Player` has no `connected` field for a screen to say so with. Next.
+  costs a round trip; but nothing pauses, times out, bot-plays or frees a seat whose player never
+  comes back, and `Player` has no `connected` field for a screen to say so with. Next.
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
-  spot, so anyone who has not joined by then is playing the next match, not this one.
+  spot, so anyone not joined by then plays the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four
-  (docs/adr/0006) and the CLI has none, so a room created from `play` plays the defaults.
+  (docs/adr/0006); the CLI has none, so a room made from `play` plays the defaults.
 - **Persistence, and sweeping abandoned rooms.** Rooms are in-memory only, so a redeploy drops
-  every match in progress — the reason splitting client and server into two services (giving up
-  same-origin, ADR-0003) would be the fix if that cost ever mattered. No idle sweep either.
-- **Slapdown against a bot.** Both clients offer it, but bots neither slap down for themselves
-  nor can be raced by a human, `playBotTurns` running in the same tick (ADR-0005).
+  every match in progress — splitting client and server into two services (giving up
+  same-origin, ADR-0003) is the fix if that cost ever matters. No idle sweep either.
+- **Bots slapping down for themselves.** A human can now win one against a bot, inside the
+  pause it takes before its turn, but no bot slaps down for itself — ADR-0005's other half.
 - **Disambiguating a joker that extends a run.** Tap order decides where it sits — a wart (§4).
 
 ## Running things

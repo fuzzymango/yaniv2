@@ -274,10 +274,9 @@ export async function runSession(
      * The open window is the one entry here that is *not* our turn — it belongs to the
      * player before the current one (docs/rules.md §9) — and without it `slap` would be
      * a word with nowhere to type it: the harness prompts serially, and every other
-     * prompt has already gone by the time a window opens. Against bots the window will
-     * be shut by the time the line is read, since `playBotTurns` runs the next seat in
-     * the same tick; that is ADR-0005's accepted limitation, not something the prompt
-     * can make up for.
+     * prompt has already gone by the time a window opens. Against a bot the window is
+     * open for as long as that bot's think time, which is enough to type `slap` into —
+     * the harness inherits that from the server, being a real client of it.
      */
     const isOurMove = (view: PlayerGameView) =>
       view.phase === "lobby" ||

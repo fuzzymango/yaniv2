@@ -9,7 +9,8 @@
 import type { Server as HttpServer } from "node:http";
 import type { Ack, ClientToServerEvents, ServerToClientEvents } from "@yaniv/shared";
 import { Server, type Socket } from "socket.io";
-import { playBotTurns } from "./botTurns.ts";
+import type { BotTurnRunnerOptions } from "./botTurns.ts";
+import { createBotTurnRunner } from "./botTurns.ts";
 import {
   callYaniv,
   playAgain,
@@ -59,20 +60,34 @@ type YanivSocket = Socket<
   SocketData
 >;
 
+/**
+ * What a server may be built with rather than told at runtime: the clock its bots think
+ * on and how long they think for, both defaulted, so production construction is one line
+ * and unchanged.
+ *
+ * The runner's own options, rather than a copy of them — the two cannot drift, and there
+ * is nothing else here a server is built with. A test seam first: a suite about something
+ * other than timing switches the pause off, and one about timing drives the clock by hand.
+ */
+export type SocketServerOptions = BotTurnRunnerOptions;
+
 /** Attach the game's event handlers to a new Socket.io server on `httpServer`. */
 export function createSocketServer(
   httpServer: HttpServer,
   rooms: RoomManager,
+  options: SocketServerOptions = {},
 ): YanivServer {
   const io: YanivServer = new Server(httpServer);
+  const botTurns = createBotTurnRunner(rooms, options);
 
   /**
    * Send every connection in a room its own view of the current state.
    *
    * Deliberately synchronous. `io.in(room).fetchSockets()` would be the idiomatic call,
-   * but it is async, and this has to be safe to invoke from inside a run of bot turns —
-   * by the time a promise resolved, the position it was meant to publish would already
-   * have been played past.
+   * but it is async, and this has to publish the position that stood when it was called:
+   * it is invoked from inside a bot's timer callback and from a handler that may be
+   * racing one, so a promise resolving a tick later would be publishing whatever the
+   * room had become by then rather than the move it was handed.
    *
    * Never `io.to(room).emit(state)`: the raw state holds every hand and the draw pile
    * order. One send per socket, each through the serializer, is the only shape that
@@ -107,12 +122,15 @@ export function createSocketServer(
    * happens. Bots have no connection of their own, so without this the table would
    * deadlock the moment the turn left the player.
    *
-   * No delay between moves: pacing a chain of bot turns for a human to watch is
-   * something the client does with the sequence of broadcasts, not something the
-   * server bakes into the wire.
+   * Each of those turns waits out bot think time first, so a chain reaches the table one
+   * move per beat rather than all of it inside this call. The pacing is the server's:
+   * the moves are spaced out because they *happen* spaced out.
+   *
+   * Safe to call while a run is already pending — the runner keeps at most one per room,
+   * and an action landing mid-pause neither hurries the waiting turn nor delays it.
    */
   function runBotTurns(roomCode: string): void {
-    playBotTurns(rooms, roomCode, () => broadcastState(roomCode));
+    botTurns.run(roomCode, () => broadcastState(roomCode));
   }
 
   /**
@@ -139,8 +157,12 @@ export function createSocketServer(
    * Shut a room down and turn everyone in it loose. Only the host does this, so everybody
    * else is told why rather than being left staring at a table that has stopped
    * answering. The closer hears it as their own ack instead.
+   *
+   * A bot mid-think is abandoned along with the rest of it: a room that has ended stops
+   * doing things, and no entry is left behind under a code that may be issued again.
    */
   function closeRoom(roomCode: string, reason: string, closer: YanivSocket): void {
+    botTurns.cancel(roomCode);
     for (const member of membersOf(roomCode)) {
       if (member.id !== closer.id) member.emit("roomClosed", reason);
       release(member, roomCode);
@@ -358,10 +380,12 @@ export function createSocketServer(
      * anyone the window was never open for — is refused by the transition itself, and a
      * refusal costs them nothing.
      *
-     * `runBotTurns` matters here even though a slapdown does not move the turn on: the
-     * turn was already handed over by the `takeTurn` that opened the window, and if that
-     * seat is a bot it has long since played. This is the no-op that says so. See
-     * ADR-0005 for why a human effectively cannot reach this ahead of a bot.
+     * `runBotTurns` is a live re-entry here, not the no-op it once was. A slapdown does
+     * not move the turn on, but the seat it was handed to by the `takeTurn` that opened
+     * the window may be a bot still thinking — and this call arrives inside its pause.
+     * What makes that safe is the runner keeping one pending run per room: the slap
+     * lands, the position updates, and the bot plays at its originally scheduled time
+     * against the position the slap produced. Acting is punished in neither direction.
      */
     socket.on("slapDown", (ack) => {
       act(ack, (session, state) => slapDown(state, session.playerId));

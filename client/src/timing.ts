@@ -8,8 +8,6 @@
  *
  * The chain and what each link answers for:
  *
- *   PACE_MS      how long a position stays on the screen (`pacing.ts` — deliberately *not*
- *                a link, see below)
  *   FLIGHT_MS    how long a card takes to cross the table
  *   SLAP_MS      the same journey, made in anger
  *   SHAKE_MS     how long the table is still ringing from it
@@ -22,12 +20,11 @@
 /**
  * How long a card is in the air.
  *
- * A sibling of `pacing.ts`'s `PACE_MS` and deliberately not derived from it: how long a
- * card takes to cross the table and how long a position stays on screen are two different
- * questions, and tying them together would mean tuning one by changing the other. What the
- * two owe each other is only this — a flight has to be over with room to spare inside a
- * beat, or a chain of bot turns would replace a position while its own cards were still
- * arriving. At better than twice the margin, it is.
+ * The top of the chain and derived from nothing: what keeps a flight from being replaced
+ * before it finishes is the server's bot think time, which is several times this and is a
+ * fact about the game rather than about the animation. A network that bunches two
+ * broadcasts can cut a flight short — cosmetic, accepted, and only on a connection that has
+ * already stuttered.
  *
  * Long enough to be seen and short enough that a player who already knows what they played
  * never waits on it. They never wait on it in any case: the turn is sent, acked and drawn

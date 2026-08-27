@@ -47,6 +47,10 @@ async function startServer(seed: number): Promise<Harness> {
       newRoomRng: () => mulberry32(seed + 1),
       defaultSettings: { botCount: MAX_PLAYERS - 1 },
     }),
+    // Bot think time off. What the harness draws is under test here, not when it draws
+    // it: the pause is the server's and is asserted at its own seam, and left on it
+    // would buy these scripts nothing but real seconds of waiting.
+    { thinkTimeMs: 0 },
   );
 
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
@@ -70,6 +74,29 @@ async function startServer(seed: number): Promise<Harness> {
 }
 
 type Ask = (prompt: string) => Promise<string | null>;
+
+/**
+ * What a scripted developer types at a prompt: their highest card, which is always a legal
+ * discard on its own.
+ *
+ * It waits for a position this seat can act on first, and that is what the wait is for. A
+ * bot now thinks before its turn, so a window opened in front of one is still open when
+ * the harness prompts — where it used to be shut in the same tick — and a discard typed
+ * into that prompt would be refused, the turn not having come back yet. These scripts are
+ * not about slapping (one below is), so the window is left to close and the turn behind it
+ * is the one played.
+ */
+async function playOn(latest: () => PlayerGameView | null): Promise<string> {
+  await waitUntil("a position this seat can act on", () => {
+    const view = latest();
+    return (
+      view !== null &&
+      (view.phase !== "playing" || view.currentTurnPlayerId === view.you.id)
+    );
+  });
+  const view = latest()!;
+  return view.phase === "playing" ? String(view.you.hand.length) : "";
+}
 
 /**
  * A host's script, with the go-ahead prepended.
@@ -172,7 +199,7 @@ describe("runSession", () => {
             promptedAfter.push(frames.length);
             if (promptedAfter.length > 2) return null;
             // Any single card is a legal discard; the last is the highest.
-            return String(view!.you.hand.length);
+            return await playOn(() => view);
           }),
           output: (text) => frames.push(text),
         },
@@ -256,7 +283,7 @@ describe("runSession", () => {
               `${current.drawPileCount}|${current.you.hand.map((c) => c.id).join(",")}`,
             );
             if (seenAtPrompt.length > 3) return null;
-            return String(current.you.hand.length);
+            return await playOn(() => view);
           }),
           output: (text) => printed.push(text),
         },
@@ -792,7 +819,7 @@ describe("runSession", () => {
         if (view.phase === "lobby") return "start";
         if (view.phase === "roundEnd") return "";
         if (view.phase === "gameEnd") return atGameEnd();
-        return String(view.you.hand.length);
+        return await playOn(latest);
       };
     }
 
@@ -878,7 +905,7 @@ describe("runSession", () => {
                 restarted ??= current;
                 return null;
               }
-              return current.phase === "roundEnd" ? "" : String(current.you.hand.length);
+              return current.phase === "roundEnd" ? "" : await playOn(() => view);
             }),
             output: (text) => printed.push(text),
           },
@@ -1023,11 +1050,11 @@ describe("runSession", () => {
     /**
      * The real thing, played until a window actually opens.
      *
-     * It takes two humans: `playBotTurns` runs the seat after ours in the same tick, so
-     * against bots the window is shut before the frame announcing it has been read
-     * (ADR-0005). Grace sits directly behind Ada — the roster is seated in join order —
-     * and is scripted to hold off while Ada's window is open, which is the position the
-     * rule exists for.
+     * It takes two humans here, because this server is built with bot think time off:
+     * the bot behind a seat plays as soon as the event loop lets it, so a window in front
+     * of one is shut before the frame announcing it has been read. Grace sits directly
+     * behind Ada — the roster is seated in join order — and is scripted to hold off while
+     * Ada's window is open, which is the position the rule exists for.
      */
     it("puts the drawn card back down from a prompt of its own", { timeout: 30_000 }, async () => {
       const server = await startServer(7);
@@ -1174,7 +1201,7 @@ describe("runSession", () => {
             // A finished match no longer ends the session on its own — the standings
             // are a screen with its own options — so this developer quits from it.
             if (current.phase === "gameEnd") return null;
-            return current.phase === "roundEnd" ? "" : String(current.you.hand.length);
+            return current.phase === "roundEnd" ? "" : await playOn(() => view);
           }),
           output: (text) => printed.push(text),
         },

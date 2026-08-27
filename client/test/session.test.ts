@@ -43,7 +43,6 @@ import {
   type SocketOptions,
 } from "socket.io-client";
 import type { CardFlight } from "../src/flight.ts";
-import type { Clock } from "../src/pacing.ts";
 import {
   createSession,
   type Session,
@@ -51,7 +50,6 @@ import {
   type TokenStore,
 } from "../src/session.ts";
 import { isLegalCall } from "../src/turn.ts";
-import { testClock } from "./helpers.ts";
 
 /**
  * Somewhere to keep a seat's credential, standing in for whatever the browser will use.
@@ -79,15 +77,10 @@ interface Harness {
   /**
    * A session on its own connection — one per player, as in a browser tab each.
    *
-   * On a clock that runs every beat the moment it is asked for, unless the test hands one
-   * in: a suite about anything other than pacing wants the positions as the server sent
-   * them, not spread over seconds of real time. A test that *is* about pacing hands in a
-   * clock it holds.
-   *
    * The store is optional for the same reason it is optional in `main.tsx`: a session that
    * keeps nothing behaves exactly as one did before there was anything to keep.
    */
-  openSession: (clock?: Clock, tokens?: TokenStore) => Promise<Session>;
+  openSession: (tokens?: TokenStore) => Promise<Session>;
   /**
    * A session opened the way a page load opens one — built on a socket that has not
    * connected yet, rather than waited for.
@@ -96,7 +89,7 @@ interface Harness {
    * the session core from `openSession`: a claim made before there is a socket to make it
    * on has to wait for one.
    */
-  bootSession: (tokens: TokenStore, clock?: Clock) => Session;
+  bootSession: (tokens: TokenStore) => Session;
   /**
    * Take a session's connection away, the way a tunnel or a locked phone does.
    *
@@ -145,6 +138,10 @@ async function startServer(
       // it yet, so this keeps the tables the size these tests were written against.
       defaultSettings: { botCount },
     }),
+    // Bot think time off. This suite is about a client, and a bot pausing before every
+    // turn would cost it real seconds per fished window without telling it anything new —
+    // the pause is the server's, and is asserted at the server's own seam.
+    { thinkTimeMs: 0 },
   );
 
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
@@ -157,20 +154,20 @@ async function startServer(
   const connections = new Map<Session, ClientSocket>();
 
   return {
-    openSession: (clock = testClock(), tokens) =>
+    openSession: (tokens) =>
       new Promise((resolve) => {
         const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
         // `once`, because a connection that comes back fires this again — and a second
         // session on the same socket would double every handler the first one attached.
         client.once("connect", () => {
-          const session = createSession(client, clock, tokens);
+          const session = createSession(client, tokens);
           connections.set(session, client);
           resolve(session);
         });
       }),
-    bootSession: (tokens, clock = testClock()) => {
+    bootSession: (tokens) => {
       const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
-      const session = createSession(client, clock, tokens);
+      const session = createSession(client, tokens);
       connections.set(session, client);
       return session;
     },
@@ -225,12 +222,8 @@ function waitForSnapshot(
  * the lobby *before* it acks the creation — so the first snapshot with a view in it is
  * one the host still cannot act from.
  */
-async function hostARoom(
-  server: Harness,
-  name: string,
-  clock?: Clock,
-): Promise<[Session, string]> {
-  const host = await server.openSession(clock);
+async function hostARoom(server: Harness, name: string): Promise<[Session, string]> {
+  const host = await server.openSession();
   host.createRoom(name);
   const snapshot = await waitForSnapshot(
     host,
@@ -263,8 +256,8 @@ async function hostAndGuest(server: Harness): Promise<[Session, Session]> {
  * before it stops, so waiting for our own turn is the only way to know the table has
  * come to rest — and the only position a turn can be taken from.
  */
-async function soloMatch(server: Harness, clock?: Clock): Promise<Session> {
-  const [host] = await hostARoom(server, "Ada", clock);
+async function soloMatch(server: Harness): Promise<Session> {
+  const [host] = await hostARoom(server, "Ada");
   host.startGame();
   await waitForSnapshot(
     host,
@@ -802,7 +795,7 @@ describe("the session core", () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
-      const host = await server.openSession(undefined, tokens.store);
+      const host = await server.openSession(tokens.store);
       host.createRoom("Ada");
       await waitForSnapshot(host, "the room", (s) => s.view !== null && !s.busy);
       assert.ok(tokens.stored(), "seated, so there is a seat to claim back");
@@ -1127,10 +1120,11 @@ describe("taking a turn", () => {
  * Slapping down (docs/rules.md §9): the one action taken while the turn belongs to
  * somebody else.
  *
- * Every test here needs two humans. `startGame` seats bots behind the two of them and
- * `playBotTurns` runs the seat after ours in the same tick, so a window opened in front
- * of a bot is shut before the broadcast announcing it has been drawn (ADR-0005) — the
- * guest sitting directly behind the host is what holds one open long enough to tap.
+ * Every test here needs two humans. `startGame` seats bots behind the two of them, and
+ * this suite's server is built with bot think time off — so a bot plays as soon as the
+ * event loop lets it, and a window opened in front of one is shut before the broadcast
+ * announcing it has been drawn. The guest sitting directly behind the host is what holds
+ * one open long enough to tap.
  */
 describe("slapping down", () => {
   /**
@@ -1152,8 +1146,8 @@ describe("slapping down", () => {
    * stopping exactly there: the window open, the turn with the guest, nothing else moved.
    *
    * Only the host's windows count. The roster is seated in join order, so the guest is
-   * behind the host and a bot is behind the guest — a window of the guest's own is shut
-   * again in the same tick it opened.
+   * behind the host and a bot is behind the guest — and with think time off, a window of
+   * the guest's own is shut as soon as that bot gets a turn of the event loop.
    */
   async function playToAnOpenWindow(server: Harness): Promise<[Session, Session]> {
     const [host, guest] = await hostAndGuest(server);
@@ -1496,43 +1490,28 @@ describe("watching the bots play", () => {
     return shown;
   }
 
-  it("shows a run of bot turns one move at a time", async () => {
+  it("draws every position the server sends, as it arrives", async () => {
     const server = await startServer(7);
     try {
-      const clock = testClock();
-      const host = await soloMatch(server, clock);
+      const host = await soloMatch(server);
       const ours = host.getSnapshot().view!;
-
-      // From here the test owns time, so nothing moves except when it says so.
-      clock.hold();
       const shown = positionsShownTo(host);
 
       takeATurn(host, ours);
-      await waitForSnapshot(host, "our own move", (s) => s.view !== ours);
 
-      // Our own move is on screen before the bots have finished arriving, which is the
-      // point of it going straight through: a player's own play never waits on a queue.
-      assert.equal(shown.length, 1, "shown at once, with no beat asked for first");
-      assert.equal(host.getSnapshot().busy, false, "and the controls came straight back");
-
-      // The rest of the chain lands within milliseconds — the server paces nothing.
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      assert.equal(
-        shown.length,
-        1,
-        "the bots' moves are waiting, not drawn over each other on arrival",
+      // The chain plays out and the turn comes back round to this seat. This suite runs the
+      // server with no think time (see `startServer`), so every bot move lands within
+      // milliseconds of the last — which is exactly the arrival pattern that would have been
+      // queued before issue #135, and is now drawn straight through.
+      await waitForSnapshot(
+        host,
+        "the table coming back to rest",
+        (s) => s.view!.currentTurnPlayerId === s.view!.you.id && s.view !== ours && !s.busy,
       );
 
-      for (let beat = 0; clock.pending() > 0; beat++) {
-        assert.ok(beat < 20, "the chain should have played out long before this");
-        const before = shown.length;
-        clock.tick();
-        assert.ok(shown.length - before <= 1, "a beat is one move, never a jump");
-      }
-
       // Our move and one per bot seat behind it. An early Yaniv would cut the chain short
-      // and this is not the seed for that — the number is what "five bot turns read as
-      // five moves" means when it is counted.
+      // and this is not the seed for that — the number is what "five bot turns read as five
+      // moves" means when it is counted, with nothing dropped for arriving in a burst.
       assert.equal(shown.length, MAX_PLAYERS, "one position drawn per move, and no more");
       assert.deepEqual(
         shown[shown.length - 1],
@@ -1540,7 +1519,7 @@ describe("watching the bots play", () => {
         "and the chain ends on the position the server actually left the table in",
       );
 
-      // What each bot discarded was on the table while its move was being shown. Card ids
+      // What each bot discarded was on the table while its move was being drawn. Card ids
       // are unique within a round, so a repeated face-up discard would mean a move whose
       // own discard was never drawn.
       const discards = shown
@@ -1549,46 +1528,31 @@ describe("watching the bots play", () => {
       assert.equal(
         new Set(discards).size,
         discards.length,
-        "every move was watched with its own discard face up",
+        "every move was drawn with its own discard face up",
       );
     } finally {
       await server.close();
     }
   });
 
-  it("drops what a closed room still had left to show", async () => {
+  it("puts a player's own move on the screen without waiting on anything", async () => {
     const server = await startServer(7);
     try {
-      const [host, roomCode] = await hostARoom(server, "Ada");
+      const host = await soloMatch(server);
+      const ours = host.getSnapshot().view!;
+      const shown = positionsShownTo(host);
 
-      const clock = testClock();
-      clock.hold();
-      const guest = await server.openSession(clock);
-      guest.joinRoom(roomCode, "Grace");
-      await seated(guest, "the guest");
+      takeATurn(host, ours);
+      await waitForSnapshot(host, "our own move", (s) => s.view !== ours);
 
-      // Two more players arrive while the first position is still on the guest's screen,
-      // so there are seats filled that they have not been shown yet. Any burst queues —
-      // a lobby filling up is the one that needs no match under way to arrange.
-      for (const name of ["Alan", "Edsger"]) {
-        const other = await server.openSession();
-        other.joinRoom(roomCode, name);
-        await seated(other, name);
-      }
+      // The first position drawn after a turn is the turn itself, not whatever the bots had
+      // made of the table by the time a queue got round to letting it go.
       assert.equal(
-        guest.getSnapshot().view!.opponents.length,
-        1,
-        "the guest is a position or two behind, so there is something waiting",
+        shown[0]!.lastMove?.playerId,
+        ours.you.id,
+        "the first thing drawn is the player's own move",
       );
-
-      host.exitToMenu();
-
-      // What was waiting is a room that no longer exists. Drawing it a beat later would
-      // put the guest back in a lobby they have already been told is gone.
-      const closed = await waitForSnapshot(guest, "the room closing", (s) => s.view === null);
-      assert.match(closed.notice ?? "", /host/);
-      assert.equal(clock.pending(), 0, "the beat stopped with the room");
-      assert.equal(guest.getSnapshot().view, null, "and nothing was drawn behind it");
+      assert.equal(host.getSnapshot().busy, false, "and the controls came straight back");
     } finally {
       await server.close();
     }
@@ -1960,7 +1924,7 @@ describe("when the connection goes", () => {
 
     const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
     try {
-      const session = createSession(client, testClock());
+      const session = createSession(client);
 
       const nothing = await waitForSnapshot(session, "the failure", (s) => !s.connected);
       assert.equal(nothing.view, null, "there was never a room to be in");
@@ -1985,7 +1949,7 @@ describe("when the connection goes", () => {
     });
     const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
     try {
-      const session = createSession(client, testClock(), tokens.store);
+      const session = createSession(client, tokens.store);
       assert.equal(session.getSnapshot().resuming, true, "the claim is owed from the off");
 
       const nothing = await waitForSnapshot(session, "the failure", (s) => !s.connected);
@@ -2034,7 +1998,7 @@ describe("when the connection goes", () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
-      const first = await server.openSession(undefined, tokens.store);
+      const first = await server.openSession(tokens.store);
       first.createRoom("Ada");
       const lobby = await waitForSnapshot(
         first,
@@ -2067,7 +2031,7 @@ describe("when the connection goes", () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
-      const first = await server.openSession(undefined, tokens.store);
+      const first = await server.openSession(tokens.store);
       first.createRoom("Ada");
       await waitForSnapshot(first, "the room", (s) => s.view !== null && !s.busy);
 
@@ -2093,7 +2057,7 @@ describe("when the connection goes", () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
-      const session = await server.openSession(undefined, tokens.store);
+      const session = await server.openSession(tokens.store);
       session.createRoom("Ada");
       await waitForSnapshot(session, "the room", (s) => s.view !== null && !s.busy);
       assert.ok(tokens.stored(), "seated, so there is a seat to claim back");
@@ -2121,7 +2085,7 @@ describe("when the connection goes", () => {
     try {
       const [host, roomCode] = await hostARoom(server, "Ada");
       const tokens = fakeTokens();
-      const guest = await server.openSession(undefined, tokens.store);
+      const guest = await server.openSession(tokens.store);
       guest.joinRoom(roomCode.toLowerCase(), "Grace");
       await seated(guest, "the guest");
       assert.equal(
