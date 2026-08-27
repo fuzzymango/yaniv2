@@ -1,5 +1,13 @@
 # Slapdown's race is resolved by event order, not a timer — and is unwinnable against a bot
 
+> **Superseded in part by [ADR-0011](0011-bot-think-time-paces-the-server.md).** Bot think
+> time gives a human's client the round trip this ADR says it cannot have, so the bolded
+> claim below — "essentially never" — no longer holds: a human can now win a slapdown
+> against the bot seated behind them. Everything else here is unchanged: the race is still
+> resolved by event order alone, and bots still never slap down for themselves. Left as
+> written below, since the reasoning it records — what was believed, and why a timer was
+> deferred rather than added on the spot — is the point of keeping it.
+
 Slapdown (`docs/rules.md` §9) opens a window after a turn resolves: the acting player may
 discard their just-drawn card back onto the pile, but only before the next player has
 taken their turn. Two connections can race for that window, and the question was how the

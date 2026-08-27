@@ -183,6 +183,26 @@ connection that has already stuttered. All three parts are one
 thing to a player who has asked for less motion: the flight never starts, so the pop and the
 jolt never happen, and the card is simply on the pile where the position already put it.
 
+## Bot think time and the beat
+
+**Bot think time** is the pause a bot takes before its turn — uniform across bots and every
+turn alike, a round opening on a bot included. It is a fact about the server, not the table:
+what a bot waits out before deciding, not a duration anything is drawn over. See
+[ADR-0011](docs/adr/0011-bot-think-time-paces-the-server.md).
+
+**The beat** is the informal word for what a table of bots *reads as* because of it: a chain
+of turns landing one think time apart rather than all at once, so a run of moves looks played
+rather than announced. Where think time is the cause, the beat is what a player sees — the
+two stay distinct on purpose, since only one of them is a number anywhere in the code. The
+beat used to be produced twice, once server-side by the spacing between bot turns and again
+client-side by a queue that re-paced a burst back out to the same rhythm; the second was
+retired as redundant once the first existed to depend on (ADR-0011) — the beat itself is
+unchanged, only which side produces it.
+
+It is also what a **slapdown window** races inside of: the only reason a human's client has a
+round trip to win that race in at all is that the bot behind them is paused rather than
+moving in the same tick (ADR-0011, superseding part of [ADR-0005](docs/adr/0005-slapdown-race-by-event-order.md)).
+
 ## Slapdown and the slapdown window
 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it
