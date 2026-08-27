@@ -58,14 +58,15 @@ this costs `shared` none of its dependency-freedom. See `docs/adr/0002`.
 |---|---|
 | `state.ts` | `GameState`, `RoundState`, `Player`, `MoveHistoryEntry` — the domain model |
 | `config.ts` | The operational constants only — `BOT_NAMES` and `ROOM_CODE_*`. The rule constants live in `shared` |
-| `rng.ts`, `clock.ts` | The two ambient capabilities, injected rather than reached for: `Rng` + `mulberry32` (a seeded PRNG), and `Clock` + `systemClock` (the one thing scheduling a bot's turn needs from outside) |
+| `rng.ts`, `clock.ts` | The two ambient capabilities, injected rather than reached for: `Rng` + `mulberry32` (a seeded PRNG), and `Clock` + `systemClock` (the one thing scheduling needs from outside, and what `roomTimers.ts` is built on) |
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
 | `deck.ts` | `createDeck`, `shuffle`, `deal` — pure functions, no class |
 | `game.ts` | `updateSettings`, `startGame`, `takeTurn`, `callYaniv`, `slapDown`, `startNextRound`, `playAgain`, `removePlayer` — the pure state transitions |
 | `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained below |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success |
 | `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See "Bot architecture" below |
-| `botTurns.ts` | `playBotTurn` — takes the turn in front of a room when it belongs to a bot — and `createBotTurnRunner`, which waits out **bot think time** before each one and so walks a chain a move at a time. One pending run per room |
+| `roomTimers.ts` | `createRoomTimers` — the work a room has waiting on the clock, keyed by purpose (`TimerPurpose`). Set replaces, cancel is explicit, and `cancelRoom` calls off everything one room holds. Deliberately dumb: it schedules and cancels, and never decides *whether* to |
+| `botTurns.ts` | `playBotTurn` — takes the turn in front of a room when it belongs to a bot — and `createBotTurnRunner`, which waits out **bot think time** before each one and so walks a chain a move at a time. One pending run per room, as the registry's `botTurn` purpose |
 | `socketServer.ts` | `createSocketServer` — wires the event contract onto an `io` instance. Never calls `listen` |
 | `staticServer.ts` | `serveStatic` — serves the built client (`client/dist`) same-origin alongside Socket.io, per ADR-0003. Hand-rolled, no framework |
 | `index.ts` | The entrypoint. Binds a port and composes the above. `npm run serve` |
@@ -383,25 +384,24 @@ instance; it never calls `listen`, and `index.ts` does that and nothing else. Th
 so tests can stand up a real server on an ephemeral port (`listen(0)`) without duplicating
 handler logic — `socketServer.test.ts` drives real `socket.io-client` connections rather than a
 stub, since this layer's whole job *is* its wire behaviour, and observes server-side facts
-through the socket rather than by asking `RoomManager`. `options` carries the clock and the bot
-think time, both defaulted, so production construction is unchanged.
+through the socket rather than by asking `RoomManager`. `options` carries the clock every room
+timer is set on and the bot think time, both defaulted, so production construction is unchanged.
 
 ### Broadcasting: one send per socket, one broadcast per move
 
 `broadcastState(roomCode)` loops the room's sockets and emits `serializeStateForPlayer` per
 connection. Never `io.to(room).emit(state)` — raw state holds every hand and the draw pile
 order (see "Serialization is the security boundary"). A wire-level test asserts no card id
-outside the viewer's own hand and the face-up discard appears anywhere in a mid-round payload,
-and it has been mutation-tested by breaking the boundary on purpose.
+outside the viewer's own hand and the face-up discard reaches a mid-round payload.
 
-It is **deliberately synchronous**, walking `io.sockets.adapter.rooms` rather than the
-idiomatic `await io.in(room).fetchSockets()`: it must publish the position that stood when it
-was called — it is called from a bot's timer and from handlers racing one, so a promise
-resolving a tick later would publish whatever the room had become by then.
+It is **deliberately synchronous**, walking `io.sockets.adapter.rooms` rather than the idiomatic
+`await io.in(room).fetchSockets()`: it must publish the position that stood when it was called —
+it is called from a bot's timer and from handlers racing one, so a promise resolving a tick later
+would publish whatever the room had become by then.
 
-**Each bot action gets its own broadcast**, and they are **spaced out by the server**: five bot
-turns are five updates in seating order, one every `BOT_THINK_MS`, because each waits that long
-before it is decided (see below). The rhythm is a fact about when the moves *happen*.
+**Each bot action gets its own broadcast**, **spaced out by the server**: five bot turns are five
+updates in seating order, one every `BOT_THINK_MS`, because each waits that long before it is
+decided (below) — the rhythm is a fact about when the moves *happen*.
 
 Every in-game handler shares one `act(ack, transition)` helper: identify the caller from their
 session, apply, and on success ack, broadcast, then run any bot turns. A rejection acks the
@@ -410,14 +410,14 @@ error and publishes nothing, so a refused action costs the player nothing.
 ### Bots think before they move
 
 A bot's turn is **scheduled, not played in the tick that handed it over**: the runner in
-`botTurns.ts` waits out `BOT_THINK_MS` (1500ms) — uniform across bots and every turn alike, a
-round opening on a bot included — then decides from the position in front of it. This is the
-codebase's one timer, and two things follow as one fact from two ends: a table of bots reads as
-a game being played, and **a human can win the slapdown window their own turn opened**, which a
-same-tick bot turn made unreachable (ADR-0005) — there is no window timer, only the pause the
-next bot takes. **At most one pending run per room** keeps a timer nobody awaits tractable, and
-closing a room cancels its pending turn; the reasoning, and the alternatives the no-op guard
-rules out, are in `botTurns.ts`'s header. Asserted at the socket seam alone.
+`botTurns.ts` waits out `BOT_THINK_MS` (1500ms) — every bot and every turn alike, a round
+opening on a bot included — then decides from the position in front of it. Two things follow as
+one fact: a table of bots reads as a game being played, and **a human can win the slapdown window
+their own turn opened**, which a same-tick bot turn made unreachable (ADR-0005) — there is no
+window timer, only the pause the next bot takes. **At most one pending run per room** keeps a
+timer nobody awaits tractable, and is the registry's doing rather than `botTurns.ts`'s: every
+per-room timer is set on `roomTimers.ts`, so that guarantee is one purpose holding one timer, and
+closing a room is `cancelRoom` — naming no behaviour. Asserted at the socket seam alone.
 
 ### The turn is two taps, and draw targets are inert until legal
 

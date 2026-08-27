@@ -11,6 +11,8 @@ import type { Ack, ClientToServerEvents, ServerToClientEvents } from "@yaniv/sha
 import { Server, type Socket } from "socket.io";
 import type { BotTurnRunnerOptions } from "./botTurns.ts";
 import { createBotTurnRunner } from "./botTurns.ts";
+import type { Clock } from "./clock.ts";
+import { systemClock } from "./clock.ts";
 import {
   callYaniv,
   playAgain,
@@ -23,6 +25,7 @@ import {
 } from "./game.ts";
 import { err, ok, type Result } from "./result.ts";
 import type { RoomManager } from "./roomManager.ts";
+import { createRoomTimers } from "./roomTimers.ts";
 import type { Rng } from "./rng.ts";
 import { serializeStateForPlayer } from "./serialize.ts";
 import type { ActionResult, GameState } from "./state.ts";
@@ -65,11 +68,15 @@ type YanivSocket = Socket<
  * on and how long they think for, both defaulted, so production construction is one line
  * and unchanged.
  *
- * The runner's own options, rather than a copy of them — the two cannot drift, and there
- * is nothing else here a server is built with. A test seam first: a suite about something
- * other than timing switches the pause off, and one about timing drives the clock by hand.
+ * The runner's own options plus the clock every timer in the server is set on — the one
+ * thing owned here rather than by a behaviour, since the registry it builds is shared by
+ * all of them. A test seam first: a suite about something other than timing switches the
+ * pause off, and one about timing drives the clock by hand.
  */
-export type SocketServerOptions = BotTurnRunnerOptions;
+export interface SocketServerOptions extends BotTurnRunnerOptions {
+  /** Defaults to real time. A test drives one by hand instead. */
+  clock?: Clock;
+}
 
 /** Attach the game's event handlers to a new Socket.io server on `httpServer`. */
 export function createSocketServer(
@@ -78,7 +85,8 @@ export function createSocketServer(
   options: SocketServerOptions = {},
 ): YanivServer {
   const io: YanivServer = new Server(httpServer);
-  const botTurns = createBotTurnRunner(rooms, options);
+  const timers = createRoomTimers(options.clock ?? systemClock);
+  const botTurns = createBotTurnRunner(rooms, timers, options);
 
   /**
    * Send every connection in a room its own view of the current state.
@@ -158,11 +166,14 @@ export function createSocketServer(
    * else is told why rather than being left staring at a table that has stopped
    * answering. The closer hears it as their own ack instead.
    *
-   * A bot mid-think is abandoned along with the rest of it: a room that has ended stops
-   * doing things, and no entry is left behind under a code that may be issued again.
+   * Everything the room had waiting on the clock is abandoned along with the rest of it —
+   * a bot mid-think today, and whatever else is scheduled per room tomorrow: a room that
+   * has ended stops doing things, and no entry is left behind under a code that may be
+   * issued again. One call, so a new timer is covered by being in the registry rather
+   * than by anyone remembering to cancel it here.
    */
   function closeRoom(roomCode: string, reason: string, closer: YanivSocket): void {
-    botTurns.cancel(roomCode);
+    timers.cancelRoom(roomCode);
     for (const member of membersOf(roomCode)) {
       if (member.id !== closer.id) member.emit("roomClosed", reason);
       release(member, roomCode);
