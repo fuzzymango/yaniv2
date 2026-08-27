@@ -1064,6 +1064,11 @@ body {
   font-size: 0.9rem;
 }
 
+/* Whose turn it is, for the viewer's own row — the same ring an opponent's label wears. */
+.you--turn {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .player__name {
   flex: 1;
   /* Names are bounded server-side but not narrow; the counts keep their place. */

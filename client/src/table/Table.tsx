@@ -542,7 +542,7 @@ export function Table({
           up and that number is there to be read off them, so the row says where the round
           left this player instead, in the words every seat's label uses.
         */}
-        <footer className="you">
+        <footer className={`you ${live && yourTurn ? "you--turn" : ""}`}>
           <span className="player__name">{view.you.name}</span>
           {result !== null && yourRound !== null ? (
             <ScoredDetail player={yourRound} result={result} />
