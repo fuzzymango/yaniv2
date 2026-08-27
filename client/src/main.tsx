@@ -12,7 +12,6 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { io } from "socket.io-client";
 import { App } from "./App.tsx";
-import { systemClock } from "./pacing.ts";
 import { createSession } from "./session.ts";
 import { seatStore } from "./tokens.ts";
 import "./styles.css";
@@ -26,7 +25,7 @@ import "./styles.css";
  * makes a reload cost nothing — the session claims its seat back from whatever it finds
  * written down, before the page is ever the main menu.
  */
-const session = createSession(io(), systemClock, seatStore(window));
+const session = createSession(io(), seatStore(window));
 
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html is missing its root element");

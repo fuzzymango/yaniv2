@@ -194,17 +194,19 @@ decisions, none of them about the rules of anything:
   landing nothing waits at**: the fan there stands for a count the position has already
   settled, so there is no card at the end of that journey to be drawn twice — and a back too
   few would misstate the count its own label states in words.
-- **`FLIGHT_MS` is nobody's sibling but `PACE_MS`'s.** 300ms against a 700ms beat: how long
-  a card takes to cross and how long a position stays are separate questions, tied only by
-  the flight having to be over inside the beat, with room to read the settled table.
+- **`FLIGHT_MS` is the top of the chain and derived from nothing.** 300ms, against the
+  seconds a bot pauses before its move: what keeps a flight from being replaced before it
+  finishes is the server's think time, not a client-side beat (issue #135, which retired the
+  one there was). A network that bunches two broadcasts can cut a flight short — cosmetic,
+  accepted, and only on a connection that has already stuttered.
 - **A slapdown is the same journey, played harder** (issue #95). One card, at twice the
   speed, on an accelerating curve where a discard decelerates, landing with a pop past its own
   size and a jolt across the whole table. Nothing in it is a second animation: the pop is a
   keyframe on the ghost already flying, and the jolt is a class the flight's own settling puts
   on the element every control is already inside — a transform, so hit-testing goes with it
   and a tap during the jolt lands where it looks like it lands.
-- **Below the beat, the durations are one chain** (`timing.ts`): `SLAP_MS` a fraction of
-  `FLIGHT_MS`, and the jolt a fraction of `SLAP_MS`. A slapdown is *sharper than a discard*,
+- **The durations below it are one chain** (`timing.ts`): `SLAP_MS` a fraction of `FLIGHT_MS`,
+  and the jolt a fraction of `SLAP_MS`. A slapdown is *sharper than a discard*,
   which is a ratio and not a speed — tuned as a number of its own it would be right until the
   next time the flight changed. The chain is plain arithmetic in a module of its own precisely
   so a test with no DOM near it can assert the derivations hold.
@@ -227,8 +229,8 @@ Every move at the table flies, whoever took it: the viewer's own between their h
 felt (issues #72, #73), and everybody else's between their seat and it (issue #74) — which is
 what answers the complaint this started from, since "did they draw from the deck or the pile?"
 is a question about somebody else's turn. Whose move it is decides only which boxes are asked
-for; nothing downstream of `ghosts.ts` knows the difference, and a chain of bot turns is
-already one position per beat, so each move flies inside its own (`pacing.ts`).
+for; nothing downstream of `ghosts.ts` knows the difference, and a chain of bot turns already
+arrives a think time apart, so each move flies inside its own.
 
 ## And the round before that one is read, not watched
 

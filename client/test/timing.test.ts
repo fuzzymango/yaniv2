@@ -1,19 +1,14 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { FLIGHT_MS, SHAKE_MS, SLAP_MS } from "../src/timing.ts";
-import { PACE_MS } from "../src/pacing.ts";
 
 /*
  * The one thing worth asserting about a set of durations: that each is still a fraction of
  * the one above it. Nothing here checks a number — a tuned value is a judgement and not a
  * fact — but a constant that stopped being derived would go unnoticed until somebody changed
- * the beat and only half the table sped up (issue #95).
+ * the flight and only half the table sped up (issue #95).
  */
 describe("the timing chain", () => {
-  it("keeps a flight comfortably inside the beat a position is drawn on", () => {
-    assert.ok(FLIGHT_MS * 2 < PACE_MS);
-  });
-
   it("makes a slapdown sharper than an ordinary discard", () => {
     assert.ok(SLAP_MS < FLIGHT_MS);
   });

@@ -217,8 +217,8 @@ automatically as part of the build phase.
 
 Persistence (rooms are in-memory, so a restart or redeploy drops games in progress), and any
 policy for a seat whose player never comes back. A match plays end to end in the browser now:
-create or join, set the room up, deal, take turns, watch a paced run of bot turns, call
-Yaniv, and finish on the standings with another match one tap away. Reconnect is whole — a
+create or join, set the room up, deal, take turns, watch a run of bot turns a move at a time,
+call Yaniv, and finish on the standings with another match one tap away. Reconnect is whole — a
 drop leaves the room and the seat alone, and the page presents the seat's token and picks up
 where it left off, whether the socket came back or the whole tab did — and the host can end a
 room outright from any phase. What is missing is what a table does about a player who is

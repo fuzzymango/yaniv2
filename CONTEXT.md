@@ -132,9 +132,9 @@ open at all are the client's alone; none of them is a fact about the round.
 
 One move as something to *watch*: the cards leaving a hand for the discard pile, and the card
 coming back the other way from wherever it was drawn (issue #69). A flight belongs to the
-move that produced a position, not to the position — it is over in well under the beat the
-next move waits out, and a table showing the same position a second later is showing nothing
-in flight at all.
+move that produced a position, not to the position — it is over in well under the think time
+the next move waits out, and a table showing the same position a second later is showing
+nothing in flight at all.
 
 Which is why the client treats it as an **event** rather than table state: it is decided once,
 as a position reaches the screen (`flightFrom` in `client/src/flight.ts`, published as
@@ -165,8 +165,9 @@ off the **deck** is drawn as a back, and has no box of its own to have come from
 where its journey starts, and it turns over at neither end, because the hand it lands in is
 already showing its face; a ghost with no face at all, flying into somebody else's hand, is
 drawn the same way and named by the seat it is going to. The flight is over in `FLIGHT_MS`,
-well inside the pacer's beat, so a chain of moves is one flight per beat. Every move at the
-table flies, whoever took it (issues #72, #73, #74); `docs/client-table.md` has the decisions.
+well inside the pause a bot takes before its move, so a chain of turns is one flight apiece.
+Every move at the table flies, whoever took it (issues #72, #73, #74);
+`docs/client-table.md` has the decisions.
 
 A **slapdown flies as its own thing** (issue #95), and how it flies is most of what says it is
 not a turn: the one card crosses in `SLAP_MS` rather than `FLIGHT_MS`, on an accelerating curve
@@ -174,8 +175,11 @@ where a discard decelerates, lands with a brief **pop** past its own size, and *
 whole table** behind it. Those durations are a **chain, not a set of numbers**
 (`client/src/timing.ts`): the slap is a fraction of the flight and the jolt a fraction of the
 slap, so the table is retuned by editing one value and cannot end up half fast and half slow.
-The chain hangs off the pacer's beat without being derived from it — a flight has to finish
-inside a beat, and that is the whole of what the two owe each other. All three parts are one
+The chain is derived from nothing outside itself: what keeps a flight from being replaced
+before it finishes is the **bot think time** the server spaces moves out by, which is several
+times a flight and is a fact about the game rather than about the animation (issue #135). A
+network that bunches two broadcasts can cut a flight short — cosmetic, accepted, and only on a
+connection that has already stuttered. All three parts are one
 thing to a player who has asked for less motion: the flight never starts, so the pop and the
 jolt never happen, and the card is simply on the pile where the position already put it.
 
