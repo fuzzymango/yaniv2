@@ -84,6 +84,19 @@ function selfViewOf(
 }
 
 /**
+ * Where everybody sits: the roster in its own order, unfiltered (issue #144).
+ *
+ * The whole of it, out and departed seats included, and the same list for every viewer —
+ * a table that is being drawn round the felt has a place for each of them, and dropping a
+ * seat here is what would slide everybody else along it. `inMatch` is turn order's filter
+ * and not this one; the two lists were equal until elimination made them different
+ * questions ("Turn order vs. seating" in CONTEXT.md).
+ */
+function seatingOf(state: GameState): string[] {
+  return state.players.map((p) => p.id);
+}
+
+/**
  * What one viewer may be told about a drawn card: the card itself, or nothing.
  *
  * Whose turn it was and where they drew from are public — a table can watch both happen.
@@ -187,6 +200,7 @@ export function serializeStateForPlayer(
       settings: state.settings,
       you,
       opponents,
+      seating: seatingOf(state),
       // Every seat, a lobby being a table nobody has gone out of yet — but read off the
       // same rule the dealt rounds' turn order is built by, rather than off the roster.
       turnOrder: state.players.filter(inMatch).map((p) => p.id),
@@ -237,6 +251,7 @@ export function serializeStateForPlayer(
     settings: state.settings,
     you,
     opponents,
+    seating: seatingOf(state),
     turnOrder: round.turnOrder,
     currentTurnPlayerId: state.phase === "playing" ? round.currentTurnPlayerId : null,
     drawPileCount: round.drawPile.length,

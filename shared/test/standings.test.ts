@@ -37,6 +37,9 @@ function finishedMatch(seated: Seat[]): PlayerGameView {
     settings: { handSize: 5, yanivThreshold: 7, maxScore: 100, botCount: 0 },
     you: { ...you, ...standing(you), spectating: false, hand: [], slapdownEligible: false },
     opponents: opponents.map((p) => ({ ...p, ...standing(p), handSize: 0 })),
+    // Every seat the match was played by, in the order they sat in — the roster, which the
+    // standings are read off and which outlasts everyone going out of it.
+    seating: seated.map((p) => p.id),
     // Only the players still in the match, which at `gameEnd` is the one who won it.
     turnOrder: seated.filter((p) => p.outInRound === undefined).map((p) => p.id),
     currentTurnPlayerId: null,

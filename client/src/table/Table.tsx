@@ -17,10 +17,11 @@
  * itself or has replaced. The felt keeps rendering: the deck count, the last discard and the
  * line saying how the final round ended are what the panel is floating over.
  *
- * The seats are placed by the same calculation in both phases — the live roster, sorted by
- * `byRelativeSeat` so the sweep always starts from the next player after the viewer, not
- * absolute turn order — and the round's own record is looked up against whoever is already
- * sitting there. Two placements could disagree; one cannot.
+ * The seats are placed by the same calculation in both phases — the roster in its own order,
+ * sorted by `byRelativeSeat` so the sweep always starts one place along from the viewer's own
+ * seat — and the round's own record is looked up against whoever is already sitting there.
+ * Two placements could disagree; one cannot. The roster and never turn order (issue #144):
+ * a seat holds its place as players go out, and a seat that is out is drawn dim in it.
  *
  * A turn is two taps and no button. Cards are tapped to build a selection, and the next
  * tap — on the deck, or on an end of the face-up discard — *is* the commit: the selection
@@ -103,12 +104,12 @@ interface TableProps {
 function ScoredDetail({
   player,
   result,
-  isOut,
+  wentOut,
 }: {
   player: PlayerRoundResultView;
   result: RoundResultView;
   /** Whether this round is the one that took them out of the match — the `OUT` tag. */
-  isOut: boolean;
+  wentOut: boolean;
 }) {
   return (
     <>
@@ -124,7 +125,7 @@ function ScoredDetail({
       {player.playerId === result.callerId && <span className="seat__mark">yaniv</span>}
       {player.playerId === result.assaferId && <span className="seat__mark">assaf</span>}
       {player.milestoneReduction > 0 && <span className="seat__mark">milestone</span>}
-      {isOut && <span className="seat__mark seat__mark--out">out</span>}
+      {wentOut && <span className="seat__mark seat__mark--out">out</span>}
       <span className="player__score">
         {scoreLabel(player.scoreAfter, player.delta, player.milestoneReduction)}
       </span>
@@ -265,6 +266,18 @@ export function Table({
     result !== null && player.outInRound === result.roundNumber;
 
   /**
+   * Whether the match has gone on without this seat, as of the position on the screen
+   * (issue #144) — what darkens it, where it has sat all match.
+   *
+   * Out, *and* out before the round being shown: the round that took somebody out is scored
+   * with them in it, and their hand and their score in it are exactly what a scored table is
+   * for reading. So the seat wears the news that round (`wentOut`, the `OUT` tag) and is dim
+   * from the next deal on, which is the first position they are genuinely not in.
+   */
+  const isOut = (player: SelfView | OpponentView): boolean =>
+    player.outInRound !== null && !wentOut(player);
+
+  /**
    * One opponent in their zone, in whichever of the two shapes the phase calls for — the
    * fan they were holding, or the same hand face up in the same seat.
    *
@@ -274,13 +287,13 @@ export function Table({
    */
   const seatFor = (zone: Zone, opponent: OpponentView) => {
     const row = scored(opponent.id);
-    const isOut = wentOut(opponent);
     if (result === null || row === null) {
       return (
         <OpponentSeat
           zone={zone}
           opponent={opponent}
           isTurn={opponent.id === view.currentTurnPlayerId}
+          isOut={isOut(opponent)}
           key={opponent.id}
         />
       );
@@ -289,8 +302,9 @@ export function Table({
       <Seat
         zone={zone}
         name={opponent.name}
-        isOut={isOut}
-        detail={<ScoredDetail player={row} result={result} isOut={isOut} />}
+        isOut={isOut(opponent)}
+        wentOut={wentOut(opponent)}
+        detail={<ScoredDetail player={row} result={result} wentOut={wentOut(opponent)} />}
         key={opponent.id}
       >
         <CascadeReveal cards={row.hand} zone={zone} />
@@ -392,10 +406,11 @@ export function Table({
           they are holding — so a hand shrinking or growing is something to see rather than a
           number to notice.
 
-          Which side anyone is on is `seatZones`, off the server's turn order rebased on the
-          viewer's own seat (`byRelativeSeat`), so the sweep always starts with the next
-          player to act — and off the same list once the round is scored, where the fans
-          turn face up where they already are.
+          Which side anyone is on is `seatZones`, off the room's roster rebased on the viewer's
+          own seat (`byRelativeSeat`), so the sweep always starts one place along from them —
+          and off the same list once the round is scored, where the fans turn face up where
+          they already are. A seat the match has gone on without keeps its place there and is
+          drawn dim, so the table never rearranges itself around whoever is left (issue #144).
         */}
         <div className="table__seats">
           {ZONES.map((zone) => (
@@ -620,11 +635,13 @@ export function Table({
           left this player instead, in the words every seat's label uses.
         */}
         <footer
-          className={`you ${live && yourTurn ? "you--turn" : ""} ${youWentOut ? "you--out" : ""}`}
+          className={`you ${live && yourTurn ? "you--turn" : ""} ${
+            youWentOut ? "you--went-out" : ""
+          }`}
         >
           <span className="player__name">{view.you.name}</span>
           {result !== null && yourRound !== null ? (
-            <ScoredDetail player={yourRound} result={result} isOut={youWentOut} />
+            <ScoredDetail player={yourRound} result={result} wentOut={youWentOut} />
           ) : (
             <>
               {/*

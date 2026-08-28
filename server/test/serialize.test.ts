@@ -719,6 +719,34 @@ describe("serializeStateForPlayer — out of the match", () => {
       "a seat that is out is drawn where it was sitting, not dropped",
     );
   });
+
+  /**
+   * Seating is the roster's own order and turn order is who is still playing (issue #144).
+   * The two were one list until elimination separated them, so the pair is asserted at the
+   * same table: whatever `turnOrder` drops, `seating` keeps, in the place it always held.
+   */
+  it("seats every player the room has, out or gone, in roster order", () => {
+    assert.deepEqual(serializeStateForPlayer(table(), "p1").seating, ["p1", "p2", "p3"]);
+  });
+
+  it("seats the same table whoever is looking at it, viewer included", () => {
+    for (const viewer of ["p1", "p2", "p3"]) {
+      assert.deepEqual(
+        serializeStateForPlayer(table(), viewer).seating,
+        ["p1", "p2", "p3"],
+        `seating read by ${viewer}`,
+      );
+    }
+  });
+
+  it("holds exactly the seats the roster on the wire does", () => {
+    const view = serializeStateForPlayer(table(), "p1");
+
+    assert.deepEqual(
+      [...view.seating].sort(),
+      [view.you.id, ...view.opponents.map((p) => p.id)].sort(),
+    );
+  });
 });
 
 /**
@@ -883,6 +911,7 @@ describe("serializeStateForPlayer — lobby", () => {
     assert.equal(view.drawPileCount, 0);
     assert.deepEqual(view.lastDiscard, []);
     assert.deepEqual(view.turnOrder, ["p1", "p2"]);
+    assert.deepEqual(view.seating, ["p1", "p2"], "a lobby seats the roster it has");
   });
 });
 

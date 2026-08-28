@@ -210,10 +210,23 @@ export interface PlayerGameView {
   you: SelfView;
   opponents: OpponentView[];
   /**
+   * Where everybody sits, by player id: the room's roster in its own order, the viewer
+   * included and every seat that has gone out with them. Append-only from the first deal,
+   * so a seat's place in this list is fixed for the life of the room and a table drawn
+   * off it does not rearrange itself around whoever is left (issue #144).
+   *
+   * A list beside `turnOrder` rather than the roster's own order recovered from `you` and
+   * `opponents`: the viewer is lifted out of `opponents`, so the roster as sent has a hole
+   * in it exactly where the seat a viewer-relative sweep has to start from would be.
+   *
+   * Holds every id in `you` and `opponents` and no others. See "Turn order vs. seating"
+   * in CONTEXT.md.
+   */
+  seating: string[];
+  /**
    * The order play moves in, by player id, including the viewer while they are still in
-   * the match — and only the players who are. Not seating: a table is drawn off the
-   * roster (`you` and `opponents`), which holds its order as players go out, so a seat
-   * keeps its place on the felt. See "Turn order vs. seating" in CONTEXT.md.
+   * the match — and only the players who are. Not seating: `seating` above is, and it
+   * keeps the seats this list drops. See "Turn order vs. seating" in CONTEXT.md.
    */
   turnOrder: string[];
 

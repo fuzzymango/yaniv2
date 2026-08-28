@@ -37,7 +37,7 @@ a `test/` of `node:test` suites beside its `src/`: one file per module, plus the
 | File | Contents |
 |---|---|
 | `cards.ts` | `Card`/`Suit`/`Rank`, rank ordering, `rankToValue` (the scoring table, `docs/rules.md` §1), and `sortHand`/`compareCards` (display order only — see below) |
-| `views.ts` | `PlayerGameView` and friends — what a client actually receives, the round's `moveHistory` and each seat's `MatchStanding` included. `SelfView` is a tagged union (`spectating`): the playing variant holds the hand and `slapdownEligible`, the spectating one has neither field at all |
+| `views.ts` | `PlayerGameView` and friends — what a client actually receives, the round's `moveHistory` and each seat's `MatchStanding` included. `seating` (the roster's order, every seat) and `turnOrder` (only the players still in the match) are two lists since #144, because elimination made them two questions. `SelfView` is a tagged union (`spectating`): the playing variant holds the hand and `slapdownEligible`, the spectating one has neither field at all |
 | `errors.ts` | `GameErrorCode` union |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and the client |
@@ -117,7 +117,7 @@ two: `table/Seat.tsx` (`CardFan` and `CascadeReveal` size from one `seatFootprin
 | `flight.ts` | `flightFrom` — the position on the screen and the one arriving in, and either the move between them or nothing. Two facts watched, `lastMove` and `lastSlapdown`, and at most one changes per arrival; `CardFlight` is tagged by which (`TurnFlight`: mover, discarded cards, draw source, drawn card where the viewer may know it — `SlapdownFlight`: mover and the one card, never redacted). Pure and total, `turn.ts`'s counterpart on the way in |
 | `ghosts.ts` | `ghostsFor` — a move and the boxes on the screen in, the cards actually in the air out (`Ghost`: what it answers to, the face to draw or none, from where, to where and into which place), dropping whatever the screen cannot place at both ends. Branches on the flight's tag — a slapdown is one card out of a hand or a seat onto the pile and nothing back, in the same box vocabulary. `DECK_BOX` and `seatBox` are the boxes that are not cards' — the deck a drawn card starts from, and the seat somebody else's hand is one place at, both ends the client is never told a card id for |
 | `flip.ts` | `invert` and `transformOf` — where a card has landed and where it came from, as the transform that puts it back. The arithmetic of the flight, and all of it: measured boxes in, one CSS transform out. Pure and total |
-| `seating.ts` | `bySeat` — the absolute `turnOrder` comparator, used by the lobby's roster listing — and `byRelativeSeat`, the same ordering rebased on the viewer's own seat (the next player to act sorts first), used by the table so the zone sweep reads correctly from whoever is looking rather than only from whoever is first in `turnOrder`. `seatZones` deals whichever ordered list it is given round the three sides of the felt (`ZONES`: `left`/`top`/`right`) in **contiguous runs**, `left` alone reversed, so the sweep reads in turn order at a doubled zone too (`right` never doubles, since 6 players is 5 opponents) — why, in `docs/client-table.md`. One placement for the table in both its phases: a scored round is seated by the same call off the same roster, so the two cannot disagree. Generic over the opponent, since seating is a fact about a list's order and nothing about what is in it |
+| `seating.ts` | `bySeat` — the absolute `view.seating` comparator, used by the lobby's roster listing — and `byRelativeSeat`, the same ordering rebased on the viewer's own seat (whoever sits one place along sorts first), used by the table so the zone sweep reads correctly from whoever is looking rather than only from whoever sits first. Both read the **roster** and never `turnOrder` (#144): turn order shrinks as players are eliminated, and a table sorted by it would slide everyone left one seat each time somebody went out. `seatZones` deals whichever ordered list it is given round the three sides of the felt (`ZONES`: `left`/`top`/`right`) in **contiguous runs**, `left` alone reversed, so the sweep reads in turn order at a doubled zone too (`right` never doubles, since 6 players is 5 opponents) — why, in `docs/client-table.md`. One placement for the table in both its phases: a scored round is seated by the same call off the same roster, so the two cannot disagree. Generic over the opponent, since seating is a fact about a list's order and nothing about what is in it |
 | `fan.ts` | The geometry of a hand held at a seat, in two shapes. Arced during play: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Cascaded once it is revealed: `cascadeOffset`, `cascadeFootprint`, `ZONE_CASCADE` (down the sides, across the top) and the `CARD_INDEX_STRIP`/`CASCADE_STEP` pair that keeps a covered card readable. And `seatFootprint` over both — the one box a seat reserves whichever shape is in it, so a round being scored never resizes a seat. Distances in card widths, so the CSS scales it |
 | `score.ts` | What a scored round says: `scoreLabel` (the round as one checkable equation — where the player started, what it was net worth once any milestone reduction is folded in, and the total it left them on; every seat's label and the viewer's own footer, so one round cannot read two ways) and `roundOutcome` (the call and the verdict as one sentence, addressed to the viewer, named off the round's own record). Pure and total |
 | `settings.ts` | What only a settings *form* knows: `wholeNumber` (a field part-way through being typed) and `sameSettings` (has the room caught up?). Pure and total, `turn.ts`'s counterpart — what a room may be set to is asked of `shared` |
@@ -470,11 +470,11 @@ The session says *what* moved (`flight.ts`), `ghosts.ts` which of it the screen 
 which way up, and `CardsInFlight.tsx` measures where and closes the difference (FLIP,
 `flip.ts`). Every move flies both ways, whoever took it, with the wire's redaction passed
 through, and **a slapdown flies as its own shape** (#95). Nothing waits on a flight, reduced
-motion skips it, and it is scoped to `playing`. A player the match has gone on without watches
-that same table, their hand slot a bar saying so (#143).
+motion skips it, and it is scoped to `playing`. A spectator watches that same table with a bar
+where their hand was (#143), and an out seat keeps its place on the felt, darkened (#144).
 
-Every decision behind the geometry, the flight and the bar is in **`docs/client-table.md`**
-(#56, #58, #59, #60, #78, #130, #143); the code is `fan.ts`, `score.ts`, `seating.ts`, `table/`.
+Every decision behind the geometry, the flight, the bar and the dim is in **`docs/client-table.md`**
+(#56, #58-#60, #78, #130, #143, #144); the code is `fan.ts`, `score.ts`, `seating.ts`, `table/`.
 
 ### Settings are edited in one place and shown in another
 
@@ -665,8 +665,8 @@ importing a Node builtin is a typecheck error.
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **Drawing a seat that is out.** A spectator has their own view shape and bar (#143); no screen
-  dims somebody *else's* out seat, marks it away, or lets a player leave mid-round — #144-#147.
+- **The rest of drawing a seat that is out.** A spectator has their own bar (#143) and an out
+  seat is dimmed in place (#144); nothing marks a seat away or lets one leave mid-round, #145-#147.
 - **What a mid-round seat does while its player is gone.** Reconnect is whole, so a reload
   costs a round trip; but nothing pauses, times out, bot-plays or frees a seat whose player
   never comes back, and `Player` has no `connected` field for a screen to say so with.

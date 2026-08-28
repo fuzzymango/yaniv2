@@ -1,11 +1,18 @@
 /**
  * Where everybody is sitting, for the screens that list them.
  *
- * `turnOrder` is the seating order, so a list sorted by it reads the same way round on
- * every player's screen — which matters as soon as two people are describing the same
- * table to each other. Screens sort *by* it rather than listing *from* it, so every row
- * is a player the view actually carries: there is no id here that could be rendered raw
- * for want of a name.
+ * `view.seating` is the seating order — the room's roster, which is append-only once a
+ * match has been dealt — so a list sorted by it reads the same way round on every player's
+ * screen, which matters as soon as two people are describing the same table to each other.
+ *
+ * **Not `turnOrder`**, which is the order play moves in and holds only the players still in
+ * the match (issue #144). The two were the same list until elimination, and a table sorted
+ * by turn order would slide every remaining player one seat along each time somebody was
+ * knocked out — a rearrangement nobody made, in the middle of a match. See "Turn order vs.
+ * seating" in CONTEXT.md.
+ *
+ * Screens sort *by* the order rather than listing *from* it, so every row is a player the
+ * view actually carries: there is no id here that could be rendered raw for want of a name.
  */
 
 import type { PlayerGameView } from "@yaniv/shared";
@@ -13,24 +20,28 @@ import type { PlayerGameView } from "@yaniv/shared";
 export function bySeat(
   view: PlayerGameView,
 ): (a: { id: string }, b: { id: string }) => number {
-  return (a, b) => view.turnOrder.indexOf(a.id) - view.turnOrder.indexOf(b.id);
+  return (a, b) => view.seating.indexOf(a.id) - view.seating.indexOf(b.id);
 }
 
 /**
- * `bySeat`, but relative to the viewer rather than absolute: the next player to act after
- * them sorts first, wrapping round to whoever sits just before them last. `bySeat` reads
- * the same way round on every screen, but only *starting from* the same seat on every
+ * `bySeat`, but relative to the viewer rather than absolute: whoever sits one place along
+ * from them sorts first, wrapping round to whoever sits just before them last. `bySeat`
+ * reads the same way round on every screen, but only *starting from* the same seat on every
  * screen — for the table, where the viewer's own seat is never one of the zones being
  * filled, that seat is nowhere to anchor from, so absolute position reads correctly only
- * for whoever happens to be first in `turnOrder` and scrambles for everyone else.
+ * for whoever happens to sit first in the room and scrambles for everyone else.
+ *
+ * The anchor is the viewer's own seat and not the next player to act, which is why this
+ * still holds for a viewer the match has gone on without: a spectator is in `seating` like
+ * everybody else, and has no place in `turnOrder` to be anchored from.
  */
 export function byRelativeSeat(
   view: PlayerGameView,
 ): (a: { id: string }, b: { id: string }) => number {
-  const { turnOrder } = view;
-  const you = turnOrder.indexOf(view.you.id);
+  const { seating } = view;
+  const you = seating.indexOf(view.you.id);
   const relative = (id: string): number =>
-    (turnOrder.indexOf(id) - you + turnOrder.length) % turnOrder.length;
+    (seating.indexOf(id) - you + seating.length) % seating.length;
   return (a, b) => relative(a.id) - relative(b.id);
 }
 

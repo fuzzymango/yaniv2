@@ -924,8 +924,23 @@ body {
  * in the colour the news actually is, and on the same one upright row (issue #142). The two
  * cannot be on at once: a scored round has no turn to be waiting on.
  */
-.table-seat--out .table-seat__label {
+.table-seat--went-out .table-seat__label {
   box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+/*
+ * A seat the match has gone on without (issue #144): still exactly where it was, and dimmed
+ * — the table does not close up around whoever is left, so a seat means one player for the
+ * life of the room and a glance says who is still in.
+ *
+ * The whole seat rather than its label, which is the opposite of the ring above and is the
+ * difference between news and a standing fact: the ring is a thing that just happened to one
+ * row, this is the seat entire receding — cards, name and score together — behind the ones
+ * still being played. Opacity alone, so nothing moves and no card in flight has to be told
+ * about it.
+ */
+.table-seat--out {
+  opacity: 0.38;
 }
 
 /*
@@ -1098,8 +1113,12 @@ body {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-/* And the round that took them out, in the same place a seat's is (issue #142). */
-.you--out {
+/*
+ * And the round that took them out, in the same place a seat's is (issue #142). The viewer's
+ * own row is never dimmed the way an out seat is (issue #144): it is the row they are reading
+ * the table from, and the bar where their hand was already says they are out in words.
+ */
+.you--went-out {
   box-shadow: inset 0 0 0 1px var(--danger);
 }
 

@@ -65,8 +65,10 @@ function renderLobby(view: PlayerGameView): string[] {
   const byId = new Map([view.you, ...view.opponents].map((p) => [p.id, p]));
   const lines = [`\n  ${bold(`room ${view.roomCode}`)}`];
 
-  // Seating order, so every player's screen lists the table the same way round.
-  for (const id of view.turnOrder) {
+  // Seating order, so every player's screen lists the table the same way round. The
+  // roster and not turn order, as the browser client's roster listing is (issue #144) —
+  // the two are equal in a lobby nobody has gone out of, and this is what it means.
+  for (const id of view.seating) {
     const name = byId.get(id)?.name ?? id;
     lines.push(`  ${seatName(name, id, view.you.id, view.hostId)}`);
   }

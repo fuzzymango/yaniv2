@@ -66,20 +66,38 @@ interface SeatProps {
   /** Whether the table is waiting on this player — the whole seat says so, not one row of it. */
   isTurn?: boolean;
   /**
-   * Whether the round just scored took this player out of the match (docs/rules.md §7).
-   * Marks the label, and only at round end — a seat drawn mid-round is a seat still in it.
+   * Whether the match has gone on without this player (docs/rules.md §7, issue #144). The
+   * seat stays exactly where it is and is drawn darkened, in every phase and whoever is
+   * behind it — a bot's seat dims like anybody else's, so a glance says who is left.
    */
   isOut?: boolean;
+  /**
+   * Whether the round just scored is the one that took them out. The news rather than the
+   * standing: it marks the label at round end, where `isOut` says nothing yet, because the
+   * round on the screen is still theirs and their hand in it is there to be read.
+   */
+  wentOut?: boolean;
   /** What else the label says about them: their score, their count, what a round cost them. */
   detail: ReactNode;
   /** Their cards, however the screen using this draws them. */
   children: ReactNode;
 }
 
-export function Seat({ zone, name, isTurn = false, isOut = false, detail, children }: SeatProps) {
-  // The two things a seat's label can be ringed for, and it is never both: a scored round
-  // has no turn to be waiting on.
-  const state = `${isTurn ? " table-seat--turn" : ""}${isOut ? " table-seat--out" : ""}`;
+export function Seat({
+  zone,
+  name,
+  isTurn = false,
+  isOut = false,
+  wentOut = false,
+  detail,
+  children,
+}: SeatProps) {
+  // What a seat can be other than ordinary, and no two of them are ever on at once: a
+  // scored round has no turn to be waiting on, and a seat the round just took out is not
+  // dimmed until the next one is dealt.
+  const state = `${isTurn ? " table-seat--turn" : ""}${isOut ? " table-seat--out" : ""}${
+    wentOut ? " table-seat--went-out" : ""
+  }`;
   return (
     <div className={`table-seat table-seat--${zone}${state}`}>
       {children}
@@ -263,21 +281,28 @@ export function CascadeReveal({ cards, zone }: { cards: readonly Card[]; zone: Z
  * The count is in words as well as in cards because most of the fan is off the edge of the
  * screen by design — the fan says *a hand*, and exactly how big it is stays a number worth
  * reading rather than counting, which is what the text row this replaces always said.
+ *
+ * A seat the match has gone on without is this same seat, darkened where it has always sat
+ * (issue #144): the round was dealt without them, so the fan they are holding is empty and
+ * the count says zero — which is what being out looks like, not a case to draw differently.
  */
 export function OpponentSeat({
   zone,
   opponent,
   isTurn,
+  isOut,
 }: {
   zone: Zone;
   opponent: OpponentView;
   isTurn: boolean;
+  isOut: boolean;
 }) {
   return (
     <Seat
       zone={zone}
       name={opponent.name}
       isTurn={isTurn}
+      isOut={isOut}
       detail={
         <>
           <span className="player__cards">{opponent.handSize} cards</span>

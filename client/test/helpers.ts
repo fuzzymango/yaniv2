@@ -105,6 +105,7 @@ export function viewOf(
     opponents: [
       { id: "p2", name: "Grace", score: 0, outInRound: null, departed: false, handSize: 5 },
     ],
+    seating: ["p1", "p2"],
     turnOrder: ["p1", "p2"],
     currentTurnPlayerId: overrides.currentTurnPlayerId ?? "p1",
     drawPileCount: 30,

@@ -282,8 +282,14 @@ always distinct:
 
 Which is why a client seats off the roster and not off turn order: a table redrawn from
 turn order would shuffle every remaining player one place along each time somebody was
-knocked out. Turn order still decides who the *next* player to act is, which is what a
-viewer-relative sweep of the seats reads from.
+knocked out. Turn order still decides who acts next, and nothing else.
+
+Both lists are on the wire, side by side — `seating` and `turnOrder` — because a client
+cannot recover the first from the roster it is sent: the viewer is lifted out of
+`opponents` into `you`, so the roster as it arrives has a hole in it exactly where the seat
+a viewer-relative sweep anchors on would be. That sweep anchors on the viewer's **own**
+seat rather than on the next player to act, which is also what keeps it meaningful for a
+spectator: they are still seated, and no longer in turn order at all.
 
 ## Standings
 

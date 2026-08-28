@@ -102,9 +102,9 @@ describe("seatZones", () => {
 });
 
 describe("byRelativeSeat", () => {
-  /** Only `turnOrder` and `you.id` are read — the rest of a view is never looked at. */
-  const view = (turnOrder: string[], youId: string): PlayerGameView =>
-    ({ turnOrder, you: { id: youId } }) as PlayerGameView;
+  /** Only `seating` and `you.id` are read — the rest of a view is never looked at. */
+  const view = (seating: string[], youId: string, turnOrder = seating): PlayerGameView =>
+    ({ seating, turnOrder, you: { id: youId } }) as PlayerGameView;
 
   const seat = (id: string) => ({ id });
 
@@ -116,42 +116,67 @@ describe("byRelativeSeat", () => {
     );
   });
 
-  it("starts from the next player to act after the viewer, wrapping round", () => {
-    const turnOrder = ["p1", "p2", "p3", "p4"];
+  it("starts from the seat after the viewer's own, wrapping round", () => {
+    const seating = ["p1", "p2", "p3", "p4"];
     const opponents = [seat("p4"), seat("p2"), seat("p3")];
     assert.deepEqual(
-      [...opponents].sort(byRelativeSeat(view(turnOrder, "p1"))).map((o) => o.id),
+      [...opponents].sort(byRelativeSeat(view(seating, "p1"))).map((o) => o.id),
       ["p2", "p3", "p4"],
     );
   });
 
-  it("wraps the order when the viewer is not first in turnOrder", () => {
-    const turnOrder = ["p1", "p2", "p3", "p4"];
+  it("wraps the order when the viewer is not first in the seating", () => {
+    const seating = ["p1", "p2", "p3", "p4"];
     const opponents = [seat("p1"), seat("p2"), seat("p4")];
     assert.deepEqual(
-      [...opponents].sort(byRelativeSeat(view(turnOrder, "p3"))).map((o) => o.id),
+      [...opponents].sort(byRelativeSeat(view(seating, "p3"))).map((o) => o.id),
       ["p4", "p1", "p2"],
     );
   });
 
   it("orders a full six-seat room relative to the viewer", () => {
-    const turnOrder = ["p1", "p2", "p3", "p4", "p5", "p6"];
+    const seating = ["p1", "p2", "p3", "p4", "p5", "p6"];
     const opponents = ["p6", "p1", "p4", "p2", "p5"].map(seat);
     assert.deepEqual(
-      [...opponents].sort(byRelativeSeat(view(turnOrder, "p3"))).map((o) => o.id),
+      [...opponents].sort(byRelativeSeat(view(seating, "p3"))).map((o) => o.id),
       ["p4", "p5", "p6", "p1", "p2"],
     );
   });
 
-  it("sorts relative to the viewer whichever seat in turnOrder they hold", () => {
-    const turnOrder = ["p1", "p2", "p3", "p4", "p5"];
-    for (const [i, youId] of turnOrder.entries()) {
-      const opponents = turnOrder.filter((id) => id !== youId).map(seat);
-      const expected = [...turnOrder.slice(i + 1), ...turnOrder.slice(0, i)];
+  it("sorts relative to the viewer whichever seat they hold", () => {
+    const seating = ["p1", "p2", "p3", "p4", "p5"];
+    for (const [i, youId] of seating.entries()) {
+      const opponents = seating.filter((id) => id !== youId).map(seat);
+      const expected = [...seating.slice(i + 1), ...seating.slice(0, i)];
       assert.deepEqual(
-        [...opponents].sort(byRelativeSeat(view(turnOrder, youId))).map((o) => o.id),
+        [...opponents].sort(byRelativeSeat(view(seating, youId))).map((o) => o.id),
         expected,
       );
     }
+  });
+
+  /**
+   * The point of seating off the roster (issue #144): `turnOrder` loses a seat every time
+   * somebody is eliminated, and a table sorted by it would slide every remaining player
+   * one place along at that moment. The roster does not shrink, so nobody moves.
+   */
+  describe("across an elimination", () => {
+    const seating = ["p1", "p2", "p3", "p4"];
+    const opponents = ["p2", "p3", "p4"].map(seat);
+    const order = (turnOrder: string[]) =>
+      [...opponents].sort(byRelativeSeat(view(seating, "p1", turnOrder))).map((o) => o.id);
+
+    it("holds every seat in place when a player in the middle goes out", () => {
+      assert.deepEqual(order(seating), ["p2", "p3", "p4"]);
+      assert.deepEqual(order(["p1", "p3", "p4"]), ["p2", "p3", "p4"], "p2 out");
+    });
+
+    it("holds them in place when the viewer themselves is out and watching", () => {
+      assert.deepEqual(order(["p2", "p3", "p4"]), ["p2", "p3", "p4"]);
+    });
+
+    it("seats the last two survivors where they have sat all match", () => {
+      assert.deepEqual(order(["p1", "p4"]), ["p2", "p3", "p4"]);
+    });
   });
 });

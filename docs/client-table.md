@@ -155,6 +155,42 @@ the full experience minus the acting.
 - **The footer keeps their name and their frozen total** and drops the hand value, since there
   is no hand to weigh — the same row in the same place, saying only what is still true.
 
+## An out seat keeps its place, darkened
+
+**The table does not close up around whoever is left** (issue #144). To everyone still playing,
+an eliminated seat stays exactly where it has sat all match, drawn dim — so a seat means one
+player for the life of the room, and a glance says who is still in.
+
+- **Seating comes off the roster, not off turn order** (`seating.ts`, and "Turn order vs.
+  seating" in `CONTEXT.md`). The two lists were equal until elimination separated them, and
+  `turnOrder` now shrinks: a table sorted by it would slide every remaining player one seat
+  along at the moment somebody went out — a rearrangement nobody made, mid-match. The roster is
+  append-only from the first deal, so nobody moves. With nobody out the two are the same list
+  and the table is seated exactly as it always was.
+- **The wire carries both lists.** A client cannot recover the roster's order from what it is
+  sent — the viewer is lifted out of `opponents` into `you`, leaving a hole exactly where the
+  seat a viewer-relative sweep anchors on would be. So `PlayerGameView.seating` is the roster in
+  its own order, every seat included, beside the `turnOrder` that holds only the players still
+  playing. The sweep anchors on the viewer's **own** seat rather than on the next player to act,
+  which is what keeps it meaningful for a spectator: they are seated like everybody else and are
+  not in turn order at all.
+- **Dim is the whole seat, and it is opacity.** Cards, name and score recede together, because
+  this is a standing fact about a seat rather than news about one row of it — which is what the
+  red ring on the label is, and why they are two classes (`.table-seat--out` against
+  `.table-seat--went-out`). Opacity moves nothing, so a card in flight needs to know nothing
+  about it, and a seat drawn for a hand of five keeps the box it reserved.
+- **Dim from the next deal on, not the round they went out in.** That round is scored with them
+  in it: their hand and what it cost them are exactly what a scored table is for reading, and it
+  wears the `OUT` mark (issue #142) instead. `Table.tsx` asks it as one question — out, and out
+  before the round on the screen. At `gameEnd` that leaves the last player knocked out undimmed,
+  deliberately: the round on the screen is the one that just ended the match, their hand in it is
+  the reason it ended, and dimming the cards everybody has come to look at to say what the
+  standings over them already say would be the wrong trade.
+- **A bot's seat dims like anybody else's.** Who is behind a seat is not what being out looks
+  like, and the table would read as two rules if it were.
+- **The viewer's own row is never dimmed.** It is the row they are reading the table from, and
+  the bar where their hand was already says they are out, in words (issue #143).
+
 ## And the finished match is that table with the standings over it
 
 **The same table once more** (issue #130). A match ending used to replace the felt with a bare
