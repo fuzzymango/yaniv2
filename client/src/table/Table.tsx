@@ -56,7 +56,7 @@ import { MoveHistory } from "./MoveHistory.tsx";
 import { PlayingCard, cardLabel } from "../shared/PlayingCard.tsx";
 import { CascadeReveal, OpponentSeat, Seat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "../settings/SettingsDialog.tsx";
-import { CloseRoomIcon, WayOut } from "../shared/WayOut.tsx";
+import { WayOut } from "../shared/WayOut.tsx";
 import type { CardFlight } from "../flight.ts";
 import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
@@ -83,14 +83,15 @@ interface TableProps {
   onCommitTurn: (source: DrawSource) => void;
   /** End the round. Offered only on a hand the rules allow it on — see below. */
   onCallYaniv: () => void;
-  /** Deal the next one. Offered to the host alone, where the Yaniv call sat a moment ago. */
+  /**
+   * Deal the next one, where the Yaniv call sat a moment ago. Offered to anyone still in
+   * the match, which is everybody who is not watching (docs/adr/0012).
+   */
   onNextRound: () => void;
   /** The tap on the pile that sheds the just-drawn card, while a window is open. */
   onSlapDown: () => void;
   /** Give the seat up. Offered where the hand was, to a player who is only watching. */
   onExit: () => void;
-  /** End the room. Offered to the host alone — see `WayOut.tsx`. */
-  onCloseRoom: () => void;
 }
 
 /**
@@ -145,10 +146,8 @@ export function Table({
   onNextRound,
   onSlapDown,
   onExit,
-  onCloseRoom,
 }: TableProps) {
   const yourTurn = view.currentTurnPlayerId === view.you.id;
-  const isHost = view.hostId === view.you.id;
 
   /**
    * The viewer's own seat, narrowed once and here (issue #143): the hand they are holding,
@@ -374,10 +373,14 @@ export function Table({
         ref={rootRef}
       >
         {/*
-          The corner every in-match screen carries. The room's locked settings, one tap away
-          and nowhere on the table itself — what a Yaniv may be called on is worth being able
-          to check, and worth nothing at all in front of a player who is looking at their
-          hand — and, for the host, the only thing that ends a room mid-round.
+          The corner every in-match screen carries, and the room's locked settings are the
+          whole of it: one tap away and nowhere on the table itself — what a Yaniv may be
+          called on is worth being able to check, and worth nothing at all in front of a
+          player who is looking at their hand.
+
+          There is nothing else here any more. The host's close-room icon stood beside it
+          until issue #145, and no control on a running table ends anybody's match now
+          (docs/adr/0012).
 
           Gone once the match is over: the panel over this table carries its own settings
           icon and its own way out, and two of each on one screen would be two answers to
@@ -385,7 +388,6 @@ export function Table({
         */}
         {!over && (
           <div className="topbar">
-            {isHost && <CloseRoomIcon busy={busy} onClose={onCloseRoom} />}
             <SettingsDialog settings={view.settings} />
           </div>
         )}
@@ -532,8 +534,10 @@ export function Table({
           also tells a player what they are playing towards.
 
           Once the round is scored it is the deal, in the same place rather than as a new
-          control somewhere else (issue #78) — and for everybody but the host it is the
-          reason there is no button, exactly as in the lobby.
+          control somewhere else (issue #78). Everybody still in the match gets that button
+          — nobody is host once the cards are out (docs/adr/0012), and a table should not be
+          waiting on one particular person — and a player the match has gone on without gets
+          the line instead, which is the same rule the server states as `NOT_IN_MATCH`.
 
           Empty once the match is over: both things this slot can say are about a round that
           is coming, and there is not one. Dealing again is a whole match and is asked for on
@@ -554,7 +558,7 @@ export function Table({
           >
             Yaniv!
           </button>
-        ) : isHost ? (
+        ) : yours !== null ? (
           <button
             className="button button--primary deal"
             type="button"
@@ -566,7 +570,7 @@ export function Table({
         ) : (
           // Its own class rather than `notice`, which carries news that has just arrived.
           // This is a standing fact about the screen, the same way it is in the lobby.
-          <p className="hint">The host deals the next round.</p>
+          <p className="hint">Waiting for the next round.</p>
         )}
 
         {/*
@@ -580,12 +584,9 @@ export function Table({
           Where there are no cards to lay out, the row says why (issue #143): a bar of about
           the same height, so the felt and every seat above it keep the position they had
           while this player was still playing. One control in it and no other — nothing here
-          should read as a move — and it is the `WayOut` every other screen offers, so the
-          question a host's close asks before it acts is asked here too rather than in a
-          second copy free to stop asking. For a guest that control reads "Leave the room",
-          which is what this slot is for; for a host it is still the close, because that is
-          what their leaving actually does today (the host retires from a running match in
-          issue #145, and this reads as Leave for everybody once it does).
+          should read as a move — and it is the `WayOut` every other screen offers, which
+          reads "Leave the room" for everybody now that no seat can end anybody else's match
+          (docs/adr/0012).
 
           Nothing at all at `gameEnd`: the panel over this table carries its own way out,
           and the bottom of the screen is given up there exactly as the topbar is.
@@ -622,7 +623,7 @@ export function Table({
             <span className="spectating__said">
               You are out of the match — watching the rest of it.
             </span>
-            <WayOut isHost={isHost} busy={busy} onExit={onExit} onCloseRoom={onCloseRoom} />
+            <WayOut busy={busy} onExit={onExit} />
           </div>
         )}
 

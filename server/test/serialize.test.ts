@@ -913,6 +913,21 @@ describe("serializeStateForPlayer — lobby", () => {
     assert.deepEqual(view.turnOrder, ["p1", "p2"]);
     assert.deepEqual(view.seating, ["p1", "p2"], "a lobby seats the roster it has");
   });
+
+  /**
+   * The one phase with a host on it. The role is the lobby's — the settings and the start
+   * — and it retires at the first deal, which is said here rather than left for a client
+   * to remember: no screen can draw a host at a table that has none (docs/adr/0012).
+   */
+  it("names the host in the lobby and nowhere else", () => {
+    const lobby = serializeStateForPlayer(makeState({ phase: "lobby" }), "p2");
+    assert.equal(lobby.hostId, "p1", "whoever the room belongs to before the deal");
+
+    for (const phase of ["playing", "roundEnd", "gameEnd"] as const) {
+      const dealt = serializeStateForPlayer(makeState({ phase }), "p2");
+      assert.equal(dealt.hostId, null, `nobody is host at ${phase}`);
+    }
+  });
 });
 
 describe("serializeStateForPlayer — round end", () => {

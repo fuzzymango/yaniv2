@@ -178,8 +178,16 @@ export function playAgain(
   if (state.phase !== "gameEnd") {
     return err("WRONG_PHASE", "No finished match to replay");
   }
-  if (requesterId !== state.hostId) {
-    return err("NOT_HOST", "Only the host can start another match");
+  /*
+   * Anyone still in the room, which is deliberately a wider door than the next round's
+   * (docs/adr/0012). At `gameEnd` exactly one player is still in the match and that
+   * player may be a bot, so asking to be in the match would freeze a bot-won room with
+   * nobody able to act; and a player knocked out of the last match is precisely who this
+   * is offered to. A seat that has been given up is nobody's to ask from.
+   */
+  const requester = getPlayer(state, requesterId);
+  if (!requester || requester.departed) {
+    return err("PLAYER_NOT_FOUND", "You are not in this room");
   }
   // Counted over the seats that are still somebody's, not `inMatch`: everyone who is
   // still in the room plays the next match, and being knocked out of the last one is
@@ -227,9 +235,16 @@ export function playAgain(
  * turn order that the round is still being played against, which is out of scope (see
  * CLAUDE.md's room lifecycle notes).
  *
- * The host is not special here. "The room must be destroyed" is not a `GameState` this
- * function could return, so that branch belongs to the layer that owns rooms — the same
- * way bot seating is a helper folded in around a transition rather than baked into one.
+ * The host leaves like anybody else — what is special is the room left behind. In the
+ * lobby the role migrates to the next remaining seat, so a room full of people is not
+ * stranded because whoever clicked create wandered off; this is the one transition that
+ * writes `hostId`, and it writes it only here (docs/adr/0012). Once a round has been
+ * dealt there is no role to migrate: nobody is host from `playing` onward.
+ *
+ * A lobby whose last seat leaves keeps the `hostId` it had, there being nobody to hand it
+ * to. "The room must be destroyed" is not a `GameState` this function could return, so
+ * that branch belongs to the layer that owns rooms — the same way bot seating is a helper
+ * folded in around a transition rather than baked into one.
  */
 export function removePlayer(state: GameState, playerId: string): ActionResult {
   if (state.phase !== "lobby" && state.phase !== "gameEnd") {
@@ -241,7 +256,14 @@ export function removePlayer(state: GameState, playerId: string): ActionResult {
   }
 
   if (state.phase === "lobby") {
-    return ok({ ...state, players: state.players.filter((p) => p.id !== playerId) });
+    const remaining = state.players.filter((p) => p.id !== playerId);
+    return ok({
+      ...state,
+      players: remaining,
+      // Roster order, which in a lobby is arrival order: the seat that has been waiting
+      // longest takes it over.
+      hostId: playerId === state.hostId ? (remaining[0]?.id ?? state.hostId) : state.hostId,
+    });
   }
 
   return ok({
@@ -256,7 +278,19 @@ export function removePlayer(state: GameState, playerId: string): ActionResult {
   });
 }
 
-/** Host deals the next round. The previous round's winner takes the first turn. */
+/**
+ * Deal the next round. The previous round's winner takes the first turn.
+ *
+ * Asked by anyone still in the match, rather than by one particular seat: nobody is host
+ * once a round has been dealt (docs/adr/0012), and a table should not be left waiting on
+ * whichever player happens to have made the room. A player the match has gone on without
+ * — eliminated, or gone — is refused: they cannot rush a match they are no longer in.
+ *
+ * Bot-ness is not asked about, and the wire is why: a requester is identified from the
+ * connection that sent this, and a bot has none, so a bot id can only ever arrive from
+ * the server itself — the harness dealing a bots-only demo match, and nothing a player
+ * could send.
+ */
 export function startNextRound(
   state: GameState,
   requesterId: string,
@@ -265,8 +299,12 @@ export function startNextRound(
   if (state.phase !== "roundEnd") {
     return err("WRONG_PHASE", "No finished round to advance from");
   }
-  if (requesterId !== state.hostId) {
-    return err("NOT_HOST", "Only the host can start the next round");
+  const requester = getPlayer(state, requesterId);
+  if (!requester) {
+    return err("PLAYER_NOT_FOUND", "You are not in this game");
+  }
+  if (!inMatch(requester)) {
+    return err("NOT_IN_MATCH", "Only a player still in the match can deal the next round");
   }
   // The round's winner, who is guaranteed still in the match: their delta was 0 and a
   // reduction only subtracts, so the round they won cannot have taken them out

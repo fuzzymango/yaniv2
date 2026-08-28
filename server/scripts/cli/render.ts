@@ -31,14 +31,15 @@ const columnWidth = (names: readonly string[]) =>
  * whoever is looking. "(you)" can only be added here: who "you" is depends on which
  * screen the frame is bound for, so it is never stored or sent over the wire.
  *
- * `hostId` is passed only where being host is worth showing — the lobby, where starting
- * the match is the one thing a host does that nobody else can.
+ * `hostId` is passed only where being host is worth showing — the lobby, which is the
+ * only place there is a host at all: the role retires at the first deal (docs/adr/0012),
+ * and the view says so by sending null from then on.
  */
 function seatName(
   name: string,
   id: string,
   viewerId: string,
-  hostId?: string,
+  hostId?: string | null,
 ): string {
   const marks = [id === viewerId ? "(you)" : "", id === hostId ? "(host)" : ""];
   return [name, ...marks.filter(Boolean)].join(" ");
@@ -46,8 +47,8 @@ function seatName(
 
 /**
  * Said on both screens a player may leave from, in the same words, because leaving means
- * the same thing on both. What it costs the rest of the table is the server's decision
- * and depends on who is asking, so the line promises neither outcome.
+ * the same thing on both and the same thing for everybody: the seat goes and the room
+ * plays on for whoever is left.
  */
 const EXIT_HINT = dim("  or menu to leave the room");
 
@@ -85,20 +86,15 @@ function renderLobby(view: PlayerGameView): string[] {
 }
 
 /**
- * What is left to do once a match is over: the host deals another, everyone else waits
- * on them. The same shape as the lobby's line, and for the same reason — who may replay
- * is the server's call, which answers anyone else with `NOT_HOST`.
+ * What is left to do once a match is over, said to everybody in the same words: anyone
+ * still in the room may deal another match, spectators included, because the match may
+ * have been won by a bot and a bot types nothing (docs/adr/0012). A constant rather than
+ * a function of the view now that it says the same thing to every seat.
  */
-function renderGameEndOptions(view: PlayerGameView): string[] {
-  return [
-    dim(
-      view.hostId === view.you.id
-        ? "  type again for another match with this table"
-        : "  waiting for the host to deal another match",
-    ),
-    EXIT_HINT,
-  ];
-}
+const GAME_END_OPTIONS = [
+  dim("  type again for another match with this table"),
+  EXIT_HINT,
+];
 
 /**
  * The viewer's hand, numbered for selection.
@@ -240,7 +236,7 @@ export function renderView(view: PlayerGameView): string {
     return [
       ...result,
       ...renderStandings(view),
-      ...renderGameEndOptions(view),
+      ...GAME_END_OPTIONS,
     ].join("\n");
   }
 

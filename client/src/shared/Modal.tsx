@@ -20,7 +20,7 @@ import type { ReactNode } from "react";
 interface ModalProps {
   /** Said at the top, and to a screen reader as the name of the dialog. */
   title: string;
-  /** Everything the panel is for, controls included — the closing one especially. */
+  /** Everything the panel is for, controls included. */
   children: ReactNode;
   /** The backdrop and Escape both land here. A control inside `children` may too. */
   onDismiss: () => void;

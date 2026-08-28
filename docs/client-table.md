@@ -63,8 +63,8 @@ the page, and nobody has to be re-found. What changes is what changed:
   what they are for.
 - **The turn line says how the round ended**, in place. A heading above the seats would push
   every one of them down the page at the one moment they must not move.
-- **The Yaniv call becomes the deal** — the host's control, or the reason there is none, in
-  the slot the call was in.
+- **The Yaniv call becomes the deal** — offered to any viewer still in the match, or the line
+  saying what is being waited for, in the slot the call was in (docs/adr/0012).
 - **Anybody the round took out of the match is tagged `OUT`** (issue #142), on their label
   beside the marks saying how the score was arrived at, with the same ring round it that
   whose-turn-it-is wears — in the colour the news actually is, and the two can never be on
@@ -140,13 +140,13 @@ the full experience minus the acting.
   height leaves every seat, the felt and the pile where they were, which is what makes
   spectating read as staying rather than as being moved somewhere. Its `min-height` is derived
   from `--hand-card-w`, the one place the hand's card size is named, so the two cannot drift.
-- **One control in it, and it is the existing one.** `WayOut` — leaving for a guest, closing
-  for the host, with the confirm it already asks. A knocked-out host is shown the close rather
-  than a Leave button that quietly does the same thing: their leaving *is* closing the room
-  until the host retires at the first deal (#145), and the label should say so. Nothing else in the bar should read as a
-  move, so the Yaniv slot renders empty for a spectator too. The scored-round branch of that
-  slot is deliberately untouched: dealing the next round is not a move in a hand, and who may
-  ask for it is the server's rule to state.
+- **One control in it, and it is the existing one.** `WayOut`, which since #145 reads "Leave
+  the room" for everybody and asks nothing before it acts: nobody's exit costs anyone else
+  their match any more (docs/adr/0012). Nothing else in the bar should read as a move, so the
+  Yaniv slot renders empty for a spectator too. The scored-round branch of that slot is
+  deliberately untouched *as a slot* — it now offers the deal to any viewer still in the match
+  and the line to whoever is only watching, which is the server's rule (`NOT_IN_MATCH`) drawn
+  rather than a rule of this screen's.
 - **The round that took them out still reveals their hand**, in the row the bar otherwise
   fills. That round was scored with them in it, so its own record holds the cards they played,
   and they are read off `roundResult` exactly as every other seat's are — being dimmed out of
@@ -200,10 +200,10 @@ reading the same `roundResult` the serializer already populates there — no sec
 codepath, and therefore no way for the final round to be revealed differently from every other
 one. `GameEnd` is drawn over it.
 
-- **The table gives up its controls, and only those.** The topbar (settings, and the host's
-  close-room icon) and the bottom slot (the Yaniv call, or the host's deal) do not render at
-  `gameEnd`: the panel carries a settings icon and both ways out itself, and two of each on one
-  screen would be two answers to the same tap. The felt keeps rendering — the deck count, the
+- **The table gives up its controls, and only those.** The topbar (the settings icon) and the
+  bottom slot (the Yaniv call, or the deal) do not render at `gameEnd`: the panel carries a
+  settings icon and the way out itself, and two of each on one screen would be two answers to
+  the same tap. The felt keeps rendering — the deck count, the
   last discard and the line saying how the final round ended are the context the panel floats
   over, and all three are inert already. The hand and the seats are the scored round's, which is
   untappable by the same branch that makes it untappable at `roundEnd`.

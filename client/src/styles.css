@@ -151,16 +151,6 @@ body {
   color: #1c1917;
 }
 
-/*
- * The one control in this client that ends something for other people. Coloured rather
- * than filled: it is the answer to a question already being asked in a panel, so it needs
- * to be findable and not shouted.
- */
-.button--danger {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
 .notice {
   margin: 0;
   padding: 0.75rem;
@@ -548,9 +538,9 @@ body {
 }
 
 /*
- * The corner of every in-match screen: the settings once they are locked, and — for the
- * host, and nowhere the host has a row of controls to put it in — closing the room. Never
- * more than those two, and nothing else about either anywhere else on the screen.
+ * The corner of every in-match screen, and the settings once they are locked are the whole
+ * of it: nothing else about the room is anywhere on the screen, and nothing else belongs
+ * up here — the close-room icon that used to sit beside it went with docs/adr/0012.
  */
 .topbar {
   display: flex;
@@ -575,16 +565,6 @@ body {
 .topbar__button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-}
-
-/*
- * Ending the room, which is not the same kind of thing as reading the settings — so it is
- * the one icon up here that carries a colour. Still dim beside the game itself: a host
- * looking for it will find it, and nobody else has to look past it every turn.
- */
-.topbar__button--danger {
-  color: var(--danger);
-  opacity: 0.75;
 }
 
 .topbar__icon {

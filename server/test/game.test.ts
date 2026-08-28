@@ -12,6 +12,7 @@ import {
   updateSettings,
 } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
+import type { StateOptions } from "./helpers.ts";
 import { allCardIds, card, expectErr, ids, makeState, unwrap } from "./helpers.ts";
 
 const rng = () => mulberry32(1234);
@@ -1862,8 +1863,45 @@ describe("startNextRound", () => {
     assert.equal(next.lastRoundResult, null);
   });
 
-  it("rejects a non-host", () => {
-    expectErr(startNextRound(finished(), "p2", rng()), "NOT_HOST");
+  /**
+   * Nobody is host once a round has been dealt (docs/adr/0012), so the deal belongs to
+   * whoever is still playing: a table does not wait on one particular person.
+   */
+  it("is dealt by any player still in the match, not one particular seat", () => {
+    const next = unwrap(startNextRound(finished(), "p2", rng()));
+
+    assert.equal(next.phase, "playing");
+    assert.equal(next.roundNumber, 2);
+  });
+
+  it("refuses a player the match has gone on without", () => {
+    const scored = makeState({
+      phase: "roundEnd",
+      players: [
+        { id: "p1", score: 105, outInRound: 1 },
+        { id: "p2", score: 10 },
+        { id: "p3", score: 20 },
+      ],
+    });
+
+    expectErr(startNextRound(scored, "p1", rng()), "NOT_IN_MATCH");
+  });
+
+  it("refuses a player who has left the room", () => {
+    const scored = makeState({
+      phase: "roundEnd",
+      players: [
+        { id: "p1", score: 40, outInRound: 1, departed: true },
+        { id: "p2", score: 10 },
+        { id: "p3", score: 20 },
+      ],
+    });
+
+    expectErr(startNextRound(scored, "p1", rng()), "NOT_IN_MATCH");
+  });
+
+  it("refuses a player the room has never held", () => {
+    expectErr(startNextRound(finished(), "ghost", rng()), "PLAYER_NOT_FOUND");
   });
 
   it("rejects advancing mid-round", () => {
@@ -1886,7 +1924,7 @@ describe("startNextRound", () => {
       ],
     });
 
-    const next = unwrap(startNextRound({ ...scored, lastRoundResult: null }, "p1", rng()));
+    const next = unwrap(startNextRound({ ...scored, lastRoundResult: null }, "p2", rng()));
 
     assert.equal(next.phase, "playing");
     assert.equal(next.round.currentTurnPlayerId, "p2");
@@ -1897,7 +1935,7 @@ describe("startNextRound", () => {
 describe("playAgain", () => {
   /** A match played to a bust, which is the only position play again is offered from. */
   const finishedMatch = (
-    players = [
+    players: NonNullable<StateOptions["players"]> = [
       { id: "p1", score: 10 },
       { id: "p2", score: 95 },
     ],
@@ -1985,8 +2023,43 @@ describe("playAgain", () => {
     assert.equal(JSON.stringify(finished), before);
   });
 
-  it("rejects a non-host", () => {
-    expectErr(playAgain(finishedMatch(), "p2", rng()), "NOT_HOST");
+  /**
+   * Anyone still in the room, and being knocked out of the last match is no bar: the
+   * seat asking here is exactly the one this is offered to (docs/adr/0012).
+   */
+  it("is dealt by anyone still in the room, the match's loser included", () => {
+    const finished = finishedMatch();
+    assert.equal(finished.players.find((p) => p.id === "p2")!.outInRound, 7);
+
+    const again = unwrap(playAgain(finished, "p2", rng()));
+
+    assert.equal(again.phase, "playing");
+  });
+
+  /**
+   * A bot can win a match, and a bot presses nothing — so a room whose survivor is a bot
+   * would be frozen if only players still in the match could ask.
+   */
+  it("is dealt by a human whose match a bot won", () => {
+    const finished = finishedMatch([
+      { id: "p1", score: 10, isBot: true },
+      { id: "p2", score: 95 },
+    ]);
+    assert.deepEqual(finished.winnerIds, ["p1"]);
+
+    const again = unwrap(playAgain(finished, "p2", rng()));
+
+    assert.equal(again.phase, "playing");
+  });
+
+  it("refuses a seat that has been given up", () => {
+    const gone = unwrap(removePlayer(finishedMatch(), "p2"));
+
+    expectErr(playAgain(gone, "p2", rng()), "PLAYER_NOT_FOUND");
+  });
+
+  it("refuses a player the room has never held", () => {
+    expectErr(playAgain(finishedMatch(), "ghost", rng()), "PLAYER_NOT_FOUND");
   });
 
   it("rejects a restart from any phase but a finished match", () => {
@@ -2108,16 +2181,69 @@ describe("removePlayer", () => {
   });
 
   /**
-   * The host is not special here: closing the room is not a `GameState` this function
-   * could return, so that branch belongs to the layer that owns rooms.
+   * The host is not special about *leaving* — the seat goes the way any other does. What
+   * is special is the room they leave behind: a lobby full of people must not be stranded
+   * because whoever clicked create wandered off, so the role moves along the roster
+   * (docs/adr/0012).
    */
-  it("removes the host like anyone else", () => {
-    const after = unwrap(removePlayer(makeState({ phase: "lobby" }), "p1"));
+  it("hands the lobby to the next remaining seat when the host leaves", () => {
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      roundNumber: 0,
+    });
+    assert.equal(lobby.hostId, "p1");
+
+    const after = unwrap(removePlayer(lobby, "p1"));
 
     assert.deepEqual(
       after.players.map((p) => p.id),
-      ["p2"],
+      ["p2", "p3"],
     );
+    assert.equal(after.hostId, "p2");
+  });
+
+  it("leaves the host where they are when somebody else leaves the lobby", () => {
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      roundNumber: 0,
+    });
+
+    const after = unwrap(removePlayer(lobby, "p2"));
+
+    assert.equal(after.hostId, "p1");
+  });
+
+  /**
+   * The last seat in a lobby leaving: there is nobody to hand the role to, and the room
+   * itself is what has ended — which is the socket layer's to act on, not a `GameState`
+   * this function could return.
+   */
+  it("leaves the host id alone when the lobby's last seat goes", () => {
+    const alone = makeState({ phase: "lobby", players: [{ id: "p1" }], roundNumber: 0 });
+
+    const after = unwrap(removePlayer(alone, "p1"));
+
+    assert.deepEqual(after.players, []);
+    assert.equal(after.hostId, "p1");
+  });
+
+  /**
+   * The role retires at the first deal (docs/adr/0012), so there is nothing to migrate:
+   * the seat is marked and `hostId` — meaningless from `playing` onward — is left as the
+   * lobby last set it.
+   */
+  it("migrates nothing once the match has been dealt", () => {
+    const finished = makeState({
+      phase: "gameEnd",
+      players: [{ id: "p1", score: 40 }, { id: "p2", score: 105, outInRound: 6 }],
+      roundNumber: 6,
+    });
+
+    const after = unwrap(removePlayer(finished, "p1"));
+
+    assert.equal(after.hostId, "p1");
   });
 
   it("rejects a player who is not seated", () => {

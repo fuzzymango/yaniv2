@@ -162,23 +162,35 @@ export function createSocketServer(
   }
 
   /**
-   * Shut a room down and turn everyone in it loose. Only the host does this, so everybody
-   * else is told why rather than being left staring at a table that has stopped
-   * answering. The closer hears it as their own ack instead.
+   * A room with nobody left in it, dropped rather than left running. Nobody is told: the
+   * seat that has just gone was the last one, so there is no connection this could be
+   * news to — which is the whole difference from the host's old close-room button, and
+   * the point of removing it (docs/adr/0012). A room now ends because it is empty, never
+   * because one player decided everyone else's game was over.
    *
-   * Everything the room had waiting on the clock is abandoned along with the rest of it —
-   * a bot mid-think today, and whatever else is scheduled per room tomorrow: a room that
-   * has ended stops doing things, and no entry is left behind under a code that may be
-   * issued again. One call, so a new timer is covered by being in the registry rather
-   * than by anyone remembering to cancel it here.
+   * Everything it had waiting on the clock is abandoned along with it — a bot mid-think
+   * today, and whatever else is scheduled per room tomorrow: a room that has ended stops
+   * doing things, and no entry is left behind under a code that may be issued again. One
+   * call, so a new timer is covered by being in the registry rather than by anyone
+   * remembering to cancel it here.
+   *
+   * A room whose players are all *disconnected* is a different question, and not this
+   * one: they still hold their seats, and a reload is a disconnect.
    */
-  function closeRoom(roomCode: string, reason: string, closer: YanivSocket): void {
+  function destroyRoom(roomCode: string): void {
     timers.cancelRoom(roomCode);
-    for (const member of membersOf(roomCode)) {
-      if (member.id !== closer.id) member.emit("roomClosed", reason);
-      release(member, roomCode);
-    }
     rooms.removeRoom(roomCode);
+  }
+
+  /**
+   * Nobody left that a room is *for*: every human has gone, or the lobby has emptied.
+   *
+   * Bots are counted out rather than waited on. A bot never departs and never asks for
+   * anything, so a table of them with the last human gone is a room playing to nobody —
+   * and, with no player left who could leave, one nothing else would ever end.
+   */
+  function abandoned(state: GameState): boolean {
+    return state.players.every((p) => p.departed || p.isBot);
   }
 
   io.on("connection", (socket) => {
@@ -188,9 +200,8 @@ export function createSocketServer(
     /**
      * The caller's session and the room behind it, or the rejection to ack instead.
      *
-     * Shared by the two handlers that are not `act`-shaped — leaving and closing —
-     * because both need the room itself to decide what to do, rather than a transition
-     * to apply to it.
+     * Used by the one handler that is not `act`-shaped — leaving — because it needs the
+     * room itself to decide what to do with it, rather than only a transition to apply.
      */
     function currentRoom(): Result<{ session: Session; state: GameState }> {
       const session = socket.data.session;
@@ -424,13 +435,16 @@ export function createSocketServer(
 
     /**
      * Leave the room without dropping the connection — the one exit that is not a
-     * disconnect. Deliberately not `act`-shaped: its two outcomes are not both a
-     * `GameState` a single transition could return, so the branch lives here, where
-     * rooms and connections are owned.
+     * disconnect, and now the only way out of a room there is (docs/adr/0012).
      *
-     * The caller does not choose which outcome they get. A non-host frees their own seat
-     * and the room plays on without them; the host closes it for everyone. See CONTEXT.md
-     * for why the two phases this is allowed from behave identically.
+     * It costs the rest of the table nothing, whoever is leaving: the host is no longer
+     * a special case here, because from the lobby the role migrates to the next seat and
+     * from the first deal there is no role at all. What the leaver's own seat becomes is
+     * the transition's business — spliced out in the lobby, marked once a match exists.
+     *
+     * Deliberately not `act`-shaped: an empty room has to be dropped, and "this room no
+     * longer exists" is not a `GameState` any transition could return, so that branch
+     * lives here, where rooms and connections are owned.
      */
     socket.on("exitToMenu", (ack) => {
       const current = currentRoom();
@@ -440,24 +454,6 @@ export function createSocketServer(
       }
 
       const { session, state } = current.value;
-      if (session.playerId === state.hostId) {
-        /*
-         * The host's leave is put to the same transition as everyone else's — it owns
-         * which phases a player may leave from, and repeating that rule here would give
-         * it two homes to drift between. Only the answer differs: the roster it hands
-         * back is thrown away, and the room closed instead.
-         */
-        const allowed = removePlayer(state, session.playerId);
-        if (!allowed.ok) {
-          ack({ ok: false, error: allowed.error });
-          return;
-        }
-
-        closeRoom(session.roomCode, "the host left the room", socket);
-        ack({ ok: true, value: null });
-        return;
-      }
-
       // Read before the removal, since afterwards there is no player to read it from.
       const name = getPlayer(state, session.playerId)?.name ?? "";
 
@@ -472,39 +468,17 @@ export function createSocketServer(
       release(socket, session.roomCode);
       ack({ ok: true, value: null });
 
+      // The seat that has just gone was the last one: there is nobody to announce it to,
+      // and nothing left for the room to be.
+      if (abandoned(result.value)) {
+        destroyRoom(session.roomCode);
+        return;
+      }
+
       // The leaver is already out of the room, so this reaches exactly whoever stayed:
       // who left, and then the table they are left with.
       io.to(session.roomCode).emit("playerLeft", name);
       broadcastState(session.roomCode);
-    });
-
-    /**
-     * End the room for everyone, from any phase. The host's alone, and the only thing
-     * that closes a room other than the game's own rules — a dropped connection no
-     * longer does, so without this a table nobody wants to keep playing would have
-     * nothing to end it.
-     *
-     * Not gated on the phase, unlike `exitToMenu`: a seat that has gone quiet mid-round
-     * is exactly the table a host needs to be able to abandon, and there is no hand or
-     * turn order left to protect once the room itself is going. Not `act`-shaped for the
-     * same reason `exitToMenu` is not — "the room must be destroyed" is not a `GameState`
-     * any transition could return.
-     */
-    socket.on("closeRoom", (ack) => {
-      const current = currentRoom();
-      if (!current.ok) {
-        ack({ ok: false, error: current.error });
-        return;
-      }
-
-      const { session, state } = current.value;
-      if (session.playerId !== state.hostId) {
-        ack(err("NOT_HOST", "Only the host can close the room"));
-        return;
-      }
-
-      closeRoom(session.roomCode, "the host closed the room", socket);
-      ack({ ok: true, value: null });
     });
 
     /*

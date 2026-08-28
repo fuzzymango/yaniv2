@@ -10,6 +10,11 @@
  * may actually start is the server's call, and it answers anyone else with `NOT_HOST`.
  * Showing the control to the host alone spares a guest hunting for a button that was never
  * theirs — it is not what enforces the rule.
+ *
+ * The one screen in this client with a host on it at all. The role is the lobby's — the
+ * settings and the start — and it retires at the first deal, `view.hostId` going null with
+ * it (docs/adr/0012). A host who leaves hands it to the next seat, which arrives here as an
+ * ordinary roster update with the marker on somebody else.
  */
 
 import type { GameError, PlayerGameView, RoomSettings } from "@yaniv/shared";
@@ -27,8 +32,6 @@ interface LobbyProps {
   onStart: () => void;
   onUpdateSettings: (settings: RoomSettings) => void;
   onExit: () => void;
-  /** End the room. The host's way out of this screen — see `WayOut.tsx`. */
-  onCloseRoom: () => void;
 }
 
 export function Lobby({
@@ -38,7 +41,6 @@ export function Lobby({
   onStart,
   onUpdateSettings,
   onExit,
-  onCloseRoom,
 }: LobbyProps) {
   const isHost = view.hostId === view.you.id;
 
@@ -126,8 +128,11 @@ export function Lobby({
           <p className="hint">The host starts the match.</p>
         )}
 
-        {/* Closing it for the host, leaving it for everybody else — see `WayOut.tsx`. */}
-        <WayOut isHost={isHost} busy={busy} onExit={onExit} onCloseRoom={onCloseRoom} />
+        {/*
+          The same way out for everybody, the host included: leaving a lobby hands the role
+          to the next seat rather than ending the room (docs/adr/0012).
+        */}
+        <WayOut busy={busy} onExit={onExit} />
       </div>
 
       {error && (

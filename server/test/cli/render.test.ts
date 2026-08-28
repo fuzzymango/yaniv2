@@ -268,17 +268,15 @@ describe("renderView", () => {
     assert.doesNotMatch(frame, /Grace \(you\)/, "and nobody else's");
   });
 
-  it("offers the host another match, and everyone else the wait", () => {
-    const view = serializeStateForPlayer(endedMatch(), "p1");
+  /** Anyone still in the room may deal another match, so everyone reads the same line. */
+  it("offers another match to everybody, in the same words", () => {
+    for (const seat of ["p1", "p2"]) {
+      const frame = plain(renderView(serializeStateForPlayer(endedMatch(), seat)));
 
-    const host = plain(renderView(view));
-    assert.match(host, /again/i, "the host is told they can deal another match");
-    assert.match(host, /menu/i, "and that they can leave instead");
-
-    const guest = plain(renderView(serializeStateForPlayer(endedMatch(), "p2")));
-    assert.match(guest, /waiting/i, "only the host may replay, so everyone else waits");
-    assert.match(guest, /menu/i, "but leaving is anyone's to do");
-    assert.doesNotMatch(guest, /type again/i);
+      assert.match(frame, /type again/i, `${seat} is told they can deal another match`);
+      assert.match(frame, /menu/i, "and that they can leave instead");
+      assert.doesNotMatch(frame, /waiting for the host/i);
+    }
   });
 
   /**

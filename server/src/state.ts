@@ -268,6 +268,15 @@ export interface RoundResult {
  */
 export interface GameStateBase {
   roomCode: string;
+  /**
+   * Whose lobby this is: the one seat that may edit the settings and deal the first round.
+   *
+   * **The role retires at that deal** (docs/adr/0012) — from `playing` onward nobody is
+   * host, nothing consults this, and the serializer sends null in its place. It is the one
+   * field of the match that is mutable, and mutable in one transition only: `removePlayer`
+   * migrates it along the roster when the host leaves the lobby, so a room is not stranded
+   * by whoever clicked create wandering off.
+   */
   hostId: string;
   players: Player[];
   /**

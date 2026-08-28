@@ -198,7 +198,13 @@ export interface PlayerGameView {
   roomCode: string;
   phase: Phase;
   roundNumber: number;
-  hostId: string;
+  /**
+   * Whose lobby this is, and **null from the first deal onward**: the role is the lobby's
+   * — the settings and the start — and it retires when the cards go out (docs/adr/0012).
+   * Null rather than a stale id so no screen can draw a host at a table that has none, and
+   * so a client cannot gate a mid-match control on being one.
+   */
+  hostId: string | null;
   /**
    * The room's live settings — present in every phase, not just `lobby`. Load-bearing
    * for a client's own pre-turn legality check (`isLegalCall`), not just display: a

@@ -686,25 +686,31 @@ describe("the session core", () => {
     }
   });
 
-  it("closes the room and says why when the host exits", async () => {
+  /**
+   * The host's exit is a seat going, exactly like anyone else's (docs/adr/0012): the room
+   * plays on for whoever remains, and the role goes with the roster that arrives behind it.
+   */
+  it("hands the lobby on when the host exits, leaving the room standing", async () => {
     const server = await startServer(7);
     try {
       const [host, guest] = await hostAndGuest(server);
+      await waitForSnapshot(host, "the table to fill", (s) => s.view?.opponents.length === 1);
+      const guestId = guest.getSnapshot().view!.you.id;
 
       host.exitToMenu();
 
       const hostGone = await waitForSnapshot(host, "the host's menu", (s) => s.view === null);
       assert.equal(hostGone.error, null);
 
-      // The guest was sitting doing nothing, so the room going away has to reach them
-      // where they are rather than waiting for them to tap something.
-      const closed = await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null);
-      assert.match(
-        closed.notice ?? "",
-        /host/,
-        "the reason it closed, so the guest is not left guessing",
+      const stayed = await waitForSnapshot(
+        guest,
+        "the roster to shrink",
+        (s) => s.view?.opponents.length === 0,
       );
-      assert.equal(closed.error, null, "nothing the guest did was refused");
+      assert.equal(stayed.view!.phase, "lobby", "the room plays on for whoever remains");
+      assert.equal(stayed.view!.hostId, guestId, "and they are now its host");
+      assert.equal(stayed.notice, null, "there is no news of a room ending, because none did");
+      assert.equal(stayed.error, null, "nothing the guest did was refused");
     } finally {
       await server.close();
     }
@@ -736,15 +742,15 @@ describe("the session core", () => {
     }
   });
 
-  it("lets a closed-out player straight into another room", async () => {
+  it("lets a player who has left straight into another room", async () => {
     const server = await startServer(7);
     try {
-      const [host, guest] = await hostAndGuest(server);
+      const [, guest] = await hostAndGuest(server);
 
-      host.exitToMenu();
-      await waitForSnapshot(guest, "the room to close", (s) => s.notice !== null);
+      guest.exitToMenu();
+      await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null && !s.busy);
 
-      // The menu is a menu, not a dead end: whatever happened to the last room, the
+      // The menu is a menu, not a dead end: whatever became of the last room, the
       // controls on this screen work.
       guest.createRoom("Grace");
       const own = await waitForSnapshot(guest, "a room of their own", (s) => s.view !== null);
@@ -756,43 +762,12 @@ describe("the session core", () => {
     }
   });
 
-  /*
-   * Closing is the host's own way out of a room, and the only one that works mid-round —
-   * `exitToMenu` is refused there, for a hand and a turn order the round is still being
-   * played against. From the caller's side it is `exitToMenu`'s shape exactly: the ack is
-   * the whole of the answer, because the server stops publishing to a connection it has
-   * just turned out.
+  /**
+   * The seat is forgotten on the way out, whoever is leaving and whatever they were in
+   * the middle of: a credential kept for a room this player has got up from would only
+   * sit them back down at it on the next page load.
    */
-  it("closes a room mid-round when the host says so", async () => {
-    const server = await startServer(7);
-    try {
-      const [host, guest] = await twoHumanMatch(server);
-      const tokens = fakeTokens();
-      // The host's seat, written down where a reload would find it — a room that has been
-      // closed must not leave a credential behind to be claimed back.
-      tokens.store.set({
-        roomCode: host.getSnapshot().view!.roomCode,
-        playerId: host.getSnapshot().view!.you.id,
-        resumeToken: "the host's",
-      });
-
-      host.closeRoom();
-
-      const gone = await waitForSnapshot(host, "the host's menu", (s) => s.view === null);
-      assert.equal(gone.error, null, "closing a room is not a failure");
-      assert.equal(gone.busy, false);
-      assert.deepEqual(gone.selection, [], "nothing chosen carries out of a closed room");
-
-      // Everyone else hears it where they are sitting, mid-hand and with nothing tapped.
-      const closed = await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null);
-      assert.match(closed.notice ?? "", /host/, "and is told which of them ended it");
-      assert.equal(closed.error, null, "nothing the guest did was refused");
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("forgets the seat of a host who closes the room", async () => {
+  it("forgets the seat of a player who leaves", async () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
@@ -801,30 +776,35 @@ describe("the session core", () => {
       await waitForSnapshot(host, "the room", (s) => s.view !== null && !s.busy);
       assert.ok(tokens.stored(), "seated, so there is a seat to claim back");
 
-      host.closeRoom();
+      host.exitToMenu();
       await waitForSnapshot(host, "the host's menu", (s) => s.view === null && !s.busy);
 
-      assert.equal(tokens.stored(), null, "a room that has been closed is not one to return to");
+      assert.equal(tokens.stored(), null, "a seat given up is not one to return to");
     } finally {
       await server.close();
     }
   });
 
-  it("refuses a guest who asks to close the room, and leaves them at the table", async () => {
+  /**
+   * Nobody is left holding a way to end anybody else's game (docs/adr/0012): mid-round
+   * there is no way out of a room at all, which is the same refusal it always was, and
+   * the round plays on around whoever asked.
+   */
+  it("refuses a leave mid-round, leaving the player at the table", async () => {
     const server = await startServer(7);
     try {
       const [host, guest] = await twoHumanMatch(server);
 
-      guest.closeRoom();
+      guest.exitToMenu();
 
       const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "NOT_HOST");
+      assert.equal(refused.error!.code, "WRONG_PHASE");
       assert.equal(refused.view!.phase, "playing", "and the round they are in plays on");
       assert.equal(refused.busy, false, "with the controls back");
       assert.equal(
         host.getSnapshot().view!.phase,
         "playing",
-        "the host's table is untouched by a guest asking",
+        "the other table is untouched by them asking",
       );
     } finally {
       await server.close();
@@ -1726,7 +1706,12 @@ describe("a finished match", () => {
     }
   });
 
-  it("refuses a guest's play again and leaves the standings where they were", async () => {
+  /**
+   * Another match is anyone's to deal, whether or not they made the room and whether or
+   * not the last match went on without them (docs/adr/0012). Whether the control is
+   * offered is the screen's business; whether a match is dealt is the server's.
+   */
+  it("deals another match when the player who did not make the room asks", async () => {
     const server = await startServer(7);
     try {
       const [host, guest] = await hostAndGuest(server);
@@ -1735,12 +1720,20 @@ describe("a finished match", () => {
 
       guest.playAgain();
 
-      // Whether the control is offered is the screen's business; whether another match is
-      // dealt is the server's, exactly as it is in the lobby.
-      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "NOT_HOST");
-      assert.equal(refused.view!.phase, "gameEnd", "still looking at how it finished");
-      assert.equal(host.getSnapshot().view!.phase, "gameEnd", "on the host's screen too");
+      const dealt = await waitForSnapshot(
+        guest,
+        "the new match",
+        (s) => s.view!.phase === "playing",
+      );
+      assert.equal(dealt.error, null, "nothing they asked for was refused");
+      assert.equal(dealt.view!.roundNumber, 1, "a new match, not another round");
+
+      const other = await waitForSnapshot(
+        host,
+        "the other player to be dealt in",
+        (s) => s.view!.phase === "playing",
+      );
+      assert.equal(other.view!.roundNumber, 1, "into the same new match, having asked for nothing");
     } finally {
       await server.close();
     }
@@ -1878,35 +1871,43 @@ describe("when the connection goes", () => {
     }
   });
 
-  it("returns to the main menu, saying why, when the room did not survive", async () => {
+  /**
+   * A seat that cannot be had back — the room has gone from the server, or the credential
+   * was refused — lands on the main menu with the news and nothing to retry.
+   *
+   * Driven from a cold boot rather than a reconnect, because there is no longer a way for
+   * a room to disappear under a player who is sitting in it (docs/adr/0012): a room ends
+   * when its last seat leaves, and that seat is the one leaving. A page opening on a
+   * credential for a room the server does not have is the case that remains — a restart,
+   * the documented cost of rooms living in memory — and it is the same `claimSeat` a
+   * returning connection uses.
+   */
+  it("returns to the main menu, saying why, when the seat cannot be had back", async () => {
     const server = await startServer(7);
     try {
-      const [host, roomCode] = await hostARoom(server, "Ada");
-      const guest = await server.openSession();
-      guest.joinRoom(roomCode, "Grace");
-      await seated(guest, "the guest");
+      const tokens = fakeTokens();
+      tokens.store.set({
+        roomCode: "ZZZZ",
+        playerId: "nobody",
+        resumeToken: "for a room that is not there",
+      });
 
-      // The guest is off the air when the host closes the room under them: nothing
-      // reaches them to say so, and the seat they come back to has gone with it.
-      server.drop(guest, true);
-      await waitForSnapshot(guest, "the drop", (s) => !s.connected);
-      host.exitToMenu();
-      await waitForSnapshot(host, "the host's exit", (s) => s.view === null && !s.busy);
+      const player = await server.openSession(tokens.store);
 
       const back = await waitForSnapshot(
-        guest,
+        player,
         "the failed claim",
         (s) => s.connected && !s.resuming,
       );
       assert.equal(back.view, null, "there is no table to return to");
       assert.ok(back.notice, "and the player is told so");
       assert.equal(back.error, null, "which is news, not a refusal of anything they did");
-      assert.deepEqual(back.selection, [], "nothing chosen carries into a room that is gone");
       assert.equal(back.busy, false);
+      assert.equal(tokens.stored(), null, "the credential goes with the seat");
 
       // A working connection, not merely a hopeful screen: the proof is a room on it.
-      guest.createRoom("Grace");
-      const another = await waitForSnapshot(guest, "a fresh room", (s) => s.view !== null);
+      player.createRoom("Grace");
+      const another = await waitForSnapshot(player, "a fresh room", (s) => s.view !== null);
       assert.equal(another.view!.phase, "lobby");
       assert.equal(another.notice, null, "and the news goes when they act again");
     } finally {
@@ -2081,10 +2082,14 @@ describe("when the connection goes", () => {
     }
   });
 
-  it("forgets the seat when the room closes under it", async () => {
+  /**
+   * The credential is written down as the *server* spells the room, not as it was typed,
+   * and it is given up when the seat is.
+   */
+  it("remembers the room as the server spells it, and forgets it on the way out", async () => {
     const server = await startServer(7);
     try {
-      const [host, roomCode] = await hostARoom(server, "Ada");
+      const [, roomCode] = await hostARoom(server, "Ada");
       const tokens = fakeTokens();
       const guest = await server.openSession(tokens.store);
       guest.joinRoom(roomCode.toLowerCase(), "Grace");
@@ -2095,10 +2100,10 @@ describe("when the connection goes", () => {
         "the room as the server spells it, not as it was typed",
       );
 
-      host.exitToMenu();
-      await waitForSnapshot(guest, "the closure", (s) => s.view === null);
+      guest.exitToMenu();
+      await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null && !s.busy);
 
-      assert.equal(tokens.stored(), null, "there is no room left to claim a seat in");
+      assert.equal(tokens.stored(), null, "a seat given up is not one to claim back");
     } finally {
       await server.close();
     }

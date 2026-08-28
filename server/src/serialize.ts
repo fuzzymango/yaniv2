@@ -247,7 +247,9 @@ export function serializeStateForPlayer(
     roomCode: state.roomCode,
     phase: state.phase,
     roundNumber: state.roundNumber,
-    hostId: state.hostId,
+    // The role retired with the first deal, and this is where that is said: a round has
+    // been dealt, so there is no host to name. docs/adr/0012.
+    hostId: null,
     settings: state.settings,
     you,
     opponents,

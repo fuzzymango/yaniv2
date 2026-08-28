@@ -29,20 +29,39 @@ Two distinct concepts, easy to conflate because both sit "before the game":
 - **Lobby** — `GameState.phase === "lobby"` (see above): a room already exists
   server-side, has a code, and players are staged in it up to the player cap.
 
-**Exit to main menu** is the action that leaves a room and returns to the main menu. It
-is available in the lobby and at `gameEnd` only — not mid-match (`playing`/`roundEnd`),
-where a seat cannot be given up part-way through a hand. **Close room** is the host's
-counterpart and the exception: available in every phase, it ends the room for everyone at
-once, and it is the only thing that ends one early — a disconnect leaves the room and the
-seat exactly as they were. Exiting is asymmetric by who invokes it, the same way in both
-phases:
+**Exit to main menu** is the action that leaves a room and returns to the main menu, and
+it is the only way out of a room there is. It is available in the lobby and at `gameEnd`
+only — not mid-match (`playing`/`roundEnd`), where a seat cannot be given up part-way
+through a hand.
 
-- A **non-host** player exiting is removed from `players` entirely — their seat is freed,
-  not held or bot-replaced. The room lives on for whoever remains: the lobby for the rest
-  to join and start, or the finished match's scoreboard for the host to still choose
-  between playing again and exiting.
-- The **host** exiting closes the room outright — every other human player is booted to
-  the main menu, told the room closed because the host quit.
+It means the same thing whoever invokes it, and it costs the rest of the table nothing.
+Before the first deal the leaver is removed from `players` entirely — their seat is freed,
+not held or bot-replaced; from the first deal the roster is append-only, so leaving marks
+the seat instead (**left**, see "Out of the match"). Either way the room lives on for
+whoever remains: the lobby for the rest to join and start, or the finished match's
+scoreboard for whoever is still looking at it.
+
+**A room ends when its last seat leaves**, and that is the whole of it — there is no
+control that ends one for anybody else, and a disconnect leaves the room and the seat
+exactly as they were. The **close room** action that used to be the host's exception was
+removed with [ADR-0012](docs/adr/0012-the-host-retires-at-the-first-deal.md), along with
+the asymmetry that made a host's exit cost everyone else their match.
+
+## Host
+
+The seat that owns the **lobby**, and only the lobby: the one player who may edit the
+room's settings and deal the first round. Everyone else asking is refused `NOT_HOST`.
+
+**The role retires at that deal.** From `playing` onward nobody is host: the next round is
+dealt by any player still in the match (`NOT_IN_MATCH` to a seat it has gone on without),
+another match by anyone still in the room, spectators included — a match may have been won
+by a bot, and a bot asks for nothing. `PlayerGameView.hostId` is null in every phase but
+the lobby, so no screen can draw a host at a table that has none.
+
+A host who **leaves the lobby** hands the role to the next remaining seat, so a room full
+of people is not stranded by whoever clicked create wandering off. This is the one mutable
+fact about a match, and it is mutable only in the lobby.
+[ADR-0012](docs/adr/0012-the-host-retires-at-the-first-deal.md).
 
 ## Selection
 
@@ -357,9 +376,9 @@ still holding it.
 
 ## Play again
 
-Starts a fresh match in the same room, for the same host and the same seated players
-(minus anyone who has exited to the main menu since the last game ended) — scores,
-hands, and the deck all reset, and the next round is dealt immediately. It does not stop
-at the lobby the way ending a match used to require; only the host may invoke it, and
-only from `gameEnd`. See [ADR-0001](docs/adr/0001-random-starting-player.md) for who
-opens the new match.
+Starts a fresh match in the same room, for the same seated players (minus anyone who has
+exited to the main menu since the last game ended) — scores, eliminations, hands and the
+deck all reset, and the next round is dealt immediately. It does not stop at the lobby the
+way ending a match used to require. **Anyone still in the room may invoke it**, spectators
+included (see "Host"), and only from `gameEnd`. See
+[ADR-0001](docs/adr/0001-random-starting-player.md) for who opens the new match.

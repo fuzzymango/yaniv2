@@ -18,7 +18,18 @@ export type GameErrorCode =
    * room code into a way of fishing for the seats behind it.
    */
   | "INVALID_RESUME_TOKEN"
+  /**
+   * The lobby's own refusal: only the host sets the room's settings and deals the first
+   * round. The role retires at that deal, so nothing outside the lobby answers with this
+   * — see docs/adr/0012.
+   */
   | "NOT_HOST"
+  /**
+   * A seat the match has gone on without — eliminated, or given up — asking for something
+   * only a player still in it may have. Distinct from `PLAYER_NOT_FOUND`: the room knows
+   * exactly who is asking, and they are still sitting there watching.
+   */
+  | "NOT_IN_MATCH"
   | "NOT_ENOUGH_PLAYERS"
   // room settings
   /**

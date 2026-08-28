@@ -30,9 +30,7 @@ export interface SessionIo {
    * Prompt for a line. Resolves `null` when input is exhausted, i.e. Ctrl-D.
    *
    * Called serially: the session never has two prompts outstanding at once, so an
-   * implementation may assume the line it reads answers the last prompt it printed. A
-   * prompt the session stops waiting on — the room closing under it — is carried over
-   * to the next screen rather than abandoned, precisely to keep that true.
+   * implementation may assume the line it reads answers the last prompt it printed.
    */
   ask: (prompt: string) => Promise<string | null>;
   output: (text: string) => void;
@@ -46,24 +44,6 @@ const send = (emit: (ack: Ack<null>) => void) =>
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
-
-/**
- * A one-shot announcement that may never be made, with its trigger held outside the
- * promise — which is how a server event the loop cannot poll for becomes something it
- * can wait on alongside the player's next line.
- */
-interface Notice {
-  arrived: Promise<string>;
-  announce: (reason: string) => void;
-}
-
-function notice(): Notice {
-  let announce!: (reason: string) => void;
-  const arrived = new Promise<string>((resolve) => {
-    announce = resolve;
-  });
-  return { arrived, announce };
-}
 
 /** How a room gets entered — chosen either at the main menu or by an argv flag. */
 export type EntryMode =
@@ -124,14 +104,11 @@ export async function runSession(
   socket.on("playerJoined", (name) => io.output(dim(`  ${name} joined`)));
   socket.on("playerLeft", (name) => io.output(dim(`  ${name} left`)));
 
-  /**
-   * Being closed out of the room we are sitting in — the host leaving, today the only
-   * cause. Replaced on every entry (see the loop below), and the handler reads the
-   * variable rather than capturing one notice, so a room that has closed can never end
-   * the next one.
+  /*
+   * There is deliberately nothing to handle a room ending under a player who is sitting
+   * in it: nobody can close a room out from under anybody any more (docs/adr/0012). A
+   * room ends when its last seat leaves, and that seat is the one doing the leaving.
    */
-  let roomClosed = notice();
-  socket.on("roomClosed", (reason) => roomClosed.announce(reason));
 
   /**
    * Every broadcast is rendered the moment it lands. That is the point of the harness:
@@ -168,23 +145,6 @@ export async function runSession(
   };
 
   /**
-   * The prompt a player is already sitting in front of, if one was left outstanding when
-   * the room closed under them.
-   *
-   * `io.ask` is a serial contract: at most one prompt is outstanding at a time. A second
-   * one issued while the first is still waiting would queue behind it at the terminal,
-   * and the next line typed would answer the prompt nobody is listening to any more —
-   * swallowing it. So the menu picks up the request the lobby left behind rather than
-   * making its own.
-   */
-  let outstanding: Promise<string | null> | null = null;
-  const ask = (prompt: string) => {
-    const asked = outstanding ?? io.ask(prompt);
-    outstanding = null;
-    return asked;
-  };
-
-  /**
    * Get a seat: a room of our own, or the one whose code we were given. The code is
    * upper-cased on the way out so it can be typed in however it was heard.
    *
@@ -217,7 +177,7 @@ export async function runSession(
   const promptMainMenu = async (): Promise<EntryMode | { kind: "quit" }> => {
     for (;;) {
       io.output(renderMainMenu());
-      const line = await ask("  > ");
+      const line = await io.ask("  > ");
       if (line === null) return { kind: "quit" };
 
       const command = parseMainMenuCommand(line);
@@ -258,9 +218,6 @@ export async function runSession(
     const { roomCode, playerId } = entered.value;
     io.output(dim(`room ${roomCode} · you are ${playerName}`));
 
-    // This room's own closing notice, not whatever became of the last one.
-    roomClosed = notice();
-
     /**
      * A position worth prompting at: the lobby we are waiting in, our turn, a slapdown
      * of ours waiting to be taken, or a round or match that has ended. Anything else is
@@ -300,29 +257,12 @@ export async function runSession(
           ? dim("  [enter] for the next round ")
           : "  > ";
 
-      /**
-       * The line, or the room going away underneath it — whichever lands first.
-       *
-       * A player waiting in a lobby is by definition doing nothing, so a host closing it
-       * has to reach them where they are: waiting for them to press a key first would
-       * leave them looking at a table that had quietly stopped answering. The prompt
-       * outlives the race — it is still in front of the player — so it is handed on to
-       * the menu rather than dropped.
+      /*
+       * Nothing races the player's line any more. A room ends when its last seat leaves
+       * (docs/adr/0012), so there is no longer a way for one to go away underneath
+       * somebody who is sitting in it — the only exit from this loop is the player's own.
        */
-      const asked = ask(prompt);
-      const answer = await Promise.race([
-        asked.then((line) => ({ kind: "line", line }) as const),
-        roomClosed.arrived.then((reason) => ({ kind: "closed", reason }) as const),
-      ]);
-
-      if (answer.kind === "closed") {
-        io.output(dim(`  room closed — ${answer.reason}`));
-        outstanding = asked;
-        forgetRoom();
-        break;
-      }
-
-      const line = answer.line;
+      const line = await io.ask(prompt);
       if (line === null) return;
 
       /**
@@ -367,9 +307,8 @@ export async function runSession(
 
       /**
        * The one action whose success ends our interest in this room rather than moving
-       * it on. What it cost everyone else — a freed seat, or the room itself — is the
-       * server's decision and not something we are told; either way we are out, and the
-       * menu is where a player without a room belongs.
+       * it on. It costs the rest of the table nothing — the seat is freed and they play
+       * on — and the menu is where a player without a room belongs.
        */
       if (command.kind === "menu") {
         forgetRoom();

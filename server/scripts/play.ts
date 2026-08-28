@@ -17,6 +17,7 @@ import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState, RoundState } from "../src/state.ts";
+import { playersInMatch } from "../src/state.ts";
 import { decideTurn } from "../src/bot.ts";
 import { bold, cyan, dim, green, pad, red, renderCard, renderHand } from "./lib/cardDisplay.ts";
 
@@ -119,7 +120,16 @@ function autoPlay(playerCount: number, seed: number): void {
 
     if (state.phase === "gameEnd") return printFinal(state);
     if (state.phase === "roundEnd") {
-      const next = rooms.apply(roomCode, (s, rng) => startNextRound(s, s.hostId, rng));
+      /*
+       * Dealt by a seat still in the match, not by whoever made the room: nobody is host
+       * once the cards are out, and a seat the match has gone on without is refused
+       * (`NOT_IN_MATCH`, docs/adr/0012). Every seat here is a bot, and the transition
+       * asks about the match rather than about bot-ness precisely so this — the server
+       * dealing its own table — is expressible.
+       */
+      const next = rooms.apply(roomCode, (s, rng) =>
+        startNextRound(s, playersInMatch(s)[0]!.id, rng),
+      );
       if (!next.ok) throw new Error(next.error.message);
       printDeal(rooms.getState(roomCode)!);
       continue;

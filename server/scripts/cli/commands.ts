@@ -51,8 +51,8 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
    *
    * Whether the typist is actually the host is not checked here — the server owns that,
    * and answers `NOT_HOST`. A second opinion in the harness could only ever disagree.
-   * `menu` is likewise sent for anyone: what it costs the rest of the table depends on
-   * whether the typist is the host, and that too is the server's call.
+   * `menu` is sent for anyone and refused to nobody: leaving a lobby costs the rest of
+   * the table nothing, the host's role migrating to the next seat (docs/adr/0012).
    */
   if (view.phase === "lobby") {
     if (line === "start") return { kind: "start" };
@@ -64,9 +64,8 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
   /**
    * A finished match reads like the lobby rather than like a round: the hands on screen
    * are a result, not something anyone can still play from, so the card commands below
-   * are turned down here too. The two moves are the host's replay and anyone's exit —
-   * and, as in the lobby, which of them the typist may actually make is the server's
-   * call, answered with `NOT_HOST`.
+   * are turned down here too. The two moves are open to everyone still in the room: any
+   * of them may deal another match (docs/adr/0012), and any of them may leave.
    */
   if (view.phase === "gameEnd") {
     if (line === "again") return { kind: "again" };
