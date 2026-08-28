@@ -3,8 +3,26 @@ import type { RoomSettings } from "./settings.ts";
 
 export type Phase = "lobby" | "playing" | "roundEnd" | "gameEnd";
 
+/**
+ * What a seat's standing in the match is, on the wire: the round it stopped playing in and
+ * whether it has been given up for good. Carried by both views below, and identically —
+ * being out is a public fact about a table, so there is nothing here to redact.
+ *
+ * Two fields rather than a "state", for the reason the domain model has two (see `Player`
+ * in `server/src/state.ts`): out-ness is one fact, and which of its two causes applies is
+ * derived — **eliminated** is `outInRound !== null` with a score past `settings.maxScore`,
+ * **left** is `outInRound !== null` with `departed`. docs/rules.md §7.
+ */
+export interface MatchStanding {
+  /** The round this seat stopped playing, or null while it is still in the match. */
+  outInRound: number | null;
+  /** Whether this seat has been given up for good. Never true in the lobby, where a
+   * player who leaves is simply gone from the roster. */
+  departed: boolean;
+}
+
 /** The viewing player. Always includes their own hand. */
-export interface SelfView {
+export interface SelfView extends MatchStanding {
   id: string;
   name: string;
   score: number;
@@ -25,7 +43,7 @@ export interface SelfView {
  * Everyone else. Deliberately has no `hand` field at all — not an optional one — so
  * there is no shape where an opponent's cards could be populated by accident.
  */
-export interface OpponentView {
+export interface OpponentView extends MatchStanding {
   id: string;
   name: string;
   score: number;
@@ -157,7 +175,12 @@ export interface PlayerGameView {
 
   you: SelfView;
   opponents: OpponentView[];
-  /** Seating order by player id, including the viewer. */
+  /**
+   * The order play moves in, by player id, including the viewer while they are still in
+   * the match — and only the players who are. Not seating: a table is drawn off the
+   * roster (`you` and `opponents`), which holds its order as players go out, so a seat
+   * keeps its place on the felt. See "Turn order vs. seating" in CONTEXT.md.
+   */
   turnOrder: string[];
 
   /** Null outside an active round. */
@@ -190,6 +213,10 @@ export interface PlayerGameView {
 
   /** Populated only in `roundEnd` and `gameEnd`, where all hands are revealed. */
   roundResult: RoundResultView | null;
-  /** Populated only in `gameEnd`. Multiple ids on a tie. */
+  /**
+   * Populated only in `gameEnd`, and always with exactly one id: the match ends when one
+   * player is left in it, and that player wins (docs/rules.md §7). A list because it has
+   * always been one, and because a client renders a list of one no differently.
+   */
   winnerIds: string[] | null;
 }

@@ -51,6 +51,13 @@ interface Harness {
 }
 
 /**
+ * A match short enough to play out over a socket. Every seat but one has to be knocked
+ * out for a match to end (docs/rules.md §7), so the limit is what decides how many rounds
+ * that takes — and nothing about the wire is proven by playing more of them.
+ */
+const SHORT_MATCH: Partial<RoomSettings> = { maxScore: 20 };
+
+/**
  * Stand up a server on an ephemeral port. Port 0 lets the OS pick, so suites can run
  * concurrently and no test depends on a fixed port being free.
  *
@@ -69,24 +76,32 @@ interface Harness {
  * clock — nor spend real seconds waiting on a bot. Bot turns are still scheduled rather
  * than played in the handler's own tick, so a test that wants one waits for its broadcast
  * whatever the interval is set to.
+ *
+ * `settings` is anything else a suite wants every room seeded with. `SHORT_MATCH` is what
+ * the suites that play a match all the way out pass: a match now ends when one player is
+ * left rather than when the first goes over (docs/rules.md §7), so at the default limit a
+ * full table has to be knocked out one seat at a time — a great many rounds over a real
+ * socket, for no coverage the same match at a lower limit does not give.
  */
 async function startServer(
   seed?: number,
   botCount = MAX_PLAYERS - 1,
   timing: SocketServerOptions = { thinkTimeMs: 0 },
+  settings: Partial<RoomSettings> = {},
 ): Promise<Harness> {
   const httpServer = createServer();
   // Every seat this server issues holds a marked token, so a leak test can grep a payload
   // for a string it knows is a credential.
   const newResumeToken = markedResumeTokens();
+  const defaultSettings = { botCount, ...settings };
   const rooms =
     seed === undefined
-      ? new RoomManager({ newResumeToken, defaultSettings: { botCount } })
+      ? new RoomManager({ newResumeToken, defaultSettings })
       : new RoomManager({
           rng: mulberry32(seed),
           newResumeToken,
           newRoomRng: () => mulberry32(seed + 1),
-          defaultSettings: { botCount },
+          defaultSettings,
         });
   const io = createSocketServer(httpServer, rooms, timing);
 
@@ -658,7 +673,7 @@ describe("playing a match", () => {
   let table: Harness;
 
   before(async () => {
-    table = await startServer(4242);
+    table = await startServer(4242, MAX_PLAYERS - 1, { thinkTimeMs: 0 }, SHORT_MATCH);
   });
   after(async () => {
     await table.close();
@@ -851,19 +866,24 @@ describe("playing a match", () => {
     );
     assert.equal(current.roundNumber, roundsFinished + 1, "every round was dealt");
 
-    // Final standings: every hand revealed, and the winner is whoever is lowest.
+    // Final standings: every hand revealed, and the winner is the last player left in the
+    // match — not whoever is lowest, which is a different player often enough.
     assertRoundIsSettled(current);
-    const scores = [current.you, ...current.opponents].map((p) => p.score);
-    const lowest = Math.min(...scores);
-    assert.ok(current.winnerIds && current.winnerIds.length > 0, "a winner was declared");
-    for (const winnerId of current.winnerIds!) {
-      const winner = [current.you, ...current.opponents].find((p) => p.id === winnerId);
-      assert.equal(winner!.score, lowest, "the winner holds the lowest score");
-    }
-    assert.ok(
-      scores.some((score) => score > MAX_SCORE),
-      "the match ended because someone busted",
+    const table = [current.you, ...current.opponents];
+    const survivors = table.filter((p) => p.outInRound === null);
+    assert.deepEqual(
+      survivors.map((p) => p.id),
+      current.winnerIds,
+      "the one player still in the match is the winner",
     );
+    assert.equal(survivors.length, 1);
+    for (const player of table) {
+      if (player.outInRound === null) continue;
+      assert.ok(
+        player.score > current.settings.maxScore,
+        `${player.name} went out over the room's limit`,
+      );
+    }
   });
 
   /** A finished round shows every hand, what each hand cost, and the new totals. */
@@ -873,7 +893,12 @@ describe("playing a match", () => {
     assertNoResumeToken(view, `a ${view.phase} view`);
     const result = view.roundResult;
     assert.ok(result, "a finished round reports its result");
-    assert.equal(result.players.length, MAX_PLAYERS);
+    // Exactly the players who played the round, which past an elimination is no longer
+    // the whole table: `turnOrder` still names the round being looked at.
+    assert.deepEqual(
+      result.players.map((p) => p.playerId).sort(),
+      [...view.turnOrder].sort(),
+    );
 
     const shownScores = new Map(
       [view.you, ...view.opponents].map((p) => [p.id, p.score]),
@@ -896,7 +921,9 @@ describe("playing a match", () => {
     assert.deepEqual(view.settings, {
       handSize: HAND_SIZE,
       yanivThreshold: YANIV_THRESHOLD,
-      maxScore: MAX_SCORE,
+      // This suite's own limit, not the shared default: what is being asserted is that
+      // the room's settings ride along in every phase, whatever they are.
+      ...SHORT_MATCH,
       botCount: MAX_PLAYERS - 1,
     });
   }
@@ -1073,7 +1100,7 @@ describe("play again and exit to menu", () => {
   let table: Harness;
 
   before(async () => {
-    table = await startServer(97);
+    table = await startServer(97, MAX_PLAYERS - 1, { thinkTimeMs: 0 }, SHORT_MATCH);
   });
   after(async () => {
     await table.close();
@@ -1084,6 +1111,8 @@ describe("play again and exit to menu", () => {
     watcher: Watcher;
     id: string;
     name: string;
+    /** The credential this seat was issued, so a test can try to come back to it. */
+    resumeToken: string;
   }
 
   /** A host and, optionally, other humans, all sitting in the same fresh lobby. */
@@ -1092,19 +1121,40 @@ describe("play again and exit to menu", () => {
     const client = await table.connect();
     const watcher = watch(client);
     const created = expectOk(
-      await ask<{ roomCode: string; playerId: string }>(client, "createRoom", hostName!),
+      await ask<{ roomCode: string; playerId: string; resumeToken: string }>(
+        client,
+        "createRoom",
+        hostName!,
+      ),
     );
     const seats: Seat[] = [
-      { client, watcher, id: created.playerId, name: hostName! },
+      {
+        client,
+        watcher,
+        id: created.playerId,
+        name: hostName!,
+        resumeToken: created.resumeToken,
+      },
     ];
 
     for (const name of guestNames) {
       const guest = await table.connect();
       const guestWatcher = watch(guest);
       const joined = expectOk(
-        await ask<{ playerId: string }>(guest, "joinRoom", created.roomCode, name),
+        await ask<{ playerId: string; resumeToken: string }>(
+          guest,
+          "joinRoom",
+          created.roomCode,
+          name,
+        ),
       );
-      seats.push({ client: guest, watcher: guestWatcher, id: joined.playerId, name });
+      seats.push({
+        client: guest,
+        watcher: guestWatcher,
+        id: joined.playerId,
+        name,
+        resumeToken: joined.resumeToken,
+      });
     }
 
     return { roomCode: created.roomCode, seats };
@@ -1167,7 +1217,9 @@ describe("play again and exit to menu", () => {
       const { roomCode, host } = await finishedMatch();
       const finished = await host.watcher.until((v) => v.phase === "gameEnd", "the finish");
       assert.ok(
-        [finished.you, ...finished.opponents].some((p) => p.score > MAX_SCORE),
+        [finished.you, ...finished.opponents].some(
+          (p) => p.score > finished.settings.maxScore,
+        ),
         "the match really did end on a bust",
       );
 
@@ -1278,13 +1330,40 @@ describe("play again and exit to menu", () => {
 
       host!.watcher.reset();
       expectOk(await ask(guest!.client, "exitToMenu"));
+      // The seat is marked rather than spliced out: from the first deal a roster is
+      // append-only, so the match keeps the record of who played it.
       const standings = await host!.watcher.until(
-        (v) => !v.opponents.some((o) => o.id === guest!.id),
-        "the roster to shrink",
+        (v) => v.opponents.some((o) => o.id === guest!.id && o.departed),
+        "the seat to be marked as given up",
       );
 
       assert.equal(standings.phase, "gameEnd", "the scoreboard is still on screen");
       assert.ok(standings.winnerIds, "and still reports who won");
+    });
+
+    /**
+     * Leaving is final, and the server is what says so. A roster is append-only from the
+     * first deal, so a seat given up keeps its place — and its resume token with it — long
+     * after its player has gone; the credential a stale tab is still holding must not be
+     * enough to sit back down at it.
+     */
+    it("refuses to resume a seat that has been given up", async () => {
+      const { roomCode, seats } = await openLobby(["Ada", "Grace"]);
+      const [host, guest] = seats;
+      expectOk(await ask(host!.client, "startGame"));
+      await playToGameEnd(seats);
+      expectOk(await ask(guest!.client, "exitToMenu"));
+
+      const returning = await table.connect();
+      const result = await ask(returning, "resumeSeat", {
+        roomCode,
+        playerId: guest!.id,
+        resumeToken: guest!.resumeToken,
+      });
+
+      // The same code a wrong token gets: a room code is not a way of finding out which
+      // of its seats have been given up.
+      assert.equal(expectError(result).code, "INVALID_RESUME_TOKEN");
     });
 
     it("closes a finished match for everyone else when the host leaves", async () => {
@@ -1319,13 +1398,18 @@ describe("play again and exit to menu", () => {
       const restarted = await host!.watcher.until((v) => v.phase === "playing", "the deal");
 
       assert.equal(
-        restarted.opponents.length,
-        MAX_PLAYERS - 2,
+        restarted.turnOrder.length,
+        MAX_PLAYERS - 1,
         "the table is one seat smaller, and no bot moved in",
       );
       assert.ok(
-        !restarted.opponents.some((o) => o.id === guest!.id),
+        !restarted.turnOrder.includes(guest!.id),
         "the player who left is not back at the table",
+      );
+      assert.equal(
+        restarted.opponents.find((o) => o.id === guest!.id)!.departed,
+        true,
+        "their seat is still listed, and still marked as given up",
       );
     });
 
@@ -1599,6 +1683,11 @@ describe("slapping down", () => {
   /**
    * The race, resolved by nothing more than the order the two events arrive in
    * (ADR-0005). Losing it looks exactly like never having had a window.
+   *
+   * Either refusal counts, and the pair is the whole set: the seat after Grace's is a bot
+   * playing on a zero pause, so it may have called Yaniv and scored the round out from
+   * under the slap before it landed. That is the same news to Ada — the window is spent
+   * and her hand is untouched, which is what the assertions below actually turn on.
    */
   it("turns away a slap the next player's turn got in ahead of", async () => {
     const { ada, grace, adaView, graceView } = await playToAnOpenWindow();
@@ -1607,7 +1696,10 @@ describe("slapping down", () => {
 
     const result = await ask(ada.client, "slapDown");
 
-    assert.equal(expectError(result).code, "SLAPDOWN_NOT_AVAILABLE");
+    assert.ok(
+      ["SLAPDOWN_NOT_AVAILABLE", "WRONG_PHASE"].includes(expectError(result).code),
+      `a lost race is refused, got ${expectError(result).code}`,
+    );
     const after = await ada.watcher.until(
       (v) => v.phase !== "playing" || v.currentTurnPlayerId !== grace.id,
       "Grace's turn to be played out",

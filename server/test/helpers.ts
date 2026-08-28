@@ -11,6 +11,7 @@ import type { Clock } from "../src/clock.ts";
 import { createDeck } from "../src/deck.ts";
 import type { Result } from "../src/result.ts";
 import type { GameState, GameStateActive, Player, RoundState } from "../src/state.ts";
+import { inMatch } from "../src/state.ts";
 
 const DEFAULT_SETTINGS: RoomSettings = {
   handSize: HAND_SIZE,
@@ -62,7 +63,16 @@ export type MoveHistorySpec =
 
 export interface StateOptions {
   phase?: Phase;
-  players?: Array<{ id: string; name?: string; score?: number; isBot?: boolean }>;
+  players?: Array<{
+    id: string;
+    name?: string;
+    score?: number;
+    isBot?: boolean;
+    /** The round they went out in. Omitted means still in the match. */
+    outInRound?: number | null;
+    /** They gave their seat up. Implies `outInRound` — set both to pin a left seat down. */
+    departed?: boolean;
+  }>;
   /** playerId -> card ids. */
   hands?: Record<string, string[]>;
   drawPile?: string[];
@@ -89,16 +99,21 @@ export function makeState(options: StateOptions = {}): GameState {
     name: p.name ?? `Player ${i + 1}`,
     score: p.score ?? 0,
     isBot: p.isBot ?? false,
+    outInRound: p.outInRound ?? null,
+    departed: p.departed ?? false,
     // Derived from the id rather than random, so a leak test can name the exact string
     // it expects never to see. `RESUME_TOKEN_MARK` is what identifies one on the wire.
     resumeToken: `${RESUME_TOKEN_MARK}${p.id}`,
   }));
-  const turnOrder = players.map((p) => p.id);
+  // Only the seats still in the match are dealt to and take turns — the roster keeps
+  // whoever has gone out, in the place they were sitting. docs/rules.md §7.
+  const turnOrder = players.filter(inMatch).map((p) => p.id);
   const phase = options.phase ?? "playing";
 
   const base = {
     roomCode: "TEST",
-    hostId: turnOrder[0]!,
+    // The roster's first seat, not turn order's: a host who has gone out is still the host.
+    hostId: players[0]!.id,
     players,
     settings: { ...DEFAULT_SETTINGS, ...options.settings },
     roundNumber: options.roundNumber ?? 1,

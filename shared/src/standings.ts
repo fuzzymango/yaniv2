@@ -8,10 +8,11 @@
  * about a match that is already over. What is left to each of them is how a row is drawn.
  *
  * The standings are not the roster. A player who exits to the main menu from a finished
- * match gives up their seat and leaves `opponents`, but leaving does not undo how the match
- * finished — so their row is rebuilt from the round result, which carries its own copy of
- * their name and their final score for exactly this reason. Dropping it instead would take
- * a departed winner's mark off the board with them. See "Standings" in CONTEXT.md.
+ * match gives up their seat, and leaving does not undo how the match finished — so their
+ * row stays, marked `departed`: off the seat itself where the roster still holds it, and
+ * rebuilt from the round result where it does not. The round result carries its own copy
+ * of a name and a final score for exactly that reason. Dropping either would take a
+ * departed winner's mark off the board with them. See "Standings" in CONTEXT.md.
  *
  * Pure over the view, so it costs `shared` none of its dependency-freedom.
  */
@@ -33,7 +34,9 @@ export function standings(view: PlayerGameView): Standing[] {
     playerId: p.id,
     name: p.name,
     score: p.score,
-    departed: false,
+    // Said by the seat itself: from the first deal a roster is append-only, so a player
+    // who has given their seat up is still listed — marked, rather than missing.
+    departed: p.departed,
   }));
 
   const departed: Standing[] = (view.roundResult?.players ?? [])

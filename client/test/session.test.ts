@@ -1760,14 +1760,14 @@ describe("a finished match", () => {
 
       const shrunk = await waitForSnapshot(
         host,
-        "the roster to shrink",
-        (s) => !s.view!.opponents.some((o) => o.id === guestId),
+        "the seat to be marked as given up",
+        (s) => s.view!.opponents.some((o) => o.id === guestId && o.departed),
       );
       assert.equal(shrunk.view!.phase, "gameEnd", "the match is still over and still on screen");
 
-      // The seat is gone but the match they played is not, and the round that ended it
-      // carries their name — which is the whole of what the standings need to keep listing
-      // them, winner's mark and all.
+      // The seat is given up but the match they played is not, and the round that ended
+      // it carries their name — which is the whole of what the standings need to keep
+      // listing them, winner's mark and all.
       const departed = shrunk.view!.roundResult!.players.find((p) => p.playerId === guestId);
       assert.ok(departed, "the round result names its own players");
       assert.ok(departed.name.length > 0);

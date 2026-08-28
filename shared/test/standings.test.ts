@@ -10,15 +10,20 @@ import type { PlayerGameView, PlayerRoundResultView } from "../src/views.ts";
  * The hands are empty because nothing here looks at them — a fixture that filled them in
  * would be claiming otherwise.
  */
+interface Seat {
+  id: string;
+  name: string;
+  score: number;
+  /** They gave their seat up, and the roster kept it — the append-only case. */
+  departed?: boolean;
+}
+
 function finishedMatch(options: {
-  seated: { id: string; name: string; score: number }[];
+  seated: Seat[];
   played?: { id: string; name: string; score: number }[];
   turnOrder?: string[];
 }): PlayerGameView {
-  const [you, ...opponents] = options.seated as [
-    { id: string; name: string; score: number },
-    ...{ id: string; name: string; score: number }[],
-  ];
+  const [you, ...opponents] = options.seated as [Seat, ...Seat[]];
   const played = options.played ?? options.seated;
 
   const players: PlayerRoundResultView[] = played.map((p) => ({
@@ -37,8 +42,19 @@ function finishedMatch(options: {
     roundNumber: 4,
     hostId: you.id,
     settings: { handSize: 5, yanivThreshold: 7, maxScore: 100, botCount: 0 },
-    you: { ...you, hand: [], slapdownEligible: false },
-    opponents: opponents.map((p) => ({ ...p, handSize: 0 })),
+    you: {
+      ...you,
+      hand: [],
+      slapdownEligible: false,
+      outInRound: null,
+      departed: you.departed ?? false,
+    },
+    opponents: opponents.map((p) => ({
+      ...p,
+      handSize: 0,
+      outInRound: null,
+      departed: p.departed ?? false,
+    })),
     turnOrder: options.turnOrder ?? options.seated.map((p) => p.id),
     currentTurnPlayerId: null,
     drawPileCount: 0,
@@ -121,6 +137,31 @@ describe("standings", () => {
         ["Ada", 104, false],
       ],
       "leaving does not undo how the match finished, so a departed winner keeps the top row",
+    );
+  });
+
+  /**
+   * The same news said the other way: from the first deal a roster is append-only, so a
+   * player who left is usually still *in* the view, marked rather than missing. The row
+   * has to read the same either way, or a match would finish differently depending on
+   * whether the seat was still listed.
+   */
+  it("marks a seat the roster kept but its player gave up", () => {
+    const rows = standings(
+      finishedMatch({
+        seated: [
+          { id: "p1", name: "Ada", score: 104 },
+          { id: "p2", name: "Grace", score: 12, departed: true },
+        ],
+      }),
+    );
+
+    assert.deepEqual(
+      rows.map((r) => [r.name, r.score, r.departed]),
+      [
+        ["Grace", 12, true],
+        ["Ada", 104, false],
+      ],
     );
   });
 

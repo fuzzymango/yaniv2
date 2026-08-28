@@ -1204,8 +1204,123 @@ describe("callYaniv — milestone reduction", () => {
   });
 });
 
-describe("callYaniv — ending the match", () => {
-  it("ends the match once a score passes 100", () => {
+/**
+ * docs/rules.md §7: crossing the room's max score takes that player out of the match
+ * rather than ending it, and the match ends when one player is left. A two-player table
+ * is the same rule read at its smallest — the round that knocks one of them out leaves
+ * exactly one, so it ends the match, which is what two players have always done.
+ */
+describe("callYaniv — elimination", () => {
+  it("marks a player whose total passes maxScore as out, in the round they went out", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 10 },
+        { id: "p2", score: 95 },
+        { id: "p3", score: 20 },
+      ],
+      hands: { p1: ["hearts-A"], p2: ["spades-K", "clubs-K"], p3: ["clubs-3"] },
+      roundNumber: 4,
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+
+    const p2 = after.players.find((p) => p.id === "p2")!;
+    assert.equal(p2.outInRound, 4);
+    assert.equal(p2.departed, false, "eliminated is not departed");
+    assert.equal(p2.score, 115, "their total is frozen where it stood");
+  });
+
+  it("plays on with everybody else once somebody goes out", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 10 },
+        { id: "p2", score: 95 },
+        { id: "p3", score: 20 },
+      ],
+      hands: { p1: ["hearts-A"], p2: ["spades-K", "clubs-K"], p3: ["clubs-3"] },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+
+    assert.equal(after.phase, "roundEnd", "one bust no longer ends a three-hander");
+    assert.equal(after.winnerIds, null);
+    assert.deepEqual(
+      after.players.filter((p) => p.outInRound === null).map((p) => p.id),
+      ["p1", "p3"],
+    );
+  });
+
+  it("deals the next round to the survivors alone, in their seated order", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 10 },
+        { id: "p2", score: 95 },
+        { id: "p3", score: 20 },
+      ],
+      hands: { p1: ["hearts-A"], p2: ["spades-K", "clubs-K"], p3: ["clubs-3"] },
+    });
+    const next = unwrap(startNextRound(unwrap(callYaniv(state, "p1")), "p1", rng()));
+
+    assert.equal(next.phase, "playing");
+    assert.deepEqual(next.round.turnOrder, ["p1", "p3"]);
+    assert.deepEqual(Object.keys(next.round.hands), ["p1", "p3"]);
+    assert.equal(next.round.hands["p1"]!.length, 5);
+    assert.equal(allCardIds(next).length, 54);
+  });
+
+  it("scores nothing further for a player already out", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 10 },
+        { id: "p2", score: 115, outInRound: 2 },
+        { id: "p3", score: 20 },
+      ],
+      hands: { p1: ["hearts-A"], p3: ["clubs-3"] },
+      roundNumber: 3,
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+
+    const p2 = after.players.find((p) => p.id === "p2")!;
+    assert.equal(p2.score, 115);
+    assert.equal(p2.outInRound, 2, "the round they went out in is not rewritten");
+    assert.ok(
+      !after.lastRoundResult!.players.some((p) => p.playerId === "p2"),
+      "a player who is out has no result in a round they did not play",
+    );
+  });
+
+  it("ends the match when exactly one player is left, and that player wins", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 10 },
+        { id: "p2", score: 95 },
+        { id: "p3", score: 99, outInRound: null },
+      ],
+      // p1 calls with 1 unopposed: p2 takes 20 and goes out, p3 takes 10 and goes out.
+      hands: { p1: ["hearts-A"], p2: ["spades-K", "clubs-K"], p3: ["clubs-10"] },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+
+    assert.equal(after.phase, "gameEnd");
+    assert.deepEqual(after.winnerIds, ["p1"]);
+  });
+
+  it("wins on outlasting everyone, not on holding the lowest score", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 70 },
+        { id: "p2", score: 99 },
+      ],
+      // p2 Assafs p1 and scores nothing; p1 takes 7 + 30 and passes 100.
+      hands: { p1: ["hearts-3", "hearts-4"], p2: ["spades-2", "spades-3"] },
+    });
+    const after = unwrap(callYaniv(state, "p1"));
+
+    assert.equal(after.phase, "gameEnd");
+    assert.deepEqual(after.winnerIds, ["p2"], "the survivor wins, on the higher score");
+    assert.equal(after.players.find((p) => p.id === "p2")!.score, 99);
+    assert.equal(after.players.find((p) => p.id === "p1")!.score, 107);
+  });
+
+  it("ends a two-player match on the first player out, with no special case", () => {
     const state = makeState({
       players: [{ id: "p1", score: 10 }, { id: "p2", score: 95 }],
       hands: { p1: ["hearts-A"], p2: ["spades-K", "clubs-K"] },
@@ -1214,6 +1329,7 @@ describe("callYaniv — ending the match", () => {
 
     assert.equal(after.phase, "gameEnd");
     assert.deepEqual(after.winnerIds, ["p1"]);
+    assert.equal(after.players.find((p) => p.id === "p1")!.outInRound, null);
   });
 
   it("keeps playing at exactly 100, milestone-reduced to 50", () => {
@@ -1224,11 +1340,12 @@ describe("callYaniv — ending the match", () => {
     const after = unwrap(callYaniv(state, "p1"));
 
     assert.equal(after.players.find((p) => p.id === "p2")!.score, 50);
+    assert.equal(after.players.find((p) => p.id === "p2")!.outInRound, null);
     assert.equal(after.phase, "roundEnd");
     assert.equal(after.winnerIds, null);
   });
 
-  it("busts against the room's own maxScore, not the shared default", () => {
+  it("goes out against the room's own maxScore, not the shared default", () => {
     const state = makeState({
       players: [{ id: "p1", score: 10 }, { id: "p2", score: 15 }],
       hands: { p1: ["hearts-A"], p2: ["spades-K"] },
@@ -1241,22 +1358,24 @@ describe("callYaniv — ending the match", () => {
     assert.deepEqual(after.winnerIds, ["p1"]);
   });
 
-  it("reports every player tied for the lowest score as a winner", () => {
+  /**
+   * The proof in §7 read back as a test: the round's winner scores 0 and a reduction only
+   * subtracts, so whoever won the round cannot be knocked out by it — which is what makes
+   * "nobody is left" unreachable and the next round's opener guaranteed.
+   */
+  it("never empties the match, even with everyone else already at the line", () => {
     const state = makeState({
       players: [
-        { id: "p1", score: 5 },
-        { id: "p2", score: 0 },
-        { id: "p3", score: 95 },
+        { id: "p1", score: 100 },
+        { id: "p2", score: 100 },
+        { id: "p3", score: 100 },
       ],
-      hands: { p1: ["hearts-A"], p2: ["spades-5"], p3: ["clubs-10"] },
-      currentTurnPlayerId: "p1",
+      hands: { p1: ["hearts-A"], p2: ["spades-K"], p3: ["clubs-10"] },
     });
-    // p1 calls with 1 and is unopposed: p1 stays on 5, p2 takes 5 to reach 5,
-    // and p3 takes 10 to bust on 105.
     const after = unwrap(callYaniv(state, "p1"));
 
     assert.equal(after.phase, "gameEnd");
-    assert.deepEqual([...after.winnerIds!].sort(), ["p1", "p2"]);
+    assert.deepEqual(after.winnerIds, ["p1"]);
   });
 });
 
@@ -1750,6 +1869,29 @@ describe("startNextRound", () => {
   it("rejects advancing mid-round", () => {
     expectErr(startNextRound(makeState(), "p1", rng()), "WRONG_PHASE");
   });
+
+  /**
+   * A round is opened by whoever won the last one, who is always still in the match (§7).
+   * The fallback behind that is the first seat still playing rather than the host, who
+   * may be out by now — a starter with no place in `turnOrder` would be dealt no hand and
+   * hand the turn on to nobody.
+   */
+  it("never opens a round on a seat that is out of the match", () => {
+    const scored = makeState({
+      phase: "roundEnd",
+      players: [
+        { id: "p1", score: 105, outInRound: 1 },
+        { id: "p2", score: 10 },
+        { id: "p3", score: 20 },
+      ],
+    });
+
+    const next = unwrap(startNextRound({ ...scored, lastRoundResult: null }, "p1", rng()));
+
+    assert.equal(next.phase, "playing");
+    assert.equal(next.round.currentTurnPlayerId, "p2");
+    assert.deepEqual(next.round.turnOrder, ["p2", "p3"]);
+  });
 });
 
 describe("playAgain", () => {
@@ -1853,6 +1995,33 @@ describe("playAgain", () => {
     expectErr(playAgain(makeState({ phase: "roundEnd" }), "p1", rng()), "WRONG_PHASE");
   });
 
+  /** docs/rules.md §7: another match is a fresh one, so nobody carries an elimination in. */
+  it("clears every elimination, putting the whole room back in the match", () => {
+    const again = unwrap(playAgain(finishedMatch(), "p1", rng()));
+
+    assert.ok(
+      again.players.every((p) => p.outInRound === null),
+      "the loser of the last match is playing this one",
+    );
+    assert.equal(again.phase, "playing");
+    assert.deepEqual(again.round.turnOrder, ["p1", "p2"]);
+  });
+
+  it("leaves a seat that was given up out of the new match", () => {
+    const left = unwrap(removePlayer(finishedMatch(), "p2"));
+    const three = {
+      ...left,
+      players: [...left.players, { ...left.players[0]!, id: "p3", name: "Third" }],
+    };
+
+    const again = unwrap(playAgain(three, "p1", rng()));
+
+    assert.equal(again.phase, "playing");
+    assert.deepEqual(again.round.turnOrder, ["p1", "p3"], "the departed seat is not dealt");
+    assert.equal(again.players.find((p) => p.id === "p2")!.outInRound, 0);
+    assert.equal(again.players.find((p) => p.id === "p2")!.departed, true);
+  });
+
   /**
    * Seats emptied by an exit to the menu stay empty — they are never backfilled with a
    * bot — so a table can be talked down below the minimum before the host plays again.
@@ -1880,13 +2049,19 @@ describe("removePlayer", () => {
     );
   });
 
-  it("frees the seat of a player leaving a finished match", () => {
+  /**
+   * The other half of the rule: from the first deal a roster is append-only, so leaving
+   * marks the seat rather than splicing it out — which is what lets a table it played at
+   * still draw it, and its standings still list it.
+   */
+  it("marks the seat of a player leaving a finished match, keeping it in the roster", () => {
     const finished = makeState({
       phase: "gameEnd",
       players: [
         { id: "p1", score: 40 },
-        { id: "p2", score: 105 },
+        { id: "p2", score: 105, outInRound: 6 },
       ],
+      roundNumber: 6,
     });
 
     const after = unwrap(removePlayer(finished, "p2"));
@@ -1894,9 +2069,42 @@ describe("removePlayer", () => {
     assert.equal(after.phase, "gameEnd");
     assert.deepEqual(
       after.players.map((p) => p.id),
-      ["p1"],
+      ["p1", "p2"],
     );
+    const p2 = after.players.find((p) => p.id === "p2")!;
+    assert.equal(p2.departed, true);
+    assert.equal(p2.outInRound, 6, "the round they were eliminated in stands");
+    assert.equal(p2.score, 105, "and the total they finished on with it");
     assert.equal(after.players[0]!.score, 40, "whoever stays keeps their standing");
+  });
+
+  /** The winner walking off: still in the match when they left, so the round is now. */
+  it("takes a player still in the match out of it as of the current round", () => {
+    const finished = makeState({
+      phase: "gameEnd",
+      players: [
+        { id: "p1", score: 40 },
+        { id: "p2", score: 105, outInRound: 6 },
+      ],
+      roundNumber: 6,
+    });
+
+    const p1 = unwrap(removePlayer(finished, "p1")).players.find((p) => p.id === "p1")!;
+
+    assert.equal(p1.departed, true);
+    assert.equal(p1.outInRound, 6);
+  });
+
+  it("rejects a seat that has already been given up", () => {
+    const finished = makeState({
+      phase: "gameEnd",
+      players: [
+        { id: "p1", score: 40 },
+        { id: "p2", score: 105, outInRound: 6, departed: true },
+      ],
+    });
+
+    expectErr(removePlayer(finished, "p2"), "PLAYER_NOT_FOUND");
   });
 
   /**

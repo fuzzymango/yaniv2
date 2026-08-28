@@ -275,8 +275,15 @@ export function createSocketServer(
      *
      * A room that has gone is said so plainly, since `joinRoom` already answers that
      * question for any code and there is nothing left to withhold. What is inside one is
-     * a different matter: a wrong token and a player the room never held share a single
-     * code, or a room code would become a way of fishing for the seats behind it.
+     * a different matter: a wrong token, a player the room never held and a seat that has
+     * been given up share a single code, or a room code would become a way of fishing for
+     * the seats behind it.
+     *
+     * That last case is checked here rather than left to the client forgetting its
+     * credential: a roster is append-only from the first deal, so a departed seat and its
+     * token now outlive the player, and a stale tab holding one would otherwise rebind to
+     * a seat its owner gave up and be handed every broadcast after it. Leaving is final,
+     * and the server is what says so.
      *
      * The position goes back in the ack alone. Nothing is broadcast, because nothing
      * about the table has changed — a resume is invisible to everyone else, who are
@@ -296,7 +303,7 @@ export function createSocketServer(
       }
 
       const player = getPlayer(state, playerId);
-      if (!player || player.resumeToken !== resumeToken) {
+      if (!player || player.departed || player.resumeToken !== resumeToken) {
         ack(err("INVALID_RESUME_TOKEN", "That seat cannot be resumed"));
         return;
       }

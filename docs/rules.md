@@ -187,11 +187,6 @@ it, and no round can empty the match. It follows that the next round always has 
 player (§6), and that "exactly one left" is reachable from every position rather than a
 condition play might step over.
 
-*Elimination is the rulebook leading the code, and the engine has not caught up yet: it
-still ends the match at the first player over the line and wins it on the lowest total.
-Tracked by [#138](https://github.com/fuzzymango/yaniv2/issues/138); delete this note when
-it lands.*
-
 A finished match may be **played again** by the same table: every score returns to 0, every
 elimination is cleared so that everyone still in the room is back in the match, the round
 count starts over, and round 1 is dealt straight away with its opening player drawn at

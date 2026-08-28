@@ -32,6 +32,43 @@ export interface Player {
    * to play on their behalf.
    */
   isBot: boolean;
+  /**
+   * The round this seat stopped playing, whichever way that happened, or `null` while it
+   * is still in the match. docs/rules.md §7, and "Out of the match" in CONTEXT.md.
+   *
+   * The one fact about out-ness, with no accompanying boolean: `outInRound !== null` asks
+   * the same question with no second source of truth to disagree with it. *Why* a seat is
+   * out is derived and never stored — **eliminated** is out with a total past the room's
+   * max score, **left** is out with `departed` below — and the two are disjoint by the
+   * rules rather than by convention: a player who left cannot also be over the line, or
+   * they would have gone out at the scoring that took them over it.
+   *
+   * A seat that is out is dealt no hand, holds no place in `RoundState.turnOrder` and
+   * scores nothing further; its total is frozen where it stood.
+   */
+  outInRound: number | null;
+  /**
+   * Whether this seat has been given up for good. From the first deal a roster is
+   * append-only, so leaving marks the seat rather than splicing it out — which is what
+   * makes "out of the match, and gone" representable at all, and what keeps a departed
+   * player in the record of the match they played. In the lobby, where there is no match
+   * record to be part of, leaving still removes the player outright.
+   */
+  departed: boolean;
+}
+
+/**
+ * Whether this seat is still playing the match: the question every seat count and every
+ * map over a roster now has to ask, membership in the roster no longer meaning membership
+ * in the match. Named rather than written out, so a filter cannot drift from the field.
+ */
+export function inMatch(player: Player): boolean {
+  return player.outInRound === null;
+}
+
+/** The seats still playing, in roster (seating) order. */
+export function playersInMatch(state: GameState): Player[] {
+  return state.players.filter(inMatch);
 }
 
 /**
@@ -131,7 +168,15 @@ export interface RoundState {
   /** Previously discarded cards, out of play. Reshuffled when the draw pile empties. */
   buried: Card[];
   currentTurnPlayerId: string;
-  /** Seating order, fixed for the whole match. */
+  /**
+   * The order play moves in, and only that: the players still in the match when this
+   * round was dealt, in seating order. A player who goes out (§7) is not in the next
+   * round's, and the rest keep their relative order.
+   *
+   * Not seating — where a seat is drawn is its place in `players`, which a room only
+   * appends to once it has dealt, so a table does not rearrange itself around whoever is
+   * left. See "Turn order vs. seating" in CONTEXT.md.
+   */
   turnOrder: string[];
   /**
    * The slapdown left open by the turn that just resolved, or null. Belongs to the
@@ -213,7 +258,12 @@ export interface GameStateBase {
   roundNumber: number;
   /** Null until a round has finished. */
   lastRoundResult: RoundResult | null;
-  /** Null until `gameEnd`. Multiple ids on a tie for lowest score. */
+  /**
+   * Null until `gameEnd`, and **always exactly one id** once populated: a match ends when
+   * one player is left in it, and that player wins (docs/rules.md §7). Still a list, since
+   * the wire type and both clients already handle one — and a list of one is what a
+   * reader of a finished match is shown either way.
+   */
   winnerIds: string[] | null;
 }
 

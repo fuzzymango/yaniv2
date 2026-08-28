@@ -2,6 +2,7 @@ import type {
   Card,
   DrawSource,
   LastMoveView,
+  MatchStanding,
   MoveHistoryEntryView,
   OpponentView,
   PlayerGameView,
@@ -13,8 +14,10 @@ import type {
   GameState,
   LastMove,
   MoveHistoryEntry,
+  Player,
   RoundResult,
 } from "./state.ts";
+import { inMatch } from "./state.ts";
 
 /**
  * Names come from the result itself, not from the roster: a player may have given their
@@ -36,6 +39,18 @@ function toRoundResultView(result: RoundResult): RoundResultView {
       scoreAfter: p.scoreAfter,
     })),
   };
+}
+
+/**
+ * Where a seat stands in the match, for either view. Nothing is redacted: whether a player
+ * is still in it is a public fact about a table — every other seat watched them go out —
+ * and both views carry it so a client can draw every seat in its correct state.
+ *
+ * One helper for the two views and both phases, so a seat cannot read as out to one
+ * viewer and in to another.
+ */
+function standingOf(player: Player): MatchStanding {
+  return { outInRound: player.outInRound, departed: player.departed };
 }
 
 /**
@@ -124,12 +139,19 @@ export function serializeStateForPlayer(
       id: viewer.id,
       name: viewer.name,
       score: viewer.score,
+      ...standingOf(viewer),
       hand: [],
       slapdownEligible: false,
     };
     const opponents: OpponentView[] = state.players
       .filter((p) => p.id !== viewerPlayerId)
-      .map((p) => ({ id: p.id, name: p.name, score: p.score, handSize: 0 }));
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        score: p.score,
+        ...standingOf(p),
+        handSize: 0,
+      }));
 
     return {
       roomCode: state.roomCode,
@@ -139,7 +161,9 @@ export function serializeStateForPlayer(
       settings: state.settings,
       you,
       opponents,
-      turnOrder: state.players.map((p) => p.id),
+      // Every seat, a lobby being a table nobody has gone out of yet — but read off the
+      // same rule the dealt rounds' turn order is built by, rather than off the roster.
+      turnOrder: state.players.filter(inMatch).map((p) => p.id),
       currentTurnPlayerId: null,
       drawPileCount: 0,
       lastDiscard: [],
@@ -158,6 +182,7 @@ export function serializeStateForPlayer(
     id: viewer.id,
     name: viewer.name,
     score: viewer.score,
+    ...standingOf(viewer),
     // Sorted here rather than in the engine: hand order is presentation, and this
     // is the one place every client is guaranteed to go through.
     hand: sortHand(round.hands[viewer.id] ?? []),
@@ -174,6 +199,9 @@ export function serializeStateForPlayer(
       id: p.id,
       name: p.name,
       score: p.score,
+      ...standingOf(p),
+      // Zero for a seat that is out: it holds no hand, the round having been dealt
+      // without it — the same absence a client draws an empty seat from.
       handSize: round.hands[p.id]?.length ?? 0,
     }));
 

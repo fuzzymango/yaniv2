@@ -41,6 +41,7 @@ export type {
   TurnHistoryEntryView,
   SlapdownHistoryEntryView,
   MoveHistoryEntryView,
+  MatchStanding,
   SelfView,
   OpponentView,
   PlayerRoundResultView,

@@ -647,7 +647,90 @@ describe("serializeStateForPlayer — settings", () => {
   });
 });
 
+/**
+ * Where each seat stands in the match, on both views and identically: a client cannot draw
+ * an eliminated seat, or a departed one, off a payload that does not say which is which —
+ * and being out is public, so there is nothing here one viewer knows and another does not.
+ */
+describe("serializeStateForPlayer — out of the match", () => {
+  const table = () =>
+    makeState({
+      players: [
+        { id: "p1", name: "Ada" },
+        { id: "p2", name: "Grace", score: 105, outInRound: 3 },
+        { id: "p3", name: "Alan", score: 40, outInRound: 2, departed: true },
+      ],
+      hands: { p1: ["hearts-3"] },
+      lastDiscard: ["clubs-7"],
+      roundNumber: 4,
+    });
+
+  it("says a still-playing seat is in the match, on both views", () => {
+    const view = serializeStateForPlayer(table(), "p1");
+
+    assert.equal(view.you.outInRound, null);
+    assert.equal(view.you.departed, false);
+
+    const asOpponent = serializeStateForPlayer(table(), "p2").opponents.find(
+      (p) => p.id === "p1",
+    )!;
+    assert.equal(asOpponent.outInRound, null);
+    assert.equal(asOpponent.departed, false);
+  });
+
+  it("names the round an eliminated seat went out in, and holds no hand for it", () => {
+    const view = serializeStateForPlayer(table(), "p1");
+    const grace = view.opponents.find((p) => p.id === "p2")!;
+
+    assert.equal(grace.outInRound, 3);
+    assert.equal(grace.departed, false, "eliminated is not departed");
+    assert.equal(grace.score, 105);
+    assert.equal(grace.handSize, 0);
+  });
+
+  it("keeps a departed seat on the wire, marked", () => {
+    const alan = serializeStateForPlayer(table(), "p1").opponents.find(
+      (p) => p.id === "p3",
+    )!;
+
+    assert.equal(alan.departed, true);
+    assert.equal(alan.outInRound, 2);
+  });
+
+  /** An eliminated player is still a viewer, and reads their own seat the same way. */
+  it("tells an eliminated viewer they are out, in their own view", () => {
+    const view = serializeStateForPlayer(table(), "p2");
+
+    assert.equal(view.you.outInRound, 3);
+    assert.equal(view.you.departed, false);
+    assert.deepEqual(view.you.hand, [], "out of the match is holding no cards");
+    assert.equal(view.you.slapdownEligible, false);
+  });
+
+  it("sends turn order without the seats that have gone out", () => {
+    assert.deepEqual(serializeStateForPlayer(table(), "p1").turnOrder, ["p1"]);
+  });
+
+  it("keeps every seat in the roster it draws the table from", () => {
+    const view = serializeStateForPlayer(table(), "p1");
+
+    assert.deepEqual(
+      view.opponents.map((p) => p.id),
+      ["p2", "p3"],
+      "a seat that is out is drawn where it was sitting, not dropped",
+    );
+  });
+});
+
 describe("serializeStateForPlayer — lobby", () => {
+  it("has everyone in the match and nobody departed", () => {
+    const view = serializeStateForPlayer(makeState({ phase: "lobby" }), "p1");
+
+    assert.equal(view.you.outInRound, null);
+    assert.equal(view.you.departed, false);
+    assert.ok(view.opponents.every((p) => p.outInRound === null && !p.departed));
+  });
+
   it("reports an empty table before the first deal", () => {
     const view = serializeStateForPlayer(makeState({ phase: "lobby" }), "p1");
 
@@ -746,10 +829,9 @@ describe("serializeStateForPlayer — round end", () => {
     const view = serializeStateForPlayer(unwrap(removePlayer(ended, "p2")), "p1");
 
     assert.ok(view.roundResult);
-    assert.ok(
-      !view.opponents.some((o) => o.id === "p2"),
-      "the fixture should have freed Grace's seat",
-    );
+    // The roster keeps her seat, marked — the record of the round names her either way,
+    // which is what a client that has to place a departed player reads.
+    assert.equal(view.opponents.find((o) => o.id === "p2")!.departed, true);
     const grace = view.roundResult.players.find((p) => p.playerId === "p2")!;
     assert.equal(grace.name, "Grace");
     assert.equal(grace.scoreAfter, 115, "and what the round cost her");
