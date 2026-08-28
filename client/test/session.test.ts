@@ -256,9 +256,27 @@ async function hostAndGuest(server: Harness): Promise<[Session, Session]> {
  * Whoever opens is chosen at random (ADR-0001) and the server plays every bot seat out
  * before it stops, so waiting for our own turn is the only way to know the table has
  * come to rest — and the only position a turn can be taken from.
+ *
+ * `maxScore` is the one setting a test may name, and it is sent through the lobby's own
+ * event as a host would send it, so the room plays to a limit it was actually told rather
+ * than one a fixture reached in and set. Omitted, the room plays to the default.
  */
-async function soloMatch(server: Harness): Promise<Session> {
+async function soloMatch(server: Harness, maxScore?: number): Promise<Session> {
   const [host] = await hostARoom(server, "Ada");
+  if (maxScore !== undefined) {
+    host.updateSettings({
+      handSize: HAND_SIZE,
+      yanivThreshold: YANIV_THRESHOLD,
+      maxScore,
+      botCount: MAX_PLAYERS - 1,
+    });
+    await waitForSnapshot(
+      host,
+      "the room to be playing to that score",
+      (s) => s.view?.settings.maxScore === maxScore && !s.busy,
+    );
+  }
+
   host.startGame();
   await waitForSnapshot(
     host,
@@ -308,6 +326,11 @@ const HUMAN_CALLS_FIRST = 27;
 /** Worth taking face up rather than gambling on the deck, for the driver below. */
 const CHEAP_PICKUP = 3;
 
+/** Whatever is pending, un-tapped — a player changing their mind before they play. */
+function untapAll(session: Session): void {
+  for (const cardId of session.getSnapshot().selection) session.toggleCard(cardId);
+}
+
 /**
  * One turn, taken through the intents a pair of taps would go through.
  *
@@ -317,8 +340,13 @@ const CHEAP_PICKUP = 3;
  * rulebook for what is legal, exactly as the client does, and decides for itself what is
  * wise; there is no import from `bot.ts` here, and a smarter bot must not quietly change
  * what this drives.
+ *
+ * It starts from an empty selection rather than assuming one: a seat may have tapped a
+ * card while waiting for its turn to come round, and this turn is the one being played
+ * now rather than that one composed onto it.
  */
 function takeATurn(session: Session, view: PlayerGameView): void {
+  untapAll(session);
   const heaviest = legalDiscards(playingSelf(view).hand).sort(
     (a, b) => handValue(b) - handValue(a),
   )[0]!;
@@ -375,7 +403,8 @@ function anyPublication(sessions: Session[]): Promise<void> {
 }
 
 /**
- * Play a whole match out, however many humans are at the table, and stop on the standings.
+ * Play the match on, however many humans are at the table, until the position they are all
+ * looking at is the one being played towards.
  *
  * Driven entirely off published snapshots — the same surface a screen reads — because
  * nothing else tells a client whose move it is. Each pass looks at every session, acts for
@@ -385,44 +414,70 @@ function anyPublication(sessions: Session[]): Promise<void> {
  * told about a move in different orders.
  *
  * Every seat calls Yaniv the instant its hand allows it, which is what the bots do and what
- * gets a match to 100 quickly. The host deals each next round, since nobody else may.
+ * gets a match to 100 quickly. Each next round is dealt by whichever seat here is still in
+ * the match, since only such a seat may (docs/adr/0012) — and the seat that made the room
+ * is not always one of them.
  *
- * It returns only once *every* session is resting on the finished match, not merely the
- * host's: whoever called the last Yaniv is still locked until the standings reach them, and
- * a caller that acted on their behalf a moment earlier would be sending into that lock.
+ * `reached` is asked of every session's snapshot at once rather than one connection's,
+ * because "the table has come to rest here" is a fact about all of them: whoever called the
+ * last Yaniv is still locked until the position reaches them, and a driver that acted on
+ * their behalf a moment earlier would be sending into that lock.
  */
-async function playToMatchEnd(sessions: Session[]): Promise<SessionSnapshot> {
-  const [host] = sessions as [Session, ...Session[]];
+async function playOn(
+  sessions: Session[],
+  what: string,
+  reached: (seen: SessionSnapshot[]) => boolean,
+): Promise<SessionSnapshot[]> {
+  /**
+   * How many passes a match is given before the driver gives up. Generous rather than
+   * tuned: a pass is one look at the table and most of them are spent waiting on a move
+   * somebody else is making, so this is nowhere near a count of turns — it is here to fail
+   * a driver that has stopped making progress rather than to bound a match.
+   */
+  const PASSES = 2000;
   /** The round already asked to be dealt past — the ack for it lands before the deal does. */
   let dealtFrom = -1;
 
-  for (let step = 0; step < 500; step++) {
+  for (let step = 0; step < PASSES; step++) {
     const seen = sessions.map((s) => s.getSnapshot());
-    const [onHost] = seen as [SessionSnapshot, ...SessionSnapshot[]];
-    if (seen.every((s) => s.view?.phase === "gameEnd" && !s.busy)) return onHost;
+    if (reached(seen)) return seen;
 
     const turn = seen.findIndex(
       ({ view, busy }) =>
         !busy && view?.phase === "playing" && view.currentTurnPlayerId === view.you.id,
     );
-
     if (turn !== -1) {
       const mover = sessions[turn]!;
       const view = seen[turn]!.view!;
       if (isLegalCall(playingSelf(view).hand, view.settings.yanivThreshold)) mover.callYaniv();
       else takeATurn(mover, view);
-    } else if (
-      onHost.view?.phase === "roundEnd" &&
-      !onHost.busy &&
-      onHost.view.roundNumber !== dealtFrom
-    ) {
-      dealtFrom = onHost.view.roundNumber;
-      host.startNextRound();
-    } else {
-      await anyPublication(sessions);
+      continue;
     }
+
+    const dealer = seen.findIndex(
+      ({ view, busy }) =>
+        !busy &&
+        view?.phase === "roundEnd" &&
+        view.you.outInRound === null &&
+        view.roundNumber !== dealtFrom,
+    );
+    if (dealer !== -1) {
+      dealtFrom = seen[dealer]!.view!.roundNumber;
+      sessions[dealer]!.startNextRound();
+      continue;
+    }
+
+    await anyPublication(sessions);
   }
-  throw new Error("nobody busted past the maximum score in 500 moves");
+  throw new Error(`the match never reached ${what} in ${PASSES} passes`);
+}
+
+/** Play a whole match out and stop on the standings, as the host sees them. */
+async function playToMatchEnd(sessions: Session[]): Promise<SessionSnapshot> {
+  const seen = await playOn(sessions, "the standings", (all) =>
+    all.every((s) => s.view?.phase === "gameEnd" && !s.busy),
+  );
+  return seen[0]!;
 }
 
 describe("the session core", () => {
@@ -1819,6 +1874,212 @@ describe("a finished match", () => {
       const another = await waitForSnapshot(host, "a room of their own", (s) => s.view !== null);
       assert.equal(another.error, null);
       assert.equal(another.view!.phase, "lobby");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The seed the match that goes on without somebody is played on.
+ *
+ * Which seat busts first is the deal's, and this is one where a human does it with another
+ * human and a bot or two still playing — the position the suite below is about, and one the
+ * seat that made the room may itself be knocked out of. Nothing else about it is special,
+ * and `matchGoneOnWithout` says so out loud if it ever stops being true.
+ */
+const HUMAN_GOES_OUT_FIRST = 1;
+
+/**
+ * A maximum score one scored round takes a seat past, with seats left under it.
+ *
+ * Low enough that a hand still holding five cards busts on the first round — a seat playing
+ * to 100 is several rounds from being knocked out of anything — and high enough that the
+ * table it leaves is still two or more seats, so the round scores somebody out of a match
+ * that goes on rather than ending one. Read against the seed the suite plays on, and the
+ * test says so out loud if it stops being true.
+ */
+const OUT_IN_ONE_ROUND = 20;
+
+/**
+ * A match still being played by a table one of its humans is no longer at:
+ * [the seat watching, a seat still in it].
+ *
+ * Which of the two goes out is the deal's business, so it is read off the position rather
+ * than assumed — the same way `twoHumanMatch` asks who opens rather than deciding.
+ */
+async function matchGoneOnWithout(server: Harness): Promise<[Session, Session]> {
+  const [host, guest] = await hostAndGuest(server);
+  host.startGame();
+  const table = [host, guest];
+
+  const watching = (s: SessionSnapshot) => s.view !== null && s.view.you.spectating;
+  const stillPlaying = (s: SessionSnapshot) =>
+    s.view !== null && !s.view.you.spectating && s.view.you.outInRound === null;
+
+  const seen = await playOn(table, "a seat the match had gone on without", (all) =>
+    all.every((s) => !s.busy && s.view?.phase !== "gameEnd") &&
+    all.some(watching) &&
+    all.some(stillPlaying),
+  );
+
+  return [table[seen.findIndex(watching)]!, table[seen.findIndex(stillPlaying)]!];
+}
+
+/**
+ * What the session core owes a player the match has gone on without (issue #149).
+ *
+ * The three questions are one question asked at three moments: a seat that has stopped
+ * playing holds no hand, so there is nothing pending on it, nothing to send from it, and
+ * nothing about coming back to it that turns it back into a seat being played. The client
+ * narrows `SelfView` once (issue #143) and the rest is meant to fall out — these are what
+ * says it does, over a real server rather than a fixture that could be built spectating and
+ * playing at once.
+ */
+describe("when the match goes on without you", () => {
+  it("drops a pending selection when the position arriving has taken its owner out", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server, OUT_IN_ONE_ROUND);
+
+      /*
+       * Play on, holding a card tapped between turns, until the round is scored. The tap is
+       * made off turn on purpose: that is the only place a selection can be pending when
+       * somebody else's move ends the round, and a selection surviving positions arriving
+       * underneath it is what it lives in the session core for.
+       */
+      let chosen: readonly string[] = [];
+      for (let move = 0; ; move++) {
+        assert.ok(move < 100, "the round was never scored");
+        const resting = await waitForSnapshot(
+          host,
+          "our turn, or the round being scored",
+          (s) =>
+            s.view !== null &&
+            !s.busy &&
+            (s.view.phase !== "playing" ||
+              s.view.currentTurnPlayerId === s.view.you.id),
+        );
+        if (resting.view!.phase !== "playing") break;
+
+        takeATurn(host, resting.view!);
+        const played = await waitForSnapshot(host, "the move to land", (s) => !s.busy);
+        assert.equal(
+          played.view!.phase,
+          "playing",
+          "a turn of our own does not end a round — only a Yaniv call does, and we call none",
+        );
+
+        chosen = [playingSelf(played.view!).hand[0]!.id];
+        host.toggleCard(chosen[0]!);
+        assert.deepEqual(
+          host.getSnapshot().selection,
+          chosen,
+          "a card is chosen, waiting for this seat's turn to come round",
+        );
+      }
+
+      const scored = host.getSnapshot();
+
+      // What the assertions below are about: the round was ended by somebody else's move
+      // with a tap of ours still pending, which the revealed hand is the proof of — the
+      // card was there to be chosen when the scored position arrived. Without this the
+      // test could pass having had nothing to lose.
+      const ours = scored.view!.roundResult!.players.find(
+        (p) => p.playerId === scored.view!.you.id,
+      )!;
+      assert.equal(chosen.length, 1, "a card was tapped while waiting for our turn");
+      assert.ok(
+        ours.hand.some((card) => card.id === chosen[0]),
+        "and was still held when the round was scored, so it was still chosen",
+      );
+      assert.notEqual(
+        scored.view!.you.outInRound,
+        null,
+        "the round that was scored took this seat out of the match",
+      );
+      assert.equal(
+        scored.view!.phase,
+        "roundEnd",
+        "and left a match still being played, which is what makes them a watcher of one",
+      );
+      assert.equal(scored.view!.you.spectating, true);
+      assert.deepEqual(
+        scored.selection,
+        [],
+        "so nothing is left chosen for a turn it can no longer take",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("offers a spectator no move, no call and no slapdown", async () => {
+    const server = await startServer(HUMAN_GOES_OUT_FIRST);
+    try {
+      const [watcher, player] = await matchGoneOnWithout(server);
+
+      // Watched from a live round rather than a scored one: a round nobody is playing has
+      // no move to withhold, so it would prove nothing.
+      player.startNextRound();
+      const watching = await waitForSnapshot(
+        watcher,
+        "the round they are watching",
+        (s) => s.view?.phase === "playing" && !s.busy,
+      );
+      const view = watching.view!;
+      assert.equal(view.you.spectating, true);
+      assert.equal("hand" in view.you, false, "with no hand to build a turn out of");
+      assert.equal(slapdownOpen(view), false, "and no window to slap into");
+
+      // Every intent a table offers, tapped by somebody with nothing to tap with. Each is
+      // silence rather than a refusal: `busy` never goes up, so nothing reached the wire.
+      watcher.toggleCard(view.lastDiscard[0]!.id);
+      watcher.commitTurn({ kind: "deck" });
+      watcher.commitTurn({ kind: "discard", cardId: view.lastDiscard[0]!.id });
+      watcher.callYaniv();
+      watcher.slapDown();
+
+      const after = watcher.getSnapshot();
+      assert.deepEqual(after.selection, [], "there is no hand for a choice to be about");
+      assert.equal(after.busy, false, "and nothing was sent to be waiting on");
+      assert.equal(after.error, null, "so nothing was refused either");
+      assert.equal(after.view, view, "the position is exactly where it was");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("sits back down as a spectator when the connection comes back", async () => {
+    const server = await startServer(HUMAN_GOES_OUT_FIRST);
+    try {
+      const [watcher, player] = await matchGoneOnWithout(server);
+      const table = watcher.getSnapshot().view!;
+
+      server.drop(watcher, true);
+      await waitForSnapshot(watcher, "the drop", (s) => !s.connected);
+
+      const back = await waitForSnapshot(
+        watcher,
+        "the seat",
+        (s) => s.connected && !s.resuming,
+      );
+      assert.equal(back.view!.roomCode, table.roomCode, "the same table, not the menu");
+      assert.equal(back.view!.you.spectating, true, "and the same standing at it");
+      assert.equal(back.notice, null, "nothing was lost, so there is nothing to say");
+      assert.equal(back.error, null);
+      assert.equal(back.busy, false);
+      assert.deepEqual(back.selection, [], "and no hand to have anything chosen from");
+
+      // A seat really claimed back rather than a position left on the screen: the proof is
+      // the next round arriving on it, which only a socket back in the room is sent.
+      player.startNextRound();
+      const dealt = await waitForSnapshot(
+        watcher,
+        "the next round",
+        (s) => s.view?.phase === "playing",
+      );
+      assert.equal(dealt.view!.you.spectating, true, "still watching, a round later");
     } finally {
       await server.close();
     }

@@ -762,6 +762,15 @@ export function createSession(
     // lock to take — only the one already held by a turn on its way out.
     toggleCard: (cardId) => {
       if (snapshot.busy) return;
+
+      // A viewer the match has gone on without holds no hand for a choice to be about
+      // (issue #143), so a tap names a card they do not have: the same silence `commitTurn`
+      // and `callYaniv` answer them with, one step earlier. `carriedInto` already empties
+      // the selection on every position such a viewer is sent; this is what keeps it empty
+      // between two of them, so a watching snapshot has nothing pending in it at any moment
+      // rather than only just after one arrived.
+      if (snapshot.view !== null && snapshot.view.you.spectating) return;
+
       publish({ selection: toggleSelection(snapshot.selection, cardId) });
     },
 

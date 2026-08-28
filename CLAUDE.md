@@ -446,9 +446,8 @@ Only a player still in the match may deal the next round (docs/adr/0012), leavin
 whose match went on without them watching a scored round no bot will ever advance. So the server
 deals it, `AUTO_DEAL_MS` (10s) after `roundEnd`, on three conditions each of which is a rule —
 that phase and not `gameEnd`, **every seat still in the match a bot**, and **somebody
-`spectating`** it, the one derivation `state.ts` already owns. Pure judgement (`autoDealSeat`) on
-the registry's `autoDeal` purpose, **reconsidered on every publication**, `broadcastState` being
-where the position and who is connected are both in hand. Each of those, in `docs/adr/0014`.
+`spectating`** it. Pure judgement (`autoDealSeat`) on the registry's `autoDeal` purpose,
+**reconsidered on every publication**. Each of those, in `docs/adr/0014`.
 
 ### The turn is two taps, and draw targets are inert until legal
 
@@ -542,7 +541,10 @@ Seven fields, and each answers a different question:
   `retainSelection` on every broadcast of a position still being played drops whatever has left
   the hand, which is also what empties it after a committed turn. A broadcast of any *other*
   phase empties it outright rather than filtering — a card id is the same string in every round
-  of a match, so a choice carried across a deal would come back chosen over its inheritor.
+  of a match, so a choice carried across a deal would come back chosen over its inheritor — as
+  does a position this viewer is only **watching**, which has no hand to filter against and
+  where `toggleCard` refuses a tap outright, so a watcher's selection is empty at every moment
+  rather than only just after a position arrived (#149).
 - **`flight`** — the move the position was reached by, when there is one worth watching
   happen, and null otherwise. The **one-shot**: `publish` clears it unless the publication
   being made is the one drawing that move, so a tap, a refusal or a reconnect never flies a
@@ -664,11 +666,9 @@ its suites need. Split, `shared/src` importing a Node builtin is a typecheck err
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **What a mid-round seat does while its player is gone.** The rest of #138: a spectator has
-  their own bar (#143), an out seat is dimmed in place (#144), every seat says who is behind it
-  (#146), anybody may leave at any time (#147) and a bots-only table deals itself on (#148) —
-  but the status slot is display only, and nothing pauses, times out, bot-plays or frees a seat
-  whose player never comes back.
+- **What a mid-round seat does while its player is gone.** The rest of #138 (#143, #144 and
+  #146-#149 are done): the status slot is display only, and nothing pauses, times out,
+  bot-plays or frees a seat whose player never comes back.
 - **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
   spot, so anyone not joined by then plays the next match, not this one.
 - **Editing the settings from the terminal harness.** The browser lobby edits all four
