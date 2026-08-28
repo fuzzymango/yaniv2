@@ -29,7 +29,7 @@ import {
 } from "@yaniv/shared";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
 import { decideTurn } from "../src/bot.ts";
-import { BOT_THINK_MS } from "../src/config.ts";
+import { AUTO_DEAL_MS, BOT_THINK_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
@@ -2707,6 +2707,221 @@ describe("disconnect", () => {
         "INVALID_RESUME_TOKEN",
         "the room answered, so it is still there",
       );
+    }
+  });
+});
+
+/**
+ * Dealing a scored round on when nobody left in the match can deal it (issue #148).
+ *
+ * A spectator whose match went on without them watches the bots that beat them play; the
+ * round they were knocked out in is up in front of them, and only a player still in the
+ * match may deal the next one (docs/adr/0012) — so the server does, after a pause. What
+ * is asserted here is what a client can see: whether a pause is waiting on the clock at
+ * all, and the position ticking it produces.
+ *
+ * Every server here is built with a clock this suite drives by hand, bots included: a
+ * table nobody is waiting on is exactly what the auto-deal is for, so the tests have to
+ * be able to say "nothing is pending" as precisely as "one thing is". Each test gets its
+ * own server for the same reason `bot think time` above does.
+ */
+describe("auto-dealing a table only bots are still playing", () => {
+  interface Table {
+    close: () => Promise<void>;
+    clock: TestClock;
+    client: ClientSocket;
+    watcher: Watcher;
+    me: string;
+    /** The latest position this seat has been sent. */
+    view: PlayerGameView;
+  }
+
+  async function sitDown(
+    seed: number,
+    bots: number,
+    settings: Partial<RoomSettings> = SHORT_MATCH,
+  ): Promise<Table> {
+    const clock = testClock();
+    // A short match by default, since the subject is a human being knocked out of one.
+    // The one test about a human who is *not* out yet asks for a long one instead.
+    const harness = await startServer(seed, bots, { clock, thinkTimeMs: 0 }, settings);
+    const client = await harness.connect();
+    const watcher = watch(client);
+    const { playerId } = expectOk(
+      await ask<{ playerId: string }>(client, "createRoom", "Ada"),
+    );
+    expectOk(await ask(client, "startGame"));
+    const view = await watcher.until((v) => v.phase === "playing", "the deal");
+    return { close: harness.close, clock, client, watcher, me: playerId, view };
+  }
+
+  /**
+   * Move the table on by one position, whatever it is standing on: the human's own turn,
+   * a bot waiting on the clock, or a scored round the human may still deal on.
+   *
+   * The human plays to lose, and deliberately — the point of every test here is a table
+   * that has gone on without them. They never call Yaniv and always shed their cheapest
+   * card, which is the fastest legal way to be holding an expensive hand when somebody
+   * else calls.
+   */
+  async function next(t: Table): Promise<PlayerGameView> {
+    const before = t.watcher.seen.length;
+
+    if (t.view.phase === "playing" && t.view.currentTurnPlayerId === t.me) {
+      // The hand arrives sorted ascending by value, so the first card is the cheapest.
+      const cheapest = playingSelf(t.view).hand[0]!.id;
+      expectOk(
+        await ask(t.client, "takeTurn", {
+          discardCardIds: [cheapest],
+          draw: { source: "deck" },
+        }),
+      );
+    } else if (t.view.phase === "playing") {
+      assert.ok(t.clock.pending() > 0, "a bot was waiting to take the turn");
+      t.clock.tick();
+    } else if (t.view.phase === "roundEnd" && !t.view.you.spectating) {
+      expectOk(await ask(t.client, "startNextRound"));
+    } else {
+      assert.fail(`nothing to play from ${t.view.phase}`);
+    }
+
+    const deadline = Date.now() + 2000;
+    while (t.watcher.seen.length === before) {
+      if (Date.now() > deadline) assert.fail("no position followed");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    t.view = t.watcher.seen[t.watcher.seen.length - 1]!;
+    return t.view;
+  }
+
+  /** Play on until the position answers `done`, or fail saying what it reached instead. */
+  async function playUntil(
+    t: Table,
+    done: (view: PlayerGameView) => boolean,
+    what: string,
+  ): Promise<PlayerGameView> {
+    for (let step = 0; step < 400; step++) {
+      if (done(t.view)) return t.view;
+      await next(t);
+    }
+    assert.fail(`the table never reached ${what} (it is at ${t.view.phase})`);
+  }
+
+  /** The scored round a knocked-out human is left watching, bots still playing. */
+  const watchingAScoredRound = (view: PlayerGameView) =>
+    view.phase === "roundEnd" && view.you.spectating;
+
+  /**
+   * Wait for the clock to hold exactly `count` timers, so a fact that arrives with a
+   * disconnect the server processes asynchronously can be asserted at all.
+   */
+  async function settle(t: Table, count: number, what: string): Promise<void> {
+    const deadline = Date.now() + 1000;
+    while (t.clock.pending() !== count) {
+      if (Date.now() > deadline) {
+        assert.equal(t.clock.pending(), count, what);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  it("deals the next round for a spectator once the pause has elapsed", async () => {
+    const t = await sitDown(7, 3);
+    try {
+      const scored = await playUntil(t, watchingAScoredRound, "a round it was out of");
+
+      assert.equal(t.clock.pending(), 1, "the scored round is waiting to deal itself on");
+      // Every position of the match so far is behind us; only what the pause produces
+      // should answer the wait below.
+      t.watcher.reset();
+      assert.equal(t.clock.tick(), AUTO_DEAL_MS, "the pause a spectator reads it in");
+
+      const dealt = await t.watcher.until(
+        (v) => v.phase === "playing",
+        "the next round, dealt by nobody at the table",
+      );
+      assert.equal(
+        dealt.roundNumber,
+        scored.roundNumber + 1,
+        "the round after the one it watched",
+      );
+      assert.ok(dealt.you.spectating, "and the spectator is still watching, not dealt in");
+    } finally {
+      await t.close();
+    }
+  });
+
+  /**
+   * A finished match waits: the standings are there to be read, and play again is offered
+   * to anybody still in the room (docs/adr/0012), so there is always somebody who can
+   * answer for it. One bot, so the human going out ends the match on the spot.
+   */
+  it("leaves a finished match up", async () => {
+    const t = await sitDown(97, 1);
+    try {
+      await playUntil(t, (v) => v.phase === "gameEnd", "a finished match");
+
+      await settle(t, 0, "a finished match waits on nothing");
+    } finally {
+      await t.close();
+    }
+  });
+
+  /**
+   * A human still in the match is who the round is waiting for, whether or not there is a
+   * socket behind them: a drop costs a seat nothing (docs/adr/0013), and dealing the next
+   * round out from under one is the one thing it must not cost.
+   */
+  it("waits on a human still in the match, dropped or not", async () => {
+    // A limit no round of this reaches, so the human is scored rather than knocked out.
+    const t = await sitDown(7, 3, LONG_MATCH);
+    try {
+      await playUntil(
+        t,
+        (v) => v.phase === "roundEnd" && !v.you.spectating,
+        "a round it was scored in",
+      );
+
+      assert.equal(t.clock.pending(), 0, "the round is the human's to deal");
+
+      t.client.disconnect();
+      await settle(t, 0, "and still theirs once their connection has gone");
+    } finally {
+      await t.close();
+    }
+  });
+
+  /**
+   * The spectator leaving is not the same event as their socket going: the seat is given
+   * up, the room is left with nothing but bots in it, and it is dropped outright. The
+   * pause goes with it — `destroyRoom` calls off everything a room had waiting, which is
+   * the whole reason this is set on the registry rather than on a timer of its own.
+   */
+  it("calls the pause off when the spectator leaves the room", async () => {
+    const t = await sitDown(7, 3);
+    try {
+      await playUntil(t, watchingAScoredRound, "a round it was out of");
+      assert.equal(t.clock.pending(), 1, "the pause is running");
+
+      expectOk(await ask(t.client, "exitToMenu"));
+
+      await settle(t, 0, "the room went, and its pause with it");
+    } finally {
+      await t.close();
+    }
+  });
+
+  it("calls the pause off when the spectator it was for goes", async () => {
+    const t = await sitDown(7, 3);
+    try {
+      await playUntil(t, watchingAScoredRound, "a round it was out of");
+      assert.equal(t.clock.pending(), 1, "the pause is running");
+
+      t.client.disconnect();
+
+      await settle(t, 0, "a table with nobody watching plays to nobody");
+    } finally {
+      await t.close();
     }
   });
 });

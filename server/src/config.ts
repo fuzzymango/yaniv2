@@ -30,6 +30,18 @@ export const BOT_NAMES = [
  */
 export const BOT_THINK_MS = 1500;
 
+/**
+ * How long a scored round is left up before the server deals it on, in the one case
+ * where nobody left in the match can deal it themselves: every seat still playing is a
+ * bot, and a spectator is watching (`autoDeal.ts`, issue #148).
+ *
+ * Long enough to read the round that just finished — the hands are face up and the
+ * scores have just moved — and not so long that a watched match stops looking like one
+ * being played. A property of this server rather than of a room, like bot think time
+ * above: not a setting, not on the wire, not locked at the first deal.
+ */
+export const AUTO_DEAL_MS = 10_000;
+
 export const ROOM_CODE_LENGTH = 4;
 
 /** Room code alphabet, with visually ambiguous characters (O/0, I/1) removed. */

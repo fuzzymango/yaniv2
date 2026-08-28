@@ -30,7 +30,7 @@ import type { Clock } from "./clock.ts";
  * for the same key by accident would silently cancel each other, and the compiler is a
  * better place to catch that than a flaky table.
  */
-export type TimerPurpose = "botTurn";
+export type TimerPurpose = "botTurn" | "autoDeal";
 
 export interface RoomTimers {
   /**

@@ -9,6 +9,7 @@
 import type { Server as HttpServer } from "node:http";
 import type { Ack, ClientToServerEvents, ServerToClientEvents } from "@yaniv/shared";
 import { Server, type Socket } from "socket.io";
+import { createAutoDealer } from "./autoDeal.ts";
 import type { BotTurnRunnerOptions } from "./botTurns.ts";
 import { createBotTurnRunner } from "./botTurns.ts";
 import type { Clock } from "./clock.ts";
@@ -87,6 +88,7 @@ export function createSocketServer(
   const io: YanivServer = new Server(httpServer);
   const timers = createRoomTimers(options.clock ?? systemClock);
   const botTurns = createBotTurnRunner(rooms, timers, options);
+  const autoDeal = createAutoDealer(rooms, timers);
 
   /**
    * Send every connection in a room its own view of the current state.
@@ -100,6 +102,15 @@ export function createSocketServer(
    * Never `io.to(room).emit(state)`: the raw state holds every hand and the draw pile
    * order. One send per socket, each through the serializer, is the only shape that
    * cannot leak. See serialize.ts.
+   *
+   * It is also where the room's auto-deal is reconsidered (issue #148), and there is one
+   * reason for that rather than two: the answer turns on the position and on who is
+   * connected, and publishing is the one moment both are in hand and the only moment
+   * either can have changed. Hanging it off each handler instead would make a new one
+   * that forgets it a table that stalls, which is exactly the failure this exists to
+   * remove. `consider` is idempotent, so publishing for any other reason — a seat going
+   * quiet, a seat sat back down at — neither starts a second countdown nor restarts the
+   * one that is running.
    */
   function broadcastState(roomCode: string): void {
     const state = rooms.getState(roomCode);
@@ -112,6 +123,13 @@ export function createSocketServer(
       if (!playerId) continue;
       member.emit("gameStateUpdate", serializeStateForPlayer(state, playerId, connected));
     }
+
+    // The deal it may schedule is `act`'s own tail: the position goes out, and the seat
+    // it opened on is played if it is a bot's — which, here, it always is.
+    autoDeal.consider(roomCode, connected, () => {
+      broadcastState(roomCode);
+      runBotTurns(roomCode);
+    });
   }
 
   /**

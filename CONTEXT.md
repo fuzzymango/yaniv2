@@ -223,6 +223,20 @@ It is also what a **slapdown window** races inside of: the only reason a human's
 round trip to win that race in at all is that the bot behind them is paused rather than
 moving in the same tick (ADR-0011, superseding part of [ADR-0005](docs/adr/0005-slapdown-race-by-event-order.md)).
 
+## Auto-deal
+
+The **auto-deal** is the server dealing a scored round on itself, in the one position where
+nobody at the table can: `roundEnd`, every seat still in the match a **bot**, and a
+**spectator** connected to watch it. Ten seconds (`AUTO_DEAL_MS`), long enough to read the
+round that just finished. Like bot think time it is a fact about this server rather than about
+a room — not a setting, not on the wire — and like it, it is what a watched match's pacing is
+made of. See [ADR-0014](docs/adr/0014-auto-dealing-a-bots-only-table.md).
+
+It is emphatically not a timeout on a player: a human who is merely **away** still holds their
+seat and their turn, and a round they are in is never dealt on without them. The three
+conditions are reconsidered every time a position is published, since that is the only moment
+either the position or who is **connected** can have changed.
+
 ## Slapdown and the slapdown window
 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it

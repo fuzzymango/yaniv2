@@ -101,10 +101,10 @@ refused when they come back (`INVALID_RESUME_TOKEN` / `ROOM_NOT_FOUND`).
   `GameEnd`'s play-again is offered to whoever is looking at it. The confirm dialog that
   guarded closing goes with it — leaving costs nobody else anything, so there is nothing to
   ask about.
-- **A bots-only table at `roundEnd` stalls until #148.** Every human being eliminated while
-  bots play on leaves nobody eligible to deal. The auto-deal ticket is the answer; until it
-  lands, the suites that play matches out seat one bot rather than five, or play at a limit
-  no run of rounds reaches.
+- **A bots-only table at `roundEnd` stalled until #148**, since every human being eliminated
+  while bots play on leaves nobody eligible to deal. The server now deals it for a watching
+  spectator (docs/adr/0014); the suites that play matches out still seat one bot rather than
+  five, or play at a limit no run of rounds reaches, the subject there being the wire.
 - **A room is dropped when its last seat leaves**, which is the whole of room destruction
   now. The 60-second sweep for rooms whose humans have all *dropped* is #150; until then a
   room whose players never come back lives until the server restarts, which is the
