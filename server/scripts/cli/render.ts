@@ -106,6 +106,11 @@ function renderGameEndOptions(view: PlayerGameView): string[] {
  * order, so a number can never point at a different card than the one printed.
  */
 function renderOwnHand(view: PlayerGameView): string {
+  // A viewer the match has gone on without holds no cards, and their shape has no hand to
+  // number (issue #143). Said in the row the hand would be in, so the reason there is
+  // nothing to type is where a developer is already looking.
+  if (view.you.spectating) return dim("  hand  out of the match — watching");
+
   const cards = view.you.hand
     .map((card, i) => `${dim(`${i + 1}:`)}${renderCard(card)}`)
     .join("  ");
@@ -141,7 +146,7 @@ function renderTable(view: PlayerGameView): string {
  * window; there is no shape in which somebody else's could be printed here.
  */
 function renderSlapdown(view: PlayerGameView): string[] {
-  if (!view.you.slapdownEligible) return [];
+  if (view.you.spectating || !view.you.slapdownEligible) return [];
   return [cyan("  slapdown! ") + dim("type slap to put the card you just drew back down")];
 }
 

@@ -21,11 +21,20 @@ export interface MatchStanding {
   departed: boolean;
 }
 
-/** The viewing player. Always includes their own hand. */
-export interface SelfView extends MatchStanding {
+/**
+ * What the viewing player is, whichever of the two they are: who they are, and where they
+ * stand in the match. Everything the standings read (`standings.ts`) is here, so a seat
+ * that has stopped playing still answers for itself.
+ */
+export interface SeatView extends MatchStanding {
   id: string;
   name: string;
   score: number;
+}
+
+/** The viewing player, while they are still in the match. Always includes their own hand. */
+export interface PlayingSelfView extends SeatView {
+  spectating: false;
   /** Empty during `lobby`, when no round is dealt. */
   hand: Card[];
   /**
@@ -38,6 +47,31 @@ export interface SelfView extends MatchStanding {
    */
   slapdownEligible: boolean;
 }
+
+/**
+ * The viewing player, once the match has gone on without them: they watch the same table,
+ * with the same things hidden, and have no move to make on it (docs/rules.md §7).
+ *
+ * Deliberately has **no `hand` and no `slapdownEligible` field at all** — not empty ones —
+ * on exactly the principle `OpponentView` below embodies: a spectator holding cards is
+ * unrepresentable rather than merely wrong, and a screen cannot draw a hand out of a
+ * shape that has none. What it keeps is what a seat is still asked for after it stops
+ * playing: its name, its frozen score and its standing.
+ */
+export interface SpectatingSelfView extends SeatView {
+  spectating: true;
+}
+
+/**
+ * The viewing player, tagged by whether they are still playing. Clients narrow it once,
+ * at the top, beside the phase branch they already make.
+ *
+ * Tagged rather than told apart by asking `outInRound !== null`: the tag is what makes the
+ * two shapes distinguishable to the type system, and a seat that is out is not always a
+ * spectator — a bot never spectates, and neither does a player who has left. What decides
+ * it is the server's, and `serialize.ts` derives it in one place.
+ */
+export type SelfView = PlayingSelfView | SpectatingSelfView;
 
 /**
  * Everyone else. Deliberately has no `hand` field at all — not an optional one — so

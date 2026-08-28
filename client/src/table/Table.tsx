@@ -55,7 +55,7 @@ import { MoveHistory } from "./MoveHistory.tsx";
 import { PlayingCard, cardLabel } from "../shared/PlayingCard.tsx";
 import { CascadeReveal, OpponentSeat, Seat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "../settings/SettingsDialog.tsx";
-import { CloseRoomIcon } from "../shared/WayOut.tsx";
+import { CloseRoomIcon, WayOut } from "../shared/WayOut.tsx";
 import type { CardFlight } from "../flight.ts";
 import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
@@ -86,6 +86,8 @@ interface TableProps {
   onNextRound: () => void;
   /** The tap on the pile that sheds the just-drawn card, while a window is open. */
   onSlapDown: () => void;
+  /** Give the seat up. Offered where the hand was, to a player who is only watching. */
+  onExit: () => void;
   /** End the room. Offered to the host alone — see `WayOut.tsx`. */
   onCloseRoom: () => void;
 }
@@ -141,10 +143,22 @@ export function Table({
   onCallYaniv,
   onNextRound,
   onSlapDown,
+  onExit,
   onCloseRoom,
 }: TableProps) {
   const yourTurn = view.currentTurnPlayerId === view.you.id;
   const isHost = view.hostId === view.you.id;
+
+  /**
+   * The viewer's own seat, narrowed once and here (issue #143): the hand they are holding,
+   * or `null` once the match has gone on without them and they are only watching.
+   *
+   * The narrowing is the phase branch's counterpart and sits beside it, so everything
+   * below asks the same question of the same name. What the wire has already settled is
+   * that there is nothing to narrow *to* for a spectator — their view carries no hand and
+   * no eligibility field at all — so this cannot be the place a hand is invented for one.
+   */
+  const yours = view.you.spectating ? null : view.you;
 
   /**
    * Whether there is still a turn to build here, and whether the match this table belongs
@@ -176,7 +190,7 @@ export function Table({
    * itself is: a tap that would be refused for any *other* reason is still offered, because
    * those reasons are the server's and a second opinion here could only ever disagree.
    */
-  const canDraw = live && !busy && isLegalSelection(selection, view.you.hand);
+  const canDraw = live && !busy && yours !== null && isLegalSelection(selection, yours.hand);
   const takeable = takeableIds(view.lastDiscard);
 
   /**
@@ -185,7 +199,8 @@ export function Table({
    * `NOT_YOUR_TURN`, the same way a draw target is: this screen enforces the rules of the
    * cards and none of the rules about whose go it is.
    */
-  const canCall = live && !busy && isLegalCall(view.you.hand, view.settings.yanivThreshold);
+  const canCall =
+    live && !busy && yours !== null && isLegalCall(yours.hand, view.settings.yanivThreshold);
 
   /**
    * Whether the pile is a slapdown target rather than a row of draw targets
@@ -286,6 +301,18 @@ export function Table({
   /** The viewer's own row of the round, for the footer under their revealed hand. */
   const yourRound = scored(view.you.id);
   const youWentOut = wentOut(view.you);
+
+  /**
+   * The cards to lay out where this player's hand goes, or `null` when there are none and
+   * the bar goes there instead (issue #143).
+   *
+   * A watcher has no hand — with one exception, and it is the round that took them out:
+   * that round is scored with them in it, so its record still holds the hand they actually
+   * played, and it is read here off `roundResult` exactly as every other seat's is. Being
+   * dimmed out of the *next* round does not retract the last one. From the following deal
+   * on there is no record of theirs to find, and the bar is what the row says.
+   */
+  const handShown = yours !== null ? yours.hand : (yourRound?.hand ?? null);
 
   /*
    * What the one line above the felt says, and how loudly. Four things can be true of a
@@ -497,7 +524,13 @@ export function Table({
           is coming, and there is not one. Dealing again is a whole match and is asked for on
           the panel, beside leaving (issue #130).
         */}
-        {over ? null : live ? (
+        {/*
+          Nothing at all where the Yaniv call is, for a player who is only watching: the
+          one thing that slot ever offers mid-round is a move, and they have none. The
+          scored-round branch below is left alone deliberately — dealing the next round is
+          not a move in a hand, and who may ask for it is the server's rule.
+        */}
+        {over || (live && yours === null) ? null : live ? (
           <button
             className={`button call ${canCall ? "call--live" : ""}`}
             type="button"
@@ -522,39 +555,61 @@ export function Table({
         )}
 
         {/*
-          In the order the server sorted them and in no other: sorting again here would
-          rearrange a hand under a player's finger between one move and the next. See
-          "Hand display order is presentation only" in CLAUDE.md.
+          The viewer's own hand, in the order the server sorted it and in no other: sorting
+          again here would rearrange a hand under a player's finger between one move and the
+          next. See "Hand display order is presentation only" in CLAUDE.md.
 
           Face up and untappable once the round is scored — there is no turn left to build,
           and a card that lifted under a thumb would be offering one.
+
+          Where there are no cards to lay out, the row says why (issue #143): a bar of about
+          the same height, so the felt and every seat above it keep the position they had
+          while this player was still playing. One control in it and no other — nothing here
+          should read as a move — and it is the `WayOut` every other screen offers, so the
+          question a host's close asks before it acts is asked here too rather than in a
+          second copy free to stop asking. For a guest that control reads "Leave the room",
+          which is what this slot is for; for a host it is still the close, because that is
+          what their leaving actually does today (the host retires from a running match in
+          issue #145, and this reads as Leave for everybody once it does).
+
+          Nothing at all at `gameEnd`: the panel over this table carries its own way out,
+          and the bottom of the screen is given up there exactly as the topbar is.
         */}
-        <ul className="hand">
-          {view.you.hand.map((card) => {
-            const chosen = selection.includes(card.id);
-            return (
-              // A card still on its way into the hand keeps its place in the row and waits
-              // there — the face only, so it can be tapped into a selection the whole time
-              // it is arriving, exactly as it could if nothing were in the air.
-              <li className={landingClass(card.id, "hand")} key={card.id}>
-                {live ? (
-                  <button
-                    className={`pick ${chosen ? "pick--chosen" : ""}`}
-                    type="button"
-                    aria-label={cardLabel(card)}
-                    aria-pressed={chosen}
-                    disabled={busy}
-                    onClick={() => onToggleCard(card.id)}
-                  >
+        {handShown !== null ? (
+          <ul className="hand">
+            {handShown.map((card) => {
+              const chosen = selection.includes(card.id);
+              return (
+                // A card still on its way into the hand keeps its place in the row and waits
+                // there — the face only, so it can be tapped into a selection the whole time
+                // it is arriving, exactly as it could if nothing were in the air.
+                <li className={landingClass(card.id, "hand")} key={card.id}>
+                  {live ? (
+                    <button
+                      className={`pick ${chosen ? "pick--chosen" : ""}`}
+                      type="button"
+                      aria-label={cardLabel(card)}
+                      aria-pressed={chosen}
+                      disabled={busy}
+                      onClick={() => onToggleCard(card.id)}
+                    >
+                      <PlayingCard card={card} />
+                    </button>
+                  ) : (
                     <PlayingCard card={card} />
-                  </button>
-                ) : (
-                  <PlayingCard card={card} />
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : over ? null : (
+          <div className="spectating">
+            <span className="spectating__said">
+              You are out of the match — watching the rest of it.
+            </span>
+            <WayOut isHost={isHost} busy={busy} onExit={onExit} onCloseRoom={onCloseRoom} />
+          </div>
+        )}
 
         {/*
           The same row in both phases, in the same place. What it says changes with what is
@@ -572,7 +627,14 @@ export function Table({
             <ScoredDetail player={yourRound} result={result} isOut={youWentOut} />
           ) : (
             <>
-              <span className="you__value">{handValue(view.you.hand)} in hand</span>
+              {/*
+                What the hand is worth, where there is one to weigh: a watcher's row keeps
+                their name and their frozen total, and says nothing about cards they are
+                not holding.
+              */}
+              {yours !== null && (
+                <span className="you__value">{handValue(yours.hand)} in hand</span>
+              )}
               <span className="player__score">{view.you.score} pts</span>
             </>
           )}

@@ -710,6 +710,14 @@ body {
  */
 .table {
   --card-w: min(4.0rem, 15vw);
+  /*
+   * How big a card in the viewer's own hand is — a little larger than the ones on the
+   * felt, since those are the ones a player picks out one at a time. Named here rather
+   * than inside `.hand` because the spectator's bar reserves the row that hand would have
+   * filled (issue #143), and a bar sized off its own copy of this number would drift out
+   * of step with the hand it stands in for.
+   */
+  --hand-card-w: min(4.0rem, 16vw);
 
   position: relative;
   justify-content: flex-start;
@@ -1454,7 +1462,7 @@ body {
  * exists to avoid (issue #78).
  */
 .hand {
-  --card-w: min(4.0rem, 16vw);
+  --card-w: var(--hand-card-w);
 
   display: flex;
   justify-content: center;
@@ -1463,6 +1471,33 @@ body {
   /* Room above for a chosen card to rise into without moving the row. */
   padding: 0.75rem 0 0;
   list-style: none;
+}
+
+/*
+ * The row the hand was in, for a player the match has gone on without (issue #143).
+ *
+ * Sized off the hand's own card width and aspect so it holds about the room a hand held:
+ * everything above it — the felt, the seats, the line saying how the round is going — keeps
+ * the position it had while this player was still playing, which is the whole of what
+ * "spectating feels like staying" comes down to on this screen.
+ *
+ * One control in it, and centred with the sentence rather than pushed to an edge: there is
+ * nothing else here to tell it apart from, and nothing else here that should read as a move.
+ */
+.spectating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: calc(var(--hand-card-w) * 7 / 5 + 0.75rem);
+  padding: 0.75rem 0 0;
+  text-align: center;
+}
+
+.spectating__said {
+  color: var(--ink-dim);
+  font-size: 0.9rem;
 }
 
 /* Chosen, and not yet sent anywhere. */

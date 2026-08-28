@@ -5,7 +5,7 @@ import { callYaniv, removePlayer, startGame } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState } from "../src/state.ts";
-import { RESUME_TOKEN_MARK, ids, makeState, unwrap } from "./helpers.ts";
+import { RESUME_TOKEN_MARK, ids, makeState, playingSelf, slapdownOpen, unwrap } from "./helpers.ts";
 
 const scenario = () =>
   makeState({
@@ -28,7 +28,7 @@ describe("serializeStateForPlayer", () => {
     assert.equal(view.you.id, "p1");
     assert.equal(view.you.name, "Ada");
     assert.equal(view.you.score, 12);
-    assert.deepEqual(ids(view.you.hand), ["hearts-3", "hearts-4"]);
+    assert.deepEqual(ids(playingSelf(view).hand), ["hearts-3", "hearts-4"]);
   });
 
   it("gives opponents a hand size and no hand field at all", () => {
@@ -52,7 +52,7 @@ describe("serializeStateForPlayer", () => {
     });
     const view = serializeStateForPlayer(state, "p1");
 
-    assert.deepEqual(ids(view.you.hand), [
+    assert.deepEqual(ids(playingSelf(view).hand), [
       "joker-1",
       "clubs-A",
       "hearts-5",
@@ -195,13 +195,13 @@ describe("serializeStateForPlayer — slapdown eligibility", () => {
     });
 
   it("tells the player holding the window that they may slap down", () => {
-    assert.equal(serializeStateForPlayer(windowOpen(), "p1").you.slapdownEligible, true);
+    assert.equal(slapdownOpen(serializeStateForPlayer(windowOpen(), "p1")), true);
   });
 
   it("tells nobody else, in any shape", () => {
     const view = serializeStateForPlayer(windowOpen(), "p2");
 
-    assert.equal(view.you.slapdownEligible, false);
+    assert.equal(slapdownOpen(view), false);
     for (const opponent of view.opponents) {
       assert.ok(
         !("slapdownEligible" in opponent),
@@ -215,7 +215,7 @@ describe("serializeStateForPlayer — slapdown eligibility", () => {
   });
 
   it("reports no eligibility with no window open", () => {
-    assert.equal(serializeStateForPlayer(scenario(), "p1").you.slapdownEligible, false);
+    assert.equal(slapdownOpen(serializeStateForPlayer(scenario(), "p1")), false);
   });
 });
 
@@ -364,7 +364,7 @@ describe("serializeStateForPlayer — the last slapdown", () => {
     );
 
     assert.equal(view.lastSlapdown, null);
-    assert.equal(view.you.slapdownEligible, false);
+    assert.equal(slapdownOpen(view), false);
   });
 
   /** Ungated by phase, as `lastMove` is: the round it belongs to is the one being read. */
@@ -703,8 +703,7 @@ describe("serializeStateForPlayer — out of the match", () => {
 
     assert.equal(view.you.outInRound, 3);
     assert.equal(view.you.departed, false);
-    assert.deepEqual(view.you.hand, [], "out of the match is holding no cards");
-    assert.equal(view.you.slapdownEligible, false);
+    assert.equal(view.you.score, 105, "their total is frozen where it stood");
   });
 
   it("sends turn order without the seats that have gone out", () => {
@@ -722,6 +721,148 @@ describe("serializeStateForPlayer — out of the match", () => {
   });
 });
 
+/**
+ * The self view is tagged by whether its owner is still playing (issue #143), and a
+ * spectator's variant has no hand and no slapdown eligibility *at all* — the principle
+ * `OpponentView` has always embodied, applied to the one seat that used to be exempt.
+ *
+ * The boundary matters more than the shape: being knocked out must not turn a player into
+ * an oracle for a friend still in the match, so a spectator's payload is asserted to hold
+ * no card id an active player's would not. Mutation-tested the way the hidden-hand and
+ * resume-token assertions are — widen the serializer on purpose and this suite fails.
+ */
+describe("serializeStateForPlayer — spectating", () => {
+  const table = () =>
+    makeState({
+      players: [
+        { id: "p1", name: "Ada", score: 104, outInRound: 3 },
+        { id: "p2", name: "Grace", score: 30 },
+        { id: "p3", name: "Bo", score: 40, isBot: true },
+        { id: "p4", name: "Alan", score: 20, outInRound: 2, departed: true },
+      ],
+      hands: { p2: ["spades-K", "spades-Q"], p3: ["clubs-9", "clubs-8"] },
+      drawPile: ["diamonds-2", "diamonds-3"],
+      lastDiscard: ["clubs-7"],
+      buried: ["hearts-10"],
+      currentTurnPlayerId: "p2",
+      roundNumber: 4,
+    });
+
+  it("gives an eliminated human the spectating variant, with no hand in any shape", () => {
+    const you = serializeStateForPlayer(table(), "p1").you;
+
+    assert.equal(you.spectating, true);
+    assert.ok(!("hand" in you), "a spectator must not carry a hand key");
+    assert.ok(
+      !("slapdownEligible" in you),
+      "a spectator must not carry an eligibility flag either",
+    );
+  });
+
+  it("keeps what a seat is still asked for after it stops playing", () => {
+    const you = serializeStateForPlayer(table(), "p1").you;
+
+    assert.equal(you.id, "p1");
+    assert.equal(you.name, "Ada");
+    assert.equal(you.score, 104);
+    assert.equal(you.outInRound, 3);
+    assert.equal(you.departed, false);
+  });
+
+  it("gives a player still in the match the playing variant", () => {
+    const view = serializeStateForPlayer(table(), "p2");
+
+    assert.equal(view.you.spectating, false);
+    assert.deepEqual(ids(playingSelf(view).hand), ["spades-Q", "spades-K"]);
+  });
+
+  /**
+   * Derived from the seat and nothing else — out, not departed, not a bot — so a bot that
+   * has been eliminated needs no special case anywhere above this. Nothing serializes for
+   * a bot in production; the rule is asserted here because it is the rule.
+   */
+  it("never has a bot spectating, however far out of the match it is", () => {
+    assert.equal(serializeStateForPlayer(table(), "p3").you.spectating, false);
+  });
+
+  it("never has a departed seat spectating — they gave the seat up", () => {
+    assert.equal(serializeStateForPlayer(table(), "p4").you.spectating, false);
+  });
+
+  it("holds no card id an active player's payload would not", () => {
+    const state = table();
+    const spectator = JSON.stringify(serializeStateForPlayer(state, "p1"));
+
+    // Everything face up, which is the whole of what a seat with no hand may be told.
+    assert.ok(spectator.includes("clubs-7"), "the face-up discard is public");
+
+    for (const card of [
+      ...state.round!.hands["p2"]!,
+      ...state.round!.hands["p3"]!,
+      ...state.round!.drawPile,
+    ]) {
+      assert.ok(!spectator.includes(card.id), `a spectator was told about ${card.id}`);
+    }
+  });
+
+  it("reduces the draw pile to a count for a spectator, exactly as for a player", () => {
+    const view = serializeStateForPlayer(table(), "p1");
+
+    assert.equal(view.drawPileCount, 2);
+    assert.equal(view.buriedCount, 1);
+    assert.ok(!("drawPile" in view));
+  });
+
+  /** Watching is the full experience minus the acting: the table itself is untouched. */
+  it("sends a spectator the same table everybody else is looking at", () => {
+    const spectator = serializeStateForPlayer(table(), "p1");
+    const player = serializeStateForPlayer(table(), "p2");
+
+    assert.equal(spectator.currentTurnPlayerId, player.currentTurnPlayerId);
+    assert.deepEqual(ids(spectator.lastDiscard), ids(player.lastDiscard));
+    assert.deepEqual(spectator.turnOrder, player.turnOrder);
+    assert.deepEqual(
+      spectator.opponents.map((p) => p.id),
+      ["p2", "p3", "p4"],
+      "every other seat is still drawn, in the place it was sitting",
+    );
+  });
+
+  it("redacts a deck draw from a spectator as it does from anyone else", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", name: "Ada", score: 104, outInRound: 3 },
+        { id: "p2", name: "Grace" },
+      ],
+      hands: { p2: ["spades-K", "spades-Q"] },
+      lastDiscard: ["clubs-7"],
+      currentTurnPlayerId: "p2",
+      lastMove: { playerId: "p2", drawSource: "deck", drawnCardId: "spades-Q" },
+      moveHistory: [
+        {
+          kind: "turn",
+          playerId: "p2",
+          discardedIds: ["clubs-7"],
+          drawSource: "deck",
+          drawnCardId: "spades-Q",
+        },
+      ],
+      roundNumber: 4,
+    });
+    const view = serializeStateForPlayer(state, "p1");
+
+    assert.equal(view.you.spectating, true);
+    assert.equal(view.lastMove?.drawnCard, null);
+    assert.equal(view.moveHistory.length, 1, "the log is still sent in full");
+    assert.ok(!JSON.stringify(view).includes("spades-Q"));
+  });
+
+  it("puts no resume token in a spectator's view either", () => {
+    const wire = JSON.stringify(serializeStateForPlayer(table(), "p1"));
+    assert.ok(!wire.includes(RESUME_TOKEN_MARK));
+  });
+});
+
 describe("serializeStateForPlayer — lobby", () => {
   it("has everyone in the match and nobody departed", () => {
     const view = serializeStateForPlayer(makeState({ phase: "lobby" }), "p1");
@@ -735,8 +876,8 @@ describe("serializeStateForPlayer — lobby", () => {
     const view = serializeStateForPlayer(makeState({ phase: "lobby" }), "p1");
 
     assert.equal(view.phase, "lobby");
-    assert.deepEqual(view.you.hand, []);
-    assert.equal(view.you.slapdownEligible, false, "no round, nothing to slap down");
+    assert.deepEqual(playingSelf(view).hand, []);
+    assert.equal(slapdownOpen(view), false, "no round, nothing to slap down");
     assert.equal(view.opponents[0]!.handSize, 0);
     assert.equal(view.currentTurnPlayerId, null);
     assert.equal(view.drawPileCount, 0);

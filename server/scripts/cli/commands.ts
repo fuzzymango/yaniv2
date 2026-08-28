@@ -78,6 +78,28 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
     };
   }
 
+  // A bare enter is the only input whose meaning depends on the phase: it deals the
+  // next round when one has just ended, and is a stray keystroke otherwise. Answered
+  // before anything about hands, because dealing is not a move in one — a watcher may
+  // still type it, and whether they may actually deal is the server's call.
+  if (line === "") {
+    return view.phase === "roundEnd" ? { kind: "next" } : { kind: "noop" };
+  }
+
+  /**
+   * A viewer the match has gone on without holds no cards, so every card command below
+   * is about a hand that is not there (issue #143). What is left them is watching, the
+   * deal above and the way out — the browser client is where spectating is a screen.
+   */
+  const you = view.you;
+  if (you.spectating) {
+    if (line === "menu") return { kind: "menu" };
+    return {
+      kind: "invalid",
+      message: "you are out of the match — watching; 'menu' asks to leave the room",
+    };
+  }
+
   if (line === "yaniv") return { kind: "yaniv" };
 
   /**
@@ -87,12 +109,6 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
    * disagree with it. The frame says when there is one to take (see `render.ts`).
    */
   if (line === "slap") return { kind: "slap" };
-
-  // A bare enter is the only input whose meaning depends on the phase: it deals the
-  // next round when one has just ended, and is a stray keystroke otherwise.
-  if (line === "") {
-    return view.phase === "roundEnd" ? { kind: "next" } : { kind: "noop" };
-  }
 
   const tokens = line.split(/[\s,]+/).filter(Boolean);
 
@@ -115,7 +131,7 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
     }
   }
 
-  const picked = tokens.map((token) => view.you.hand[Number(token) - 1]);
+  const picked = tokens.map((token) => you.hand[Number(token) - 1]);
   if (picked.some((card) => card === undefined)) {
     return { kind: "invalid", message: "pick cards by number, e.g. '1' or '2 3 4'" };
   }

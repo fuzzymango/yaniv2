@@ -37,6 +37,8 @@ import { createSocketServer } from "../src/socketServer.ts";
 import {
   RESUME_TOKEN_MARK,
   markedResumeTokens,
+  playingSelf,
+  slapdownOpen,
   testClock,
   type TestClock,
 } from "./helpers.ts";
@@ -541,7 +543,7 @@ describe("updateSettings", () => {
     views.reset();
     expectOk(await ask(host, "startGame"));
     const dealt = await views.until((v) => v.phase === "playing", "the deal");
-    assert.equal(dealt.you.hand.length, HAND_SIZE);
+    assert.equal(playingSelf(dealt).hand.length, HAND_SIZE);
     assert.equal(dealt.settings.maxScore, MAX_SCORE);
   });
 
@@ -567,7 +569,7 @@ describe("startGame", () => {
     const view = await dealt;
 
     assert.equal(view.phase, "playing");
-    assert.equal(view.you.hand.length, HAND_SIZE);
+    assert.equal(playingSelf(view).hand.length, HAND_SIZE);
     assert.equal(
       view.opponents.length,
       MAX_PLAYERS - 1,
@@ -705,7 +707,7 @@ describe("playing a match", () => {
     expectOk(
       await ask(client, "takeTurn", {
         // A single card is always a legal discard, whatever was dealt.
-        discardCardIds: [view.you.hand[0]!.id],
+        discardCardIds: [playingSelf(view).hand[0]!.id],
         draw: { source: "deck" },
       }),
     );
@@ -736,7 +738,7 @@ describe("playing a match", () => {
 
     const result = await ask(client, "takeTurn", {
       discardCardIds: [
-        ["joker-1", "joker-2"].find((id) => !view.you.hand.some((c) => c.id === id))!,
+        ["joker-1", "joker-2"].find((id) => !playingSelf(view).hand.some((c) => c.id === id))!,
       ],
       draw: { source: "deck" },
     });
@@ -746,8 +748,8 @@ describe("playing a match", () => {
 
   it("rejects a discard that is not a legal set", async () => {
     const { client, watcher, view } = await sitDown();
-    const [first] = view.you.hand;
-    const mismatched = view.you.hand.find((c) => c.rank !== first!.rank);
+    const [first] = playingSelf(view).hand;
+    const mismatched = playingSelf(view).hand.find((c) => c.rank !== first!.rank);
     assert.ok(mismatched, "the deal held two different ranks");
     watcher.reset();
 
@@ -766,7 +768,7 @@ describe("playing a match", () => {
     watcher.reset();
 
     const result = await ask(client, "takeTurn", {
-      discardCardIds: [view.you.hand[0]!.id],
+      discardCardIds: [playingSelf(view).hand[0]!.id],
       draw: { source: "discard", cardId: "joker-1" },
     });
 
@@ -786,7 +788,7 @@ describe("playing a match", () => {
     const view = await watcher.until((v) => v.phase === "playing", "the deal");
 
     const result = await ask(other, "takeTurn", {
-      discardCardIds: [view.you.hand[0]!.id],
+      discardCardIds: [playingSelf(view).hand[0]!.id],
       draw: { source: "deck" },
     });
 
@@ -807,7 +809,7 @@ describe("playing a match", () => {
     // The same hand is still there to play, and the turn is still theirs.
     expectOk(
       await ask(client, "takeTurn", {
-        discardCardIds: [view.you.hand[0]!.id],
+        discardCardIds: [playingSelf(view).hand[0]!.id],
         draw: { source: "deck" },
       }),
     );
@@ -941,7 +943,7 @@ describe("playing a match", () => {
     watcher.reset();
     expectOk(
       await ask(client, "takeTurn", {
-        discardCardIds: [view.you.hand[0]!.id],
+        discardCardIds: [playingSelf(view).hand[0]!.id],
         draw: { source: "deck" },
       }),
     );
@@ -954,7 +956,7 @@ describe("playing a match", () => {
       if (published.phase !== "playing") continue;
 
       const maySee = new Set(
-        [...published.you.hand, ...published.lastDiscard].map((card) => card.id),
+        [...playingSelf(published).hand, ...published.lastDiscard].map((card) => card.id),
       );
       // A card taken off the face-up pile is public the moment before it is taken, so
       // `lastMove` is allowed to name it even once it has left the pile for a hand.
@@ -1001,7 +1003,7 @@ describe("playing a match", () => {
     watcher.reset();
     expectOk(
       await ask(client, "takeTurn", {
-        discardCardIds: [view.you.hand[0]!.id],
+        discardCardIds: [playingSelf(view).hand[0]!.id],
         draw: { source: "deck" },
       }),
     );
@@ -1042,7 +1044,7 @@ describe("playing a match", () => {
 
     assert.equal(mine.you.id, hostId, "Ada is 'you' in her own view");
     assert.equal(theirs.you.id, otherId, "Grace is 'you' in hers");
-    assert.notDeepEqual(mine.you.hand, theirs.you.hand, "and they hold different cards");
+    assert.notDeepEqual(playingSelf(mine).hand, playingSelf(theirs).hand, "and they hold different cards");
     assert.ok(
       mine.opponents.some((o) => o.id === otherId),
       "each sees the other as an opponent",
@@ -1052,7 +1054,7 @@ describe("playing a match", () => {
   it("rejects a Yaniv call from a hand that is worth too much", async () => {
     const { client, view } = await sitDown();
     assert.ok(
-      handValue(view.you.hand) > YANIV_THRESHOLD,
+      handValue(playingSelf(view).hand) > YANIV_THRESHOLD,
       "the opening hand is above the threshold, as a five-card deal will be",
     );
 
@@ -1229,7 +1231,7 @@ describe("play again and exit to menu", () => {
 
       assert.equal(restarted.roomCode, roomCode, "the room code does not change");
       assert.equal(restarted.roundNumber, 1);
-      assert.equal(restarted.you.hand.length, HAND_SIZE);
+      assert.equal(playingSelf(restarted).hand.length, HAND_SIZE);
       assert.deepEqual(
         [restarted.you, ...restarted.opponents].map((p) => p.score),
         new Array(MAX_PLAYERS).fill(0),
@@ -1501,7 +1503,7 @@ describe("slapping down", () => {
    * Jokers are skipped outright — a drawn joker never opens a window.
    */
   function fishingDiscard(view: PlayerGameView): string {
-    const hand = view.you.hand;
+    const hand = playingSelf(view).hand;
     const lonely = hand.find(
       (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
     );
@@ -1586,7 +1588,7 @@ describe("slapping down", () => {
         (v) => v.phase !== "playing" || v.currentTurnPlayerId === grace.id,
         "the turn to pass to Grace",
       );
-      if (!adaView.you.slapdownEligible) continue;
+      if (!slapdownOpen(adaView)) continue;
 
       const graceView = await waitFor(grace, "Grace's view of the same position");
       return { ada, grace, adaView, graceView };
@@ -1597,7 +1599,7 @@ describe("slapping down", () => {
   /** Take Grace's turn, from the view she is holding. */
   const graceTakesHerTurn = (grace: Seat, graceView: PlayerGameView) =>
     ask(grace.client, "takeTurn", {
-      discardCardIds: [graceView.you.hand[0]!.id],
+      discardCardIds: [playingSelf(graceView).hand[0]!.id],
       draw: { source: "deck" },
     });
 
@@ -1608,7 +1610,7 @@ describe("slapping down", () => {
     expectOk(await ask(ada.client, "slapDown"));
 
     const after = await ada.watcher.until(
-      (v) => v.you.hand.length === adaView.you.hand.length - 1,
+      (v) => playingSelf(v).hand.length === playingSelf(adaView).hand.length - 1,
       "Ada's hand to shrink",
     );
     const slapped = after.lastDiscard.at(-1)!;
@@ -1619,15 +1621,15 @@ describe("slapping down", () => {
       "the slapped card joined the set it matches",
     );
     assert.ok(
-      adaView.you.hand.some((c) => c.id === slapped.id),
+      playingSelf(adaView).hand.some((c) => c.id === slapped.id),
       "the card it went down from was the one she had just drawn",
     );
     assert.ok(
-      !after.you.hand.some((c) => c.id === slapped.id),
+      !playingSelf(after).hand.some((c) => c.id === slapped.id),
       "and it left the hand it came from",
     );
     assert.equal(after.currentTurnPlayerId, grace.id, "a slapdown is not a turn");
-    assert.equal(after.you.slapdownEligible, false, "the window closed behind it");
+    assert.equal(slapdownOpen(after), false, "the window closed behind it");
   });
 
   /**
@@ -1650,7 +1652,7 @@ describe("slapping down", () => {
       assert.equal(after.lastSlapdown!.playerId, ada.id);
       assert.equal(after.lastSlapdown!.card.id, after.lastDiscard.at(-1)!.id);
       assert.ok(
-        adaView.you.hand.some((c) => c.id === after.lastSlapdown!.card.id),
+        playingSelf(adaView).hand.some((c) => c.id === after.lastSlapdown!.card.id),
         `${seat.name} was told a card that never came out of Ada's hand`,
       );
     }
@@ -1705,11 +1707,11 @@ describe("slapping down", () => {
       "Grace's turn to be played out",
     );
     assert.equal(
-      after.you.hand.length,
-      adaView.you.hand.length,
+      playingSelf(after).hand.length,
+      playingSelf(adaView).hand.length,
       "the refused slap left Ada holding what she had",
     );
-    assert.equal(after.you.slapdownEligible, false, "and no window to try again with");
+    assert.equal(slapdownOpen(after), false, "and no window to try again with");
   });
 
   /**
@@ -1728,21 +1730,21 @@ describe("slapping down", () => {
 
     expectOk(turn);
     const expectedHand = slap.ok
-      ? adaView.you.hand.length - 1
-      : adaView.you.hand.length;
+      ? playingSelf(adaView).hand.length - 1
+      : playingSelf(adaView).hand.length;
     if (!slap.ok) assert.equal(slap.error.code, "SLAPDOWN_NOT_AVAILABLE");
     const after = await ada.watcher.until(
       (v) => v.phase !== "playing" || v.currentTurnPlayerId !== grace.id,
       "the position both actions left behind",
     );
     assert.equal(
-      after.you.hand.length,
+      playingSelf(after).hand.length,
       expectedHand,
       "Ada's hand agrees with the ack she was given",
     );
     // Whoever went first, the window is spent: no order of arrival leaves it open behind
     // both of them.
-    assert.equal(after.you.slapdownEligible, false);
+    assert.equal(slapdownOpen(after), false);
   });
 
   /**
@@ -1754,11 +1756,11 @@ describe("slapping down", () => {
     const { ada, grace } = await playToAnOpenWindow();
 
     assert.ok(
-      ada.heard.some((v) => v.you.slapdownEligible),
+      ada.heard.some((v) => slapdownOpen(v)),
       "Ada really was told about her own window",
     );
     for (const view of grace.heard) {
-      assert.equal(view.you.slapdownEligible, false, "Grace was told about a window");
+      assert.equal(slapdownOpen(view), false, "Grace was told about a window");
       for (const opponent of view.opponents) {
         assert.ok(
           !("slapdownEligible" in opponent),
@@ -1871,7 +1873,7 @@ describe("bot think time", () => {
    * once, since every copy still in hand is a copy that cannot come back off the deck.
    */
   function fishingDiscard(view: PlayerGameView): string {
-    const hand = view.you.hand;
+    const hand = playingSelf(view).hand;
     const lonely = hand.find(
       (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
     );
@@ -2016,7 +2018,7 @@ describe("bot think time", () => {
           (v) => v.phase !== "playing" || v.currentTurnPlayerId !== t.me,
           "the host's own move to land",
         );
-        if (landed.phase === "playing" && landed.you.slapdownEligible) return landed;
+        if (landed.phase === "playing" && slapdownOpen(landed)) return landed;
       }
       assert.fail("no slapdown window ever opened");
     }
@@ -2035,8 +2037,8 @@ describe("bot think time", () => {
         );
         assert.equal(after.lastSlapdown!.playerId, t.me);
         assert.equal(
-          after.you.hand.length,
-          open.you.hand.length - 1,
+          playingSelf(after).hand.length,
+          playingSelf(open).hand.length - 1,
           "the drawn card went back down",
         );
         assert.equal(
@@ -2072,7 +2074,7 @@ describe("bot think time", () => {
       const t = await sitDown(20250811);
       try {
         const open = await fishForAWindow(t);
-        const slapped = open.you.hand.find((c) => c.rank === open.lastDiscard[0]!.rank);
+        const slapped = playingSelf(open).hand.find((c) => c.rank === open.lastDiscard[0]!.rank);
         assert.ok(slapped, "the window is over a card matching the set it would join");
         t.watcher.reset();
 
@@ -2244,12 +2246,12 @@ describe("resumeSeat", () => {
     // recognised as the player, and it is in the room the position is published to.
     expectOk(
       await ask(returning, "takeTurn", {
-        discardCardIds: [before.you.hand[0]!.id],
+        discardCardIds: [playingSelf(before).hand[0]!.id],
         draw: { source: "deck" },
       }),
     );
     const played = await watcher.until(
-      (view) => view.phase === "playing" && view.you.hand.length === before.you.hand.length,
+      (view) => view.phase === "playing" && playingSelf(view).hand.length === playingSelf(before).hand.length,
       "the turn to be published back",
     );
     assertNoResumeToken(played, "a resumed connection's view");

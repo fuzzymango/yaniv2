@@ -66,6 +66,26 @@ export function inMatch(player: Player): boolean {
   return player.outInRound === null;
 }
 
+/**
+ * Whether this seat is *watching* the match rather than playing it: out of it, not gone,
+ * and somebody there is to watch. "Spectator" in CONTEXT.md — a fact about who is looking
+ * at a table rather than a rule of the game, which is why `docs/rules.md` §7 defines only
+ * the out-ness underneath it.
+ *
+ * Fully derived, and derived here rather than at the boundary that sends it, so no layer
+ * above needs a special case for a bot: a bot is out of the match exactly as a human is
+ * and spectates exactly never, because there is nobody behind the seat to be shown the
+ * table. A departed seat is out too, and nobody is looking at that one either.
+ *
+ * Connectedness is the fourth condition, and is not asked here because it is not stored:
+ * a view is built once per live socket, so a payload that names a spectator is one being
+ * sent to one. When connection becomes a fact the model carries (issue #146), it belongs
+ * in this predicate and nowhere else.
+ */
+export function spectating(player: Player): boolean {
+  return !inMatch(player) && !player.departed && !player.isBot;
+}
+
 /** The seats still playing, in roster (seating) order. */
 export function playersInMatch(state: GameState): Player[] {
   return state.players.filter(inMatch);

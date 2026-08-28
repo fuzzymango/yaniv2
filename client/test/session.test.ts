@@ -50,6 +50,7 @@ import {
   type TokenStore,
 } from "../src/session.ts";
 import { isLegalCall } from "../src/turn.ts";
+import { playingSelf, slapdownOpen } from "./helpers.ts";
 
 /**
  * Somewhere to keep a seat's credential, standing in for whatever the browser will use.
@@ -318,7 +319,7 @@ const CHEAP_PICKUP = 3;
  * what this drives.
  */
 function takeATurn(session: Session, view: PlayerGameView): void {
-  const heaviest = legalDiscards(view.you.hand).sort(
+  const heaviest = legalDiscards(playingSelf(view).hand).sort(
     (a, b) => handValue(b) - handValue(a),
   )[0]!;
   for (const card of heaviest) session.toggleCard(card.id);
@@ -346,7 +347,7 @@ async function playUntilCallable(session: Session): Promise<SessionSnapshot> {
     );
     const view = resting.view!;
     assert.equal(view.phase, "playing", "a bot called Yaniv before this seat could");
-    if (isLegalCall(view.you.hand, view.settings.yanivThreshold)) return resting;
+    if (isLegalCall(playingSelf(view).hand, view.settings.yanivThreshold)) return resting;
 
     takeATurn(session, view);
   }
@@ -408,7 +409,7 @@ async function playToMatchEnd(sessions: Session[]): Promise<SessionSnapshot> {
     if (turn !== -1) {
       const mover = sessions[turn]!;
       const view = seen[turn]!.view!;
-      if (isLegalCall(view.you.hand, view.settings.yanivThreshold)) mover.callYaniv();
+      if (isLegalCall(playingSelf(view).hand, view.settings.yanivThreshold)) mover.callYaniv();
       else takeATurn(mover, view);
     } else if (
       onHost.view?.phase === "roundEnd" &&
@@ -592,7 +593,7 @@ describe("the session core", () => {
         MAX_PLAYERS - 1,
         "every seat the host did not fill is a bot",
       );
-      assert.equal(playing.view!.you.hand.length, HAND_SIZE, "and the cards are dealt");
+      assert.equal(playingSelf(playing.view!).hand.length, HAND_SIZE, "and the cards are dealt");
       assert.equal(
         playing.view!.settings.yanivThreshold,
         YANIV_THRESHOLD,
@@ -650,7 +651,7 @@ describe("the session core", () => {
 
       // Nothing was dealt behind the refusal, on the host's screen either.
       assert.equal(host.getSnapshot().view!.phase, "lobby");
-      assert.equal(host.getSnapshot().view!.you.hand.length, 0);
+      assert.equal(playingSelf(host.getSnapshot().view!).hand.length, 0);
     } finally {
       await server.close();
     }
@@ -899,7 +900,7 @@ describe("the room's settings", () => {
           `${who}'s hand`,
           (s) => s.view!.phase !== "lobby",
         );
-        assert.equal(dealt.view!.you.hand.length, RAISED.handSize);
+        assert.equal(playingSelf(dealt.view!).hand.length, RAISED.handSize);
       }
     } finally {
       await server.close();
@@ -962,7 +963,7 @@ describe("taking a turn", () => {
     const server = await startServer(7);
     try {
       const host = await soloMatch(server);
-      const chosen = host.getSnapshot().view!.you.hand[0]!;
+      const chosen = playingSelf(host.getSnapshot().view!).hand[0]!;
 
       host.toggleCard(chosen.id);
       assert.deepEqual(host.getSnapshot().selection, [chosen.id], "chosen, not yet sent");
@@ -976,12 +977,12 @@ describe("taking a turn", () => {
       // broadcasts the result, so a lock released on the ack would let go while the
       // last view still showed this card in hand and this player on turn.
       assert.ok(
-        !landed.view!.you.hand.some((c) => c.id === chosen.id),
+        !playingSelf(landed.view!).hand.some((c) => c.id === chosen.id),
         "the lock held until a strictly newer position arrived, not merely until the ack",
       );
       assert.equal(landed.error, null);
       assert.deepEqual(landed.selection, [], "the selection went with the turn");
-      assert.equal(landed.view!.you.hand.length, HAND_SIZE, "discarded one, drew one");
+      assert.equal(playingSelf(landed.view!).hand.length, HAND_SIZE, "discarded one, drew one");
       assert.deepEqual(
         landed.view!.lastDiscard.map((c) => c.id),
         [chosen.id],
@@ -999,13 +1000,13 @@ describe("taking a turn", () => {
       const before = host.getSnapshot().view!;
       const wanted = before.lastDiscard[0]!;
 
-      host.toggleCard(before.you.hand[0]!.id);
+      host.toggleCard(playingSelf(before).hand[0]!.id);
       host.commitTurn({ kind: "discard", cardId: wanted.id });
 
       const landed = await waitForSnapshot(host, "the turn to land", (s) => !s.busy);
       assert.equal(landed.error, null, "the client offered only what the server accepts");
       assert.ok(
-        landed.view!.you.hand.some((c) => c.id === wanted.id),
+        playingSelf(landed.view!).hand.some((c) => c.id === wanted.id),
         "the tapped card was drawn, not one off the deck",
       );
     } finally {
@@ -1017,7 +1018,7 @@ describe("taking a turn", () => {
     const server = await startServer(7);
     try {
       const [, waiting] = await twoHumanMatch(server);
-      const chosen = waiting.getSnapshot().view!.you.hand[0]!;
+      const chosen = playingSelf(waiting.getSnapshot().view!).hand[0]!;
 
       // A legal discard, out of turn. Turn order is the server's to own — the client
       // does not second-guess it, so the refusal is how this player is told.
@@ -1042,7 +1043,7 @@ describe("taking a turn", () => {
     const server = await startServer(7);
     try {
       const host = await soloMatch(server);
-      const chosen = host.getSnapshot().view!.you.hand[0]!;
+      const chosen = playingSelf(host.getSnapshot().view!).hand[0]!;
       host.toggleCard(chosen.id);
 
       // A phone on a slow connection double-taps far more readily than a keyboard
@@ -1066,10 +1067,10 @@ describe("taking a turn", () => {
     const server = await startServer(7);
     try {
       const [mover, waiting] = await twoHumanMatch(server);
-      const chosen = waiting.getSnapshot().view!.you.hand[0]!;
+      const chosen = playingSelf(waiting.getSnapshot().view!).hand[0]!;
       waiting.toggleCard(chosen.id);
 
-      const played = mover.getSnapshot().view!.you.hand[0]!;
+      const played = playingSelf(mover.getSnapshot().view!).hand[0]!;
       mover.toggleCard(played.id);
       mover.commitTurn({ kind: "deck" });
 
@@ -1090,7 +1091,7 @@ describe("taking a turn", () => {
     const server = await startServer(7);
     try {
       const host = await soloMatch(server);
-      const hand = host.getSnapshot().view!.you.hand;
+      const hand = playingSelf(host.getSnapshot().view!).hand;
 
       // Five dealt cards always hold two that make no set between them, and tapping
       // both is the ordinary way to find that out — so it has to cost nothing at all.
@@ -1133,7 +1134,7 @@ describe("slapping down", () => {
    * joker never opens a window at all, so this is the discard most likely to.
    */
   function fishForAWindow(session: Session, view: PlayerGameView): void {
-    const hand = view.you.hand;
+    const hand = playingSelf(view).hand;
     const lonely = hand.find(
       (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
     );
@@ -1201,7 +1202,7 @@ describe("slapping down", () => {
 
       fishForAWindow(host, view);
       const landed = await waitForSnapshot(host, "the host's turn to land", (s) => !s.busy);
-      if (landed.view!.you.slapdownEligible) return [host, guest];
+      if (slapdownOpen(landed.view!)) return [host, guest];
     }
     throw new Error("no slapdown window ever opened");
   }
@@ -1212,12 +1213,12 @@ describe("slapping down", () => {
       const [host, guest] = await playToAnOpenWindow(server);
 
       assert.equal(
-        host.getSnapshot().view!.you.slapdownEligible,
+        slapdownOpen(host.getSnapshot().view!),
         true,
         "the window is on the position the screen reads",
       );
       const seenByGuest = guest.getSnapshot().view!;
-      assert.equal(seenByGuest.you.slapdownEligible, false);
+      assert.equal(slapdownOpen(seenByGuest), false);
       assert.ok(
         !JSON.stringify(seenByGuest).includes('"slapdownEligible":true'),
         "an open window leaked into the other player's position",
@@ -1243,7 +1244,7 @@ describe("slapping down", () => {
       const landed = await waitForSnapshot(host, "the slap to land", (s) => !s.busy);
       const after = landed.view!;
       assert.equal(landed.error, null);
-      assert.equal(after.you.hand.length, before.you.hand.length - 1, "a card lighter");
+      assert.equal(playingSelf(after).hand.length, playingSelf(before).hand.length - 1, "a card lighter");
       assert.equal(
         after.lastDiscard.length,
         before.lastDiscard.length + 1,
@@ -1254,7 +1255,7 @@ describe("slapping down", () => {
         before.currentTurnPlayerId,
         "a slapdown is not a turn",
       );
-      assert.equal(after.you.slapdownEligible, false, "the window closed behind it");
+      assert.equal(slapdownOpen(after), false, "the window closed behind it");
     } finally {
       await server.close();
     }
@@ -1272,7 +1273,7 @@ describe("slapping down", () => {
 
       const landed = await waitForSnapshot(host, "the slap to land", (s) => !s.busy);
       assert.equal(landed.error, null, "a second slap would have been refused");
-      assert.equal(landed.view!.you.hand.length, before.you.hand.length - 1);
+      assert.equal(playingSelf(landed.view!).hand.length, playingSelf(before).hand.length - 1);
     } finally {
       await server.close();
     }
@@ -1304,15 +1305,15 @@ describe("slapping down", () => {
         "the race to settle",
         (s) =>
           !s.busy &&
-          (s.error !== null || s.view!.you.hand.length === before.you.hand.length - 1),
+          (s.error !== null || playingSelf(s.view!).hand.length === playingSelf(before).hand.length - 1),
       );
       if (landed.error === null) {
-        assert.equal(landed.view!.you.hand.length, before.you.hand.length - 1);
+        assert.equal(playingSelf(landed.view!).hand.length, playingSelf(before).hand.length - 1);
       } else {
         assert.equal(landed.error.code, "SLAPDOWN_NOT_AVAILABLE");
         assert.equal(
-          landed.view!.you.hand.length,
-          before.you.hand.length,
+          playingSelf(landed.view!).hand.length,
+          playingSelf(before).hand.length,
           "a refused slap left them holding what they had",
         );
       }
@@ -1359,7 +1360,7 @@ describe("the move to animate", () => {
     const server = await startServer(7);
     try {
       const host = await soloMatch(server);
-      const chosen = host.getSnapshot().view!.you.hand[0]!;
+      const chosen = playingSelf(host.getSnapshot().view!).hand[0]!;
 
       host.toggleCard(chosen.id);
       host.commitTurn({ kind: "deck" });
@@ -1380,7 +1381,7 @@ describe("the move to animate", () => {
       assert.equal(flight.drawSource, "deck");
       assert.ok(flight.drawnCard, "and the card we drew, which is ours to know");
       assert.ok(
-        ours.view!.you.hand.some((c) => c.id === flight.drawnCard!.id),
+        playingSelf(ours.view!).hand.some((c) => c.id === flight.drawnCard!.id),
         "and which the position it arrived with has put in our hand",
       );
     } finally {
@@ -1465,7 +1466,7 @@ describe("the move to animate", () => {
 
       // A card in flight belongs to the publication that announced the move and to no
       // other, so anything published after it — here, a tap choosing a card — has none.
-      host.toggleCard(resting.view!.you.hand[0]!.id);
+      host.toggleCard(playingSelf(resting.view!).hand[0]!.id);
       assert.equal(host.getSnapshot().flight, null, "a tap is not a move to animate");
     } finally {
       await server.close();
@@ -1603,7 +1604,7 @@ describe("calling Yaniv", () => {
       const host = await soloMatch(server);
       const view = host.getSnapshot().view!;
       assert.equal(
-        isLegalCall(view.you.hand, view.settings.yanivThreshold),
+        isLegalCall(playingSelf(view).hand, view.settings.yanivThreshold),
         false,
         "five dealt cards are worth more than the threshold",
       );
@@ -1633,7 +1634,7 @@ describe("calling Yaniv", () => {
       // and what it leaves behind matters: a card id is the same string every round (the
       // deck is rebuilt, not shuffled on), so a choice carried across a deal would come
       // back highlighted over whatever card inherited its id.
-      host.toggleCard(ready.view!.you.hand[0]!.id);
+      host.toggleCard(playingSelf(ready.view!).hand[0]!.id);
       host.callYaniv();
 
       const scored = await waitForSnapshot(
@@ -1667,7 +1668,7 @@ describe("calling Yaniv", () => {
         (s) => s.view?.phase === "playing",
       );
       assert.equal(dealt.view!.roundNumber, 2);
-      assert.equal(dealt.view!.you.hand.length, HAND_SIZE, "a fresh hand, not the scored one");
+      assert.equal(playingSelf(dealt.view!).hand.length, HAND_SIZE, "a fresh hand, not the scored one");
       assert.equal(dealt.view!.roundResult, null, "the last round's hands are off the table");
     } finally {
       await server.close();
@@ -1713,7 +1714,7 @@ describe("a finished match", () => {
       assert.equal(dealt.error, null);
       assert.equal(dealt.view!.roundNumber, 1, "a fresh match, not the next round of the old one");
       assert.equal(dealt.view!.you.score, 0, "and everybody starts level again");
-      assert.equal(dealt.view!.you.hand.length, HAND_SIZE);
+      assert.equal(playingSelf(dealt.view!).hand.length, HAND_SIZE);
       assert.equal(dealt.view!.roundResult, null, "the match that ended is off the table");
       assert.deepEqual(
         dealt.view!.opponents.map((o) => o.id),

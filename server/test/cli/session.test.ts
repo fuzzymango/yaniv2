@@ -22,6 +22,7 @@ import { RoomManager } from "../../src/roomManager.ts";
 import { mulberry32 } from "../../src/rng.ts";
 import { createSocketServer } from "../../src/socketServer.ts";
 import { runSession } from "../../scripts/cli/session.ts";
+import { playingSelf, slapdownOpen } from "../helpers.ts";
 
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
@@ -95,7 +96,7 @@ async function playOn(latest: () => PlayerGameView | null): Promise<string> {
     );
   });
   const view = latest()!;
-  return view.phase === "playing" ? String(view.you.hand.length) : "";
+  return view.phase === "playing" ? String(playingSelf(view).hand.length) : "";
 }
 
 /**
@@ -230,7 +231,7 @@ describe("runSession", () => {
     try {
       const socket = await server.connect();
       socket.on("gameStateUpdate", (view) => {
-        if (openingHandValue === 0) openingHandValue = handValue(view.you.hand);
+        if (openingHandValue === 0) openingHandValue = handValue(playingSelf(view).hand);
       });
 
       await runSession(
@@ -280,7 +281,7 @@ describe("runSession", () => {
           ask: hostAsk(async () => {
             const current = view!;
             seenAtPrompt.push(
-              `${current.drawPileCount}|${current.you.hand.map((c) => c.id).join(",")}`,
+              `${current.drawPileCount}|${playingSelf(current).hand.map((c) => c.id).join(",")}`,
             );
             if (seenAtPrompt.length > 3) return null;
             return await playOn(() => view);
@@ -921,7 +922,7 @@ describe("runSession", () => {
       const fresh = restarted!;
       assert.equal(fresh.phase, "playing", "the new match is dealt, with no stop at a lobby");
       assert.equal(fresh.roundNumber, 1, "and it is a new match, not another round");
-      assert.equal(fresh.you.hand.length, 5, "with a fresh hand");
+      assert.equal(playingSelf(fresh).hand.length, 5, "with a fresh hand");
       for (const player of [fresh.you, ...fresh.opponents]) {
         assert.equal(player.score, 0, `${player.name} starts the new match on nothing`);
       }
@@ -1012,7 +1013,7 @@ describe("runSession", () => {
      * back off the deck. Jokers are skipped — a drawn joker never opens a window.
      */
     function fishingDiscard(view: PlayerGameView): string {
-      const hand = view.you.hand;
+      const hand = playingSelf(view).hand;
       const at = hand.findIndex(
         (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
       );
@@ -1088,7 +1089,7 @@ describe("runSession", () => {
               // One window is the whole of what this test is after; the fishing is only
               // how it gets there.
               if (slapped || adaPrompts > 400) return null;
-              if (view.you.slapdownEligible) {
+              if (slapdownOpen(view)) {
                 slapped = true;
                 return "slap";
               }
@@ -1122,7 +1123,7 @@ describe("runSession", () => {
                 return (
                   view.phase === "playing" &&
                   view.currentTurnPlayerId === view.you.id &&
-                  !adaView!.you.slapdownEligible
+                  !slapdownOpen(adaView!)
                 );
               });
               return done ? null : fishingDiscard(graceView!);
@@ -1148,12 +1149,12 @@ describe("runSession", () => {
 
       assert.ok(slapped, "no window ever opened to slap from");
 
-      const opened = adaHeard.findIndex((v) => v.you.slapdownEligible);
+      const opened = adaHeard.findIndex((v) => slapdownOpen(v));
       const before = adaHeard[opened]!;
       const after = adaHeard[opened + 1]!;
       assert.equal(
-        after.you.hand.length,
-        before.you.hand.length - 1,
+        playingSelf(after).hand.length,
+        playingSelf(before).hand.length - 1,
         "the slapped card left the hand",
       );
       assert.equal(
@@ -1166,7 +1167,7 @@ describe("runSession", () => {
         before.currentTurnPlayerId,
         "a slapdown is not a turn",
       );
-      assert.equal(after.you.slapdownEligible, false, "the window closed behind it");
+      assert.equal(slapdownOpen(after), false, "the window closed behind it");
 
       const screen = plain(adaScreen.join("\n"));
       assert.match(screen, /slapdown!/, "the frame is what told her the window was open");

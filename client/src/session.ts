@@ -350,11 +350,16 @@ export function createSession(
    * in every round of a match — the deck is rebuilt, not shuffled on — so a choice carried
    * across a deal would come back chosen over whatever card inherited its id.
    *
+   * A position this viewer is only *watching* is the same case (issue #143): they hold no
+   * hand for a choice to be about, and the shape they are sent has none to filter against.
+   *
    * Stated once and here, because a seat claimed back answers it the same way an arriving
    * broadcast does.
    */
   const carriedInto = (view: PlayerGameView): readonly string[] =>
-    view.phase === "playing" ? retainSelection(snapshot.selection, view.you.hand) : [];
+    view.phase === "playing" && !view.you.spectating
+      ? retainSelection(snapshot.selection, view.you.hand)
+      : [];
 
   /**
    * A position reaching the screen, which is the moment it reaches the client: there is no
@@ -807,8 +812,12 @@ export function createSession(
 
       // The same rulebook the server will judge the call by, and the same silence when it
       // says no: an inert control that was tapped anyway has asked for nothing. Whether it
-      // is this player's turn is left to the server, exactly as it is for a discard.
-      if (!isLegalCall(snapshot.view.you.hand, snapshot.view.settings.yanivThreshold)) return;
+      // is this player's turn is left to the server, exactly as it is for a discard. A
+      // viewer who is only watching has no hand to call on, which `turnFrom` answers for
+      // the other half of the same screen (issue #143).
+      const you = snapshot.view.you;
+      if (you.spectating) return;
+      if (!isLegalCall(you.hand, snapshot.view.settings.yanivThreshold)) return;
 
       play((ack) => socket.emit("callYaniv", ack));
     },

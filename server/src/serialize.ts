@@ -7,6 +7,7 @@ import type {
   OpponentView,
   PlayerGameView,
   RoundResultView,
+  SeatView,
   SelfView,
 } from "@yaniv/shared";
 import { sortHand } from "@yaniv/shared";
@@ -17,7 +18,7 @@ import type {
   Player,
   RoundResult,
 } from "./state.ts";
-import { inMatch } from "./state.ts";
+import { inMatch, spectating } from "./state.ts";
 
 /**
  * Names come from the result itself, not from the roster: a scored round is a record of
@@ -51,6 +52,35 @@ function toRoundResultView(result: RoundResult): RoundResultView {
  */
 function standingOf(player: Player): MatchStanding {
   return { outInRound: player.outInRound, departed: player.departed };
+}
+
+/**
+ * The viewer's own view, in whichever of its two shapes they are entitled to (issue #143).
+ *
+ * The tag is `spectating` from `state.ts` and nothing else, so which shape a seat gets is
+ * one derivation rather than one per phase — and a spectator's shape carries no hand and
+ * no eligibility field to fill in, which is what makes "a spectator holding cards" not a
+ * mistake this function could make.
+ *
+ * **It widens nothing.** Everything below this line is about the viewer's own seat: a
+ * spectator's payload is an active player's minus a hand, never plus anything, because
+ * being knocked out must not turn a player into an oracle for a friend still playing.
+ * One function for both phases, so the lobby and a dealt round cannot answer differently.
+ */
+function selfViewOf(
+  viewer: Player,
+  hand: Card[],
+  slapdownEligible: boolean,
+): SelfView {
+  const seat: SeatView = {
+    id: viewer.id,
+    name: viewer.name,
+    score: viewer.score,
+    ...standingOf(viewer),
+  };
+  return spectating(viewer)
+    ? { ...seat, spectating: true }
+    : { ...seat, spectating: false, hand, slapdownEligible };
 }
 
 /**
@@ -135,14 +165,10 @@ export function serializeStateForPlayer(
   }
 
   if (state.phase === "lobby") {
-    const you: SelfView = {
-      id: viewer.id,
-      name: viewer.name,
-      score: viewer.score,
-      ...standingOf(viewer),
-      hand: [],
-      slapdownEligible: false,
-    };
+    // Nobody is out of a match that has not been dealt, so this is always the playing
+    // shape — arrived at by the same derivation as every other phase, rather than by
+    // this branch knowing it.
+    const you: SelfView = selfViewOf(viewer, [], false);
     const opponents: OpponentView[] = state.players
       .filter((p) => p.id !== viewerPlayerId)
       .map((p) => ({
@@ -178,20 +204,16 @@ export function serializeStateForPlayer(
 
   const round = state.round;
 
-  const you: SelfView = {
-    id: viewer.id,
-    name: viewer.name,
-    score: viewer.score,
-    ...standingOf(viewer),
+  const you: SelfView = selfViewOf(
+    viewer,
     // Sorted here rather than in the engine: hand order is presentation, and this
     // is the one place every client is guaranteed to go through.
-    hand: sortHand(round.hands[viewer.id] ?? []),
+    sortHand(round.hands[viewer.id] ?? []),
     // Told only to whoever holds the window: an open window is a fact about the holder's
     // hand, so it goes no further. Gated on the phase the same way `currentTurnPlayerId`
     // below is — both are answers about a round still being played.
-    slapdownEligible:
-      state.phase === "playing" && round.slapdown?.playerId === viewer.id,
-  };
+    state.phase === "playing" && round.slapdown?.playerId === viewer.id,
+  );
 
   const opponents: OpponentView[] = state.players
     .filter((p) => p.id !== viewerPlayerId)

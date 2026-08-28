@@ -36,6 +36,23 @@ const MAX_PICKUP_VALUE = 3;
  */
 const VALUE_WEIGHT = 10;
 
+/**
+ * The hand the bot is holding, from the view it was handed.
+ *
+ * The self view is tagged by whether its owner is still in the match (issue #143), and a
+ * bot's is always the playing shape — `spectating` is derived as "out, not departed, not
+ * a bot", precisely so nothing above the serializer needs a special case for one. Being
+ * asked to decide from a spectating view is therefore a defect and not a rule violation,
+ * and gets the treatment `playBotTurn` gives a rejected bot move: thrown, because there
+ * is no client at fault to report it to.
+ */
+function handOf(view: PlayerGameView): Card[] {
+  if (view.you.spectating) {
+    throw new Error(`Bot ${view.you.id} was asked to play from a spectator's view`);
+  }
+  return view.you.hand;
+}
+
 /** What the bot has decided to do with its turn. */
 export type BotAction =
   | { type: "yaniv" }
@@ -50,7 +67,7 @@ export type BotAction =
  * which is why the bot takes the whole view rather than just its hand.
  */
 export function shouldCallYaniv(view: PlayerGameView): boolean {
-  return canCallYaniv(view.you.hand, view.settings.yanivThreshold);
+  return canCallYaniv(handOf(view), view.settings.yanivThreshold);
 }
 
 /**
@@ -62,7 +79,7 @@ export function shouldCallYaniv(view: PlayerGameView): boolean {
  * so the pair wins on length.
  */
 export function chooseDiscard(view: PlayerGameView): Card[] {
-  const options = legalDiscards(view.you.hand);
+  const options = legalDiscards(handOf(view));
   const best = options.reduce<Card[] | null>(
     (winner, option) =>
       winner === null || rateDiscard(option) > rateDiscard(winner) ? option : winner,

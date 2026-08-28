@@ -116,6 +116,7 @@ export function App({ session }: { session: Session }) {
         onCallYaniv={session.callYaniv}
         onNextRound={session.startNextRound}
         onSlapDown={session.slapDown}
+        onExit={session.exitToMenu}
         onCloseRoom={session.closeRoom}
       />
     );

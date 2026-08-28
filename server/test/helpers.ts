@@ -4,6 +4,8 @@ import type {
   DrawSource,
   GameErrorCode,
   Phase,
+  PlayerGameView,
+  PlayingSelfView,
   RoomSettings,
 } from "@yaniv/shared";
 import { HAND_SIZE, MAX_SCORE, YANIV_THRESHOLD } from "@yaniv/shared";
@@ -202,6 +204,35 @@ export function expectErr<T>(result: Result<T>, code: GameErrorCode): void {
 
 export function ids(list: readonly Card[]): string[] {
   return list.map((c) => c.id);
+}
+
+/**
+ * The viewer's own view, narrowed to the variant that holds a hand.
+ *
+ * `SelfView` is tagged by whether its owner is still in the match (issue #143), and a
+ * spectator's has no `hand` and no `slapdownEligible` to read. Every suite that asks for
+ * either is about a player still playing, so the narrowing is a fixture concern rather
+ * than something each assertion should restate — and a scenario that drifted into
+ * spectating fails here, by name, instead of at a confusing assertion downstream.
+ */
+export function playingSelf(view: PlayerGameView): PlayingSelfView {
+  if (view.you.spectating) {
+    throw new Error(`expected ${view.you.id} to still be in the match, not spectating`);
+  }
+  return view.you;
+}
+
+/**
+ * Whether this viewer holds an open slapdown window — the total question, over either
+ * shape of self view.
+ *
+ * `playingSelf` is for a scenario that has pinned a player down as still playing; this is
+ * for the suites that scan every position a seat was sent, across matches a player may
+ * have been knocked out of along the way. A watcher holds no window, which is the same
+ * answer `isSlapdownTarget` gives the browser client.
+ */
+export function slapdownOpen(view: PlayerGameView): boolean {
+  return !view.you.spectating && view.you.slapdownEligible;
 }
 
 /**

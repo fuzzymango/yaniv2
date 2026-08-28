@@ -281,7 +281,7 @@ export async function runSession(
     const isOurMove = (view: PlayerGameView) =>
       view.phase === "lobby" ||
       view.currentTurnPlayerId === playerId ||
-      view.you.slapdownEligible ||
+      (!view.you.spectating && view.you.slapdownEligible) ||
       view.phase === "roundEnd" ||
       view.phase === "gameEnd";
 

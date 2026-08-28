@@ -121,6 +121,40 @@ Three things still separate the revealed hand from the played one (issues #56, #
   since issue #130 it is a panel floating over the same seated table, which reveals the final
   round through the codepath above while the standings sit in front of it.
 
+## Watching it, once the match has gone on without you
+
+**The same table again** (issue #143). A player whose total crosses the room's max score is out
+of the match and stays in the room as a **spectator**: no dialog to answer, no screen to be
+moved to, and everything above the bottom of the screen exactly as it was a moment before —
+the felt, the seats, the turn line and the move-history drawer all keep working. Watching is
+the full experience minus the acting.
+
+- **The wire says which of the two they are, not the screen.** `SelfView` is a tagged union,
+  and `Table.tsx` narrows it once at the top (`yours`) beside the phase branch it already
+  makes. A spectator's variant has no `hand` and no `slapdownEligible` at all, so this screen
+  cannot draw a hand for somebody who is not holding one — the same guarantee `OpponentView`
+  has always given about everybody else's cards.
+- **The hand slot becomes a bar of about the same height** (`.spectating`), saying they are out
+  and carrying the way out and nothing else — and nothing at all at `gameEnd`, where the panel
+  over the table carries its own and the bottom of the screen is given up as the topbar is. The size is the whole point: a bar the hand's
+  height leaves every seat, the felt and the pile where they were, which is what makes
+  spectating read as staying rather than as being moved somewhere. Its `min-height` is derived
+  from `--hand-card-w`, the one place the hand's card size is named, so the two cannot drift.
+- **One control in it, and it is the existing one.** `WayOut` — leaving for a guest, closing
+  for the host, with the confirm it already asks. A knocked-out host is shown the close rather
+  than a Leave button that quietly does the same thing: their leaving *is* closing the room
+  until the host retires at the first deal (#145), and the label should say so. Nothing else in the bar should read as a
+  move, so the Yaniv slot renders empty for a spectator too. The scored-round branch of that
+  slot is deliberately untouched: dealing the next round is not a move in a hand, and who may
+  ask for it is the server's rule to state.
+- **The round that took them out still reveals their hand**, in the row the bar otherwise
+  fills. That round was scored with them in it, so its own record holds the cards they played,
+  and they are read off `roundResult` exactly as every other seat's are — being dimmed out of
+  the next round does not retract the last one. From the following deal on there is no record
+  of theirs to find, and the bar is what the row says.
+- **The footer keeps their name and their frozen total** and drops the hand value, since there
+  is no hand to weigh — the same row in the same place, saying only what is still true.
+
 ## And the finished match is that table with the standings over it
 
 **The same table once more** (issue #130). A match ending used to replace the felt with a bare

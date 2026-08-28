@@ -37,7 +37,7 @@ a `test/` of `node:test` suites beside its `src/`: one file per module, plus the
 | File | Contents |
 |---|---|
 | `cards.ts` | `Card`/`Suit`/`Rank`, rank ordering, `rankToValue` (the scoring table, `docs/rules.md` §1), and `sortHand`/`compareCards` (display order only — see below) |
-| `views.ts` | `PlayerGameView` and friends — what a client actually receives, the round's `moveHistory` and each seat's `MatchStanding` included |
+| `views.ts` | `PlayerGameView` and friends — what a client actually receives, the round's `moveHistory` and each seat's `MatchStanding` included. `SelfView` is a tagged union (`spectating`): the playing variant holds the hand and `slapdownEligible`, the spectating one has neither field at all |
 | `errors.ts` | `GameErrorCode` union |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and the client |
@@ -55,7 +55,7 @@ carries, so this costs `shared` none of its dependency-freedom. See `docs/adr/00
 
 | File | Contents |
 |---|---|
-| `state.ts` | `GameState`, `RoundState`, `Player` (`outInRound`/`departed` included), `MoveHistoryEntry` — the domain model — plus `inMatch`/`playersInMatch`, the filter every count over a roster goes through |
+| `state.ts` | `GameState`, `RoundState`, `Player` (`outInRound`/`departed` included), `MoveHistoryEntry` — the domain model — plus `inMatch`/`playersInMatch`, the filter every count over a roster goes through, and `spectating`, the one derivation of watching-rather-than-playing |
 | `config.ts` | The operational constants only — `BOT_NAMES` and `ROOM_CODE_*`. The rule constants live in `shared` |
 | `rng.ts`, `clock.ts` | The two ambient capabilities, injected rather than reached for: `Rng` + `mulberry32` (a seeded PRNG), and `Clock` + `systemClock` (the one thing scheduling needs from outside, and what `roomTimers.ts` is built on) |
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
@@ -102,14 +102,12 @@ pure logic modules and `styles.css` stay flat at the root: they are not a screen
 component folder is the wrong place to look for them. **No barrel `index.ts`** anywhere —
 every import names the file it pulls from, as the rest of the codebase does.
 
-Two exemptions, and only these. **Private, single-use render helpers stay inline** with the
-one component that uses them (`table/MoveHistory.tsx`'s `FaceDown`/`TurnEntry`/
-`SlapdownEntry`): decomposition for readability, not peers worth finding on their own.
+Two exemptions, and only these. **Private, single-use render helpers stay inline** with the one
+component that uses them (`table/MoveHistory.tsx`'s `FaceDown`/`TurnEntry`/`SlapdownEntry`).
 **Two or more exported components share a file only where splitting them would lose an
 invariant, and the file's own header must say which** — inferring it is not enough. There are
-two: `table/Seat.tsx` (`CardFan` and `CascadeReveal` size from one `seatFootprint` call, so a
-round-end swap costs no layout) and `shared/WayOut.tsx` (both close-room triggers ask through
-one `ConfirmClose`, so neither can quietly stop asking).
+two: `table/Seat.tsx` (`CardFan` and `CascadeReveal` size from one `seatFootprint` call) and
+`shared/WayOut.tsx` (both close-room triggers ask through one `ConfirmClose`).
 
 | File | Contents |
 |---|---|
@@ -130,7 +128,7 @@ one `ConfirmClose`, so neither can quietly stop asking).
 | `main-menu/MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `lobby/Lobby.tsx` | `phase: 'lobby'` — the code, who is seated, the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out: closing the room for the host, leaving for everyone else |
 | `lobby/SettingsEditor.tsx` | The host's four controls, in the lobby and nowhere else. Offers exactly what `isValidSettings` accepts, and sends the whole object per change |
-| `table/Table.tsx` | `phase: 'playing'`, **`'roundEnd'` and `'gameEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, the call become the deal, the history drawer gone, and an `OUT` tag on any seat the round took out of the match. Once the *match* is over it is that same scored table with its controls given up — no topbar and no bottom slot — for `GameEnd` to float over |
+| `table/Table.tsx` | `phase: 'playing'`, **`'roundEnd'` and `'gameEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. `SelfView` is narrowed once at the top: a viewer the match has gone on without gets a bar where their hand was, saying so and carrying the way out and no other control (issue #143). Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, the call become the deal, the history drawer gone, and an `OUT` tag on any seat the round took out of the match. Once the *match* is over it is that same scored table with its controls given up — no topbar and no bottom slot — for `GameEnd` to float over |
 | `table/Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held, carrying the seat's own `data-flight-box` — the one box in this client drawn to be measured rather than looked at) and `CascadeReveal` (the same hand face up and read, in the seat's own reserved box). Both take that box from `seatFootprint`, so swapping one for the other moves nothing around them. `OpponentSeat` composes the first three for live play; `Table.tsx` composes the scored seat. Presentational throughout |
 | `table/CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen, and the deck and the seats with them, after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), and the `CardsInFlight` overlay they fly across. Also *how* it flies, which is the one thing here that is not a measurement: a turn crosses in `FLIGHT_MS` and decelerates, a slapdown crosses in `SLAP_MS` on a sharper curve, pops on landing and jolts the table (`.table--jolt`, worn for `SHAKE_MS`). The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
 | `table/MoveHistory.tsx` | `phase: 'playing'` only — the round's moves behind an arrow on the left edge of the felt, newest first, in mini cards. A pass-through of `view.moveHistory`: the redaction arrived applied, so a null drawn card is drawn face down rather than filled in. Open or closed is `useState`, so every fresh mount starts closed |
@@ -206,8 +204,7 @@ taken from it depends on its shape (`pickupCandidates`): a run exposes **only it
 same-rank set of any length **every card**, having no sequence for a middle position to protect.
 A slapdown extends that same array, so a slapped card is takeable like the set it joined.
 `RoundState.buried: Card[]` is everything discarded earlier — out of play until the draw pile
-empties and it is reshuffled. A flat array cannot express "only part of the last discard is
-takeable".
+empties and it is reshuffled. A flat array cannot express "only part of this is takeable".
 
 ### Wildcard jokers in runs (docs/rules.md §4)
 
@@ -261,9 +258,9 @@ The engine ignores it entirely — bots move through `takeTurn`/`callYaniv` exac
 do — it exists so the layer above knows whose turn it has to play. Required rather than
 optional so no construction can leave a seat ambiguously controlled.
 
-The integration fuzzer has its **own** discard/draw logic and deliberately does not import
-from `bot.ts`: coupling it to the real bot would let a smarter bot silently narrow what it
-covers. It shares `legalDiscards` alone — a rules query, not a policy.
+The integration fuzzer has its **own** discard/draw logic and deliberately does not import from
+`bot.ts`: coupling it to the real bot would let a smarter bot silently narrow what it covers. It
+shares `legalDiscards` alone — a rules query, not a policy.
 
 ### Errors are values
 
@@ -288,6 +285,12 @@ disallows the leaky shape), draw pile as a count only, and every seat's standing
 sent whole to everyone, being public either way. Hands are revealed only at
 `phase: 'roundEnd'`/`'gameEnd'`, where the rules require it. Tests assert no hidden card id
 reaches a payload, mutation-tested by breaking the serializer on purpose.
+
+**A spectator's payload is an active player's minus a hand, never plus anything** (issue #143).
+`SelfView` is tagged by `spectating`, derived in `state.ts` as out, not departed, not a bot — so
+no layer above needs a special case for one — and the spectating variant has no `hand` and no
+`slapdownEligible` at all, on `OpponentView`'s principle. No branch here widens anything: being
+knocked out must not make a player an oracle for a friend still playing. Mutation-tested too.
 
 **The last move is sent with its drawn card redacted.** `RoundState.lastMove` records the mover,
 the pile they drew from and the card itself; the serializer sends that card to everyone off the
@@ -353,11 +356,11 @@ first deal locks the lot; `playAgain` never returns to the lobby.
 **A disconnect costs the room nothing** — there is deliberately no `disconnect` handler. The
 seat, the player and the room are left as they were, and whoever dropped comes back through
 **`resumeSeat({ roomCode, playerId, resumeToken })`**: session rebound, room rejoined, the
-position answered in the ack alone and broadcast to nobody. The token is the check for a seat still somebody's — a player id appears in every
-opponent's view — and a wrong token, an unknown player and a seat given up (whose token now
-outlives it) share `INVALID_RESUME_TOKEN`, or a room code would be a way of fishing for the
-seats behind it. One live connection per seat: a resume disconnects whatever socket still
-held it, so two tabs cannot disagree about one table.
+position answered in the ack alone and broadcast to nobody. The token is the check for a seat
+still somebody's — a player id appears in every opponent's view — and a wrong token, an unknown
+player and a seat given up share `INVALID_RESUME_TOKEN`, or a room code would be a way of
+fishing for the seats behind it. One live connection per seat: a resume disconnects whatever
+socket still held it, so two tabs cannot disagree about one table.
 
 ### Leaving a room without dropping the connection
 
@@ -451,8 +454,8 @@ of whose turn it is — turn order is the server's alone, and comes back as a `G
 
 An open slapdown window suspends all of it: `Table.tsx` draws the pile as one flashing control
 instead of a row of draw targets, because a tap has to mean one thing. It is also the one
-question there the rulebook cannot answer — a window is about a card off a pile the server
-never sends, so `slapdownEligible` *is* the answer.
+question the rulebook cannot answer — a window is about a card off a pile the server never
+sends — so `isSlapdownTarget` reads the wire's own answer, and answers `false` for a spectator.
 
 ### The table is seated, and the scored round is the same table
 
@@ -467,10 +470,11 @@ The session says *what* moved (`flight.ts`), `ghosts.ts` which of it the screen 
 which way up, and `CardsInFlight.tsx` measures where and closes the difference (FLIP,
 `flip.ts`). Every move flies both ways, whoever took it, with the wire's redaction passed
 through, and **a slapdown flies as its own shape** (#95). Nothing waits on a flight, reduced
-motion skips it, and it is scoped to `playing`.
+motion skips it, and it is scoped to `playing`. A player the match has gone on without watches
+that same table, their hand slot a bar saying so (#143).
 
-Every decision behind the geometry and the flight is in **`docs/client-table.md`** (issues
-#56, #58, #59, #60, #78, #130); the code is `fan.ts`, `score.ts`, `seating.ts` and `table/`.
+Every decision behind the geometry, the flight and the bar is in **`docs/client-table.md`**
+(#56, #58, #59, #60, #78, #130, #143); the code is `fan.ts`, `score.ts`, `seating.ts`, `table/`.
 
 ### Settings are edited in one place and shown in another
 
@@ -484,9 +488,8 @@ so a value cannot be worded two ways.
 (`sameSettings`). An edit is acked as soon as the server has it, and the position behind it
 arrives separately — so a second tap read off the screen would send the first one's change
 still undone in it, and hand size 6 would snap back to 5 a moment after the host asked for it.
-That draft stays in the component, as does whether the
-modal is open: a form half-filled in is no use outside the screen holding it, and no arriving
-view can contradict either.
+That draft stays in the component, as does whether the modal is open: a form half-filled in is
+no use outside the screen holding it, and no arriving view can contradict either.
 
 ### The client's session core
 
@@ -550,10 +553,9 @@ after entering a room is one the player still cannot act from — tests wait on
 `view !== null && !busy` rather than on the view alone.
 
 **A position is drawn the moment it arrives.** There is no queue between the socket and the
-snapshot: the server spaces a run of bot turns out itself (above), so there is no burst left
-for the client to smooth, and the pacer that used to do it went with issue #135. What
-guarantees a flight finishes before the next position replaces it is bot think time; a network
-that bunches two broadcasts can cut one short, which is cosmetic and accepted.
+snapshot: the server spaces a run of bot turns out itself (above), so there is no burst left for
+the client to smooth, and the pacer that used to do it went with issue #135. Bot think time is
+what a flight finishes inside; a network that bunches two broadcasts can cut one short.
 
 **A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
 `null`, `commitTurn` returns, and no error is published — the screen should not have offered a
@@ -636,11 +638,10 @@ the seat. A drop at the menu costs nothing and says nothing.
 `disconnect` is, the two being indistinguishable to whoever is looking at them. Only the
 first of a run of failed retries is news.
 
-**Nothing argues about the tab closing.** A `beforeunload` warning guarded a live round
-until issue #66 and went with it: a reload now costs a round trip, and a page carrying that
-listener is held out of the back/forward cache — which is how a backgrounded tab comes back
-without reloading at all. The accepted cost is that a player who cannot be resumed (storage
-off, or full) loses their place in silence.
+**Nothing argues about the tab closing.** A `beforeunload` warning guarded a live round until
+issue #66 and went with it: a page carrying that listener is held out of the back/forward
+cache, which is how a backgrounded tab comes back without reloading at all. The cost accepted
+is that a player who cannot be resumed loses their place in silence.
 
 ### Tooling
 
@@ -664,9 +665,8 @@ importing a Node builtin is a typecheck error.
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
-- **Drawing a seat that is out.** The engine eliminates and the wire says so per seat
-  (`MatchStanding`), but no screen dims one, offers a spectator anything, or lets a player
-  leave mid-round yet — issues #142-#147. Next.
+- **Drawing a seat that is out.** A spectator has their own view shape and bar (#143); no screen
+  dims somebody *else's* out seat, marks it away, or lets a player leave mid-round — #144-#147.
 - **What a mid-round seat does while its player is gone.** Reconnect is whole, so a reload
   costs a round trip; but nothing pauses, times out, bot-plays or frees a seat whose player
   never comes back, and `Player` has no `connected` field for a screen to say so with.
