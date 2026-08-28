@@ -19,6 +19,18 @@ export interface MatchStanding {
   /** Whether this seat has been given up for good. Never true in the lobby, where a
    * player who leaves is simply gone from the roster. */
   departed: boolean;
+  /**
+   * Whether somebody is there behind this seat right now — a live connection, and nothing
+   * about the match itself (issue #146). False is a player who has dropped: their seat is
+   * held, their turn still waits for them, and the table says so rather than going quiet
+   * for no stated reason.
+   *
+   * Derived by the server from the sockets in the room at the moment it publishes and
+   * never stored, so there is no flag here to go stale (docs/adr/0013). True for a bot,
+   * which is never away: the server is always there for it, and a bot's absence of any
+   * marker is what says it is one.
+   */
+  connected: boolean;
 }
 
 /**
@@ -82,6 +94,17 @@ export interface OpponentView extends MatchStanding {
   name: string;
   score: number;
   handSize: number;
+  /**
+   * Whether this seat is *watching* the match rather than playing it: out of it, not gone,
+   * connected, and somebody rather than a bot. The same derivation that tags the viewer's
+   * own view above, made once on the server and sent for every seat, so a table cannot
+   * decide for itself who is looking at it (issue #146).
+   *
+   * Sent rather than derived here because the last of those conditions is not on the wire
+   * at all: nothing tells a client which seats are bots, and nothing should — a bot is
+   * exactly the seat that carries no marker.
+   */
+  spectating: boolean;
 }
 
 /**

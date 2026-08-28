@@ -369,6 +369,36 @@ body {
   font-weight: 700;
 }
 
+/*
+ * The status slot: one word about the player rather than about their round — left, away, or
+ * watching (issue #146). A chip like the marks above, because it sits in the same row and
+ * reads at the same glance, but in lower case and unspaced: those are stamps on a scored
+ * round, this is a note about somebody.
+ *
+ * Brighter than a mark deliberately. A seat that is out wears `.table-seat--out`, which
+ * fades the whole seat to a little over a third (issue #144), and opacity on the seat is a
+ * ceiling its children cannot climb back out of — so the one thing on a dimmed seat worth
+ * reading is given the full ink and a stronger border to survive the fade.
+ */
+.seat__status {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid rgb(255 255 255 / 45%);
+  border-radius: 0.75rem;
+  color: var(--ink);
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+}
+
+/*
+ * Away is the one that may yet change, and the only one the table is arguably waiting on —
+ * so it is the one that catches an eye. Left and watching are settled facts and stay plain:
+ * a table with three watchers should not look like a table with three problems.
+ */
+.seat__status--away {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .lobby__actions {
   display: flex;
   flex-direction: column;

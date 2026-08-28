@@ -24,9 +24,12 @@ interface Seat {
 
 function finishedMatch(seated: Seat[]): PlayerGameView {
   const [you, ...opponents] = seated as [Seat, ...Seat[]];
+  // Everyone still there, connection being a fact about right now and the standings a
+  // record of a match that is over: nothing here is read off it.
   const standing = (p: Seat) => ({
     outInRound: p.outInRound ?? null,
     departed: p.departed ?? false,
+    connected: true,
   });
 
   return {
@@ -36,7 +39,12 @@ function finishedMatch(seated: Seat[]): PlayerGameView {
     hostId: you.id,
     settings: { handSize: 5, yanivThreshold: 7, maxScore: 100, botCount: 0 },
     you: { ...you, ...standing(you), spectating: false, hand: [], slapdownEligible: false },
-    opponents: opponents.map((p) => ({ ...p, ...standing(p), handSize: 0 })),
+    opponents: opponents.map((p) => ({
+      ...p,
+      ...standing(p),
+      spectating: p.outInRound !== undefined && !p.departed,
+      handSize: 0,
+    })),
     // Every seat the match was played by, in the order they sat in — the roster, which the
     // standings are read off and which outlasts everyone going out of it.
     seating: seated.map((p) => p.id),

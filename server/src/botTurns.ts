@@ -22,7 +22,7 @@ import { BOT_THINK_MS } from "./config.ts";
 import { callYaniv, takeTurn } from "./game.ts";
 import type { RoomManager } from "./roomManager.ts";
 import type { RoomTimers } from "./roomTimers.ts";
-import { serializeStateForPlayer } from "./serialize.ts";
+import { NO_CONNECTIONS, serializeStateForPlayer } from "./serialize.ts";
 import type { GameStateActive } from "./state.ts";
 
 /** Injected so a test can drive a deliberately broken bot. Defaults to the real one. */
@@ -66,8 +66,9 @@ export function playBotTurn(
   // The bot decides from the same payload a client receives, never from raw state. Read
   // now rather than when the turn was scheduled: an action may have landed during the
   // pause — a slapdown is the case that matters — and the bot plays the position in
-  // front of it, so a slapped card is one it can see and take.
-  const decision = decide(serializeStateForPlayer(state, playerId));
+  // front of it, so a slapped card is one it can see and take. Who is connected is not
+  // part of that judgement and no connection is being served here, hence `NO_CONNECTIONS`.
+  const decision = decide(serializeStateForPlayer(state, playerId, NO_CONNECTIONS));
   const result =
     decision.type === "yaniv"
       ? rooms.apply(roomCode, (s) => callYaniv(s, playerId))

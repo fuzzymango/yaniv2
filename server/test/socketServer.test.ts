@@ -2489,8 +2489,113 @@ describe("a room with nobody left in it", () => {
 
 describe("disconnect", () => {
   /**
-   * A dropped connection now costs the room nothing: the seat is held, and the player
-   * behind it comes back through `resumeSeat`. Only the host closing the room ends one.
+   * A seat and the connection holding it, for the suites about who is there. Two humans in
+   * a lobby is the smallest table the question means anything at: one of them drops, and
+   * the other has to be told something about it.
+   */
+  interface Seated {
+    roomCode: string;
+    host: ClientSocket;
+    hostId: string;
+    /** Every view the host has been sent, watched from before the guest arrived. */
+    hostViews: Watcher;
+    guest: ClientSocket;
+    guestId: string;
+    guestToken: string;
+  }
+
+  async function twoInALobby(): Promise<Seated> {
+    const host = await server.connect();
+    const { roomCode, playerId: hostId } = expectOk(
+      await ask<{ roomCode: string; playerId: string }>(host, "createRoom", "Ada"),
+    );
+    // Subscribed before the join it is about to be told about: a broadcast that has
+    // already landed is one no later watcher can be handed.
+    const hostViews = watch(host);
+    const guest = await server.connect();
+    const { playerId: guestId, resumeToken: guestToken } = expectOk(
+      await ask<{ playerId: string; resumeToken: string }>(
+        guest,
+        "joinRoom",
+        roomCode,
+        "Grace",
+      ),
+    );
+    return { roomCode, host, hostId, hostViews, guest, guestId, guestToken };
+  }
+
+  it("tells the rest of the room that a seat has gone quiet", async () => {
+    const table = await twoInALobby();
+
+    const quiet = nextEvent<PlayerGameView>(table.host, "gameStateUpdate");
+    table.guest.disconnect();
+    const view = await quiet;
+
+    assert.equal(view.opponents.find((o) => o.id === table.guestId)!.connected, false);
+    assert.equal(view.you.connected, true, "a viewer is never away in their own view");
+  });
+
+  /**
+   * Display, and nothing else (issue #146). The seat is still there, still in the match and
+   * still in the roster: the only difference between the position before the drop and the
+   * one published after it is the word for whether anybody is behind it.
+   */
+  it("changes nothing about the room but who is there", async () => {
+    const table = await twoInALobby();
+    const before = await table.hostViews.until(
+      (v) => v.opponents.length === 1,
+      "the full lobby",
+    );
+
+    const quiet = nextEvent<PlayerGameView>(table.host, "gameStateUpdate");
+    table.guest.disconnect();
+    const after = await quiet;
+
+    assert.deepEqual(
+      { ...after, opponents: after.opponents.map((o) => ({ ...o, connected: true })) },
+      before,
+    );
+  });
+
+  it("says a seat is back once its player resumes", async () => {
+    const table = await twoInALobby();
+
+    const quiet = nextEvent<PlayerGameView>(table.host, "gameStateUpdate");
+    table.guest.disconnect();
+    await quiet;
+
+    const back = nextEvent<PlayerGameView>(table.host, "gameStateUpdate");
+    const returning = await server.connect();
+    expectOk(
+      await ask(returning, "resumeSeat", {
+        roomCode: table.roomCode,
+        playerId: table.guestId,
+        resumeToken: table.guestToken,
+      }),
+    );
+
+    assert.equal((await back).opponents.find((o) => o.id === table.guestId)!.connected, true);
+  });
+
+  /** A bot has no socket to drop, and is the one seat that carries no marker at all. */
+  it("has the bots connected at a table that has been dealt", async () => {
+    const host = await server.connect();
+    const watcher = watch(host);
+    expectOk(await ask(host, "createRoom", "Ada"));
+    expectOk(await ask(host, "startGame"));
+
+    const view = await watcher.until((v) => v.phase === "playing", "the deal");
+
+    assert.ok(view.opponents.length > 0, "the table was filled with bots");
+    for (const bot of view.opponents) {
+      assert.equal(bot.connected, true, `${bot.name} is never away`);
+      assert.equal(bot.spectating, false, "and never watching either");
+    }
+  });
+
+  /**
+   * A dropped connection costs the room nothing: the seat is held, and the player behind it
+   * comes back through `resumeSeat`. A room ends when its last seat *leaves* (adr/0012).
    *
    * The server processes a disconnect asynchronously, so there is no instant at which
    * "nothing happened" can be observed once and for all — the room is probed repeatedly

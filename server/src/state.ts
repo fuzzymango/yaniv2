@@ -77,13 +77,14 @@ export function inMatch(player: Player): boolean {
  * and spectates exactly never, because there is nobody behind the seat to be shown the
  * table. A departed seat is out too, and nobody is looking at that one either.
  *
- * Connectedness is the fourth condition, and is not asked here because it is not stored:
- * a view is built once per live socket, so a payload that names a spectator is one being
- * sent to one. When connection becomes a fact the model carries (issue #146), it belongs
- * in this predicate and nowhere else.
+ * `connected` is the fourth condition, and is passed in rather than read off the player
+ * because it is never stored on one (issue #146, docs/adr/0013): who is there right now
+ * is a fact about the sockets in a room, which the serializer is handed at the moment it
+ * publishes. It belongs in this predicate and nowhere else — a seat whose player has
+ * dropped is out of the match and *away*, not watching it.
  */
-export function spectating(player: Player): boolean {
-  return !inMatch(player) && !player.departed && !player.isBot;
+export function spectating(player: Player, connected: boolean): boolean {
+  return !inMatch(player) && !player.departed && !player.isBot && connected;
 }
 
 /** The seats still playing, in roster (seating) order. */

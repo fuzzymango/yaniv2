@@ -96,6 +96,12 @@ scoreboard you left. If the connection goes, the screen says so rather than leav
 tapping at a dead table, and sits you back down when it returns. Only if the room itself has
 gone are you sent to the main menu, and told why.
 
+While you are away, everybody else's table says so: each seat carries one word about the
+player behind it — **away** while their connection is gone, **watching** once the match has
+gone on without them, **left** when they have given the seat up. A bot says nothing there,
+which is how you tell one. Nothing is done about it: their seat keeps its place and their
+turn still waits for them.
+
 Everybody has the same way out — "leave the room", in the lobby and at a finished match —
 which frees their own seat and leaves the table playing for whoever remains. Nobody holds a
 control that ends anybody else's match: the host owns the lobby and retires at the first

@@ -63,6 +63,7 @@ import { DECK_BOX } from "../ghosts.ts";
 import { roundOutcome, scoreLabel } from "../score.ts";
 import type { Zone } from "../seating.ts";
 import { ZONES, byRelativeSeat, seatZones } from "../seating.ts";
+import { seatStatus } from "../status.ts";
 import { SHAKE_MS } from "../timing.ts";
 import type { DrawSource } from "../turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "../turn.ts";
@@ -303,6 +304,10 @@ export function Table({
         name={opponent.name}
         isOut={isOut(opponent)}
         wentOut={wentOut(opponent)}
+        // The same slot the live seat carries (issue #146): who is there is as true of a
+        // round being scored as of one being played, and a seat that says "away" while the
+        // table waits on the deal is saying exactly what is worth knowing.
+        status={seatStatus(opponent)}
         detail={<ScoredDetail player={row} result={result} wentOut={wentOut(opponent)} />}
         key={opponent.id}
       >

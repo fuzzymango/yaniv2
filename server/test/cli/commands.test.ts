@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { callYaniv } from "../../src/game.ts";
-import { serializeStateForPlayer } from "../../src/serialize.ts";
+import { NO_CONNECTIONS, serializeStateForPlayer } from "../../src/serialize.ts";
 import { parseCommand, parseMainMenuCommand } from "../../scripts/cli/commands.ts";
 import { makeState, unwrap } from "../helpers.ts";
 
@@ -28,6 +28,7 @@ function midRoundView() {
       currentTurnPlayerId: "p1",
     }),
     "p1",
+    NO_CONNECTIONS,
   );
 }
 
@@ -42,6 +43,7 @@ function lobbyView() {
       ],
     }),
     "p1",
+    NO_CONNECTIONS,
   );
 }
 
@@ -63,7 +65,7 @@ function gameEndView() {
       "p1",
     ),
   );
-  return serializeStateForPlayer(ended, "p1");
+  return serializeStateForPlayer(ended, "p1", NO_CONNECTIONS);
 }
 
 describe("parseCommand", () => {
@@ -202,7 +204,7 @@ describe("parseCommand", () => {
       ),
     );
 
-    assert.deepEqual(parseCommand("", serializeStateForPlayer(ended, "p1")), {
+    assert.deepEqual(parseCommand("", serializeStateForPlayer(ended, "p1", NO_CONNECTIONS)), {
       kind: "next",
     });
     // Mid-round the same keystroke is just an accident: do nothing, ask again.

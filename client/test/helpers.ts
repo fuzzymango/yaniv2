@@ -100,10 +100,20 @@ export function viewOf(
       hand,
       outInRound: null,
       departed: false,
+      connected: true,
       slapdownEligible: overrides.slapdownEligible ?? false,
     },
     opponents: [
-      { id: "p2", name: "Grace", score: 0, outInRound: null, departed: false, handSize: 5 },
+      {
+        id: "p2",
+        name: "Grace",
+        score: 0,
+        outInRound: null,
+        departed: false,
+        connected: true,
+        spectating: false,
+        handSize: 5,
+      },
     ],
     seating: ["p1", "p2"],
     turnOrder: ["p1", "p2"],
@@ -130,7 +140,15 @@ export function spectatorViewOf(lastDiscard: Card[]): PlayerGameView {
   const view = viewOf([], lastDiscard, { currentTurnPlayerId: "p2" });
   return {
     ...view,
-    you: { id: "p1", name: "Ada", score: 104, spectating: true, outInRound: 3, departed: false },
+    you: {
+      id: "p1",
+      name: "Ada",
+      score: 104,
+      spectating: true,
+      outInRound: 3,
+      departed: false,
+      connected: true,
+    },
     turnOrder: ["p2"],
   };
 }

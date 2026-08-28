@@ -15,7 +15,7 @@ import { handValue, sortHand } from "@yaniv/shared";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { serializeStateForPlayer } from "../src/serialize.ts";
+import { NO_CONNECTIONS, serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState, RoundState } from "../src/state.ts";
 import { playersInMatch } from "../src/state.ts";
 import { decideTurn } from "../src/bot.ts";
@@ -139,7 +139,7 @@ function autoPlay(playerCount: number, seed: number): void {
     const playerId = round.currentTurnPlayerId;
 
     // The bot decides from the same view a client would receive, never raw state.
-    const decision = decideTurn(serializeStateForPlayer(state, playerId));
+    const decision = decideTurn(serializeStateForPlayer(state, playerId, NO_CONNECTIONS));
 
     if (decision.type === "yaniv") {
       const called = rooms.apply(roomCode, (s) => callYaniv(s, playerId));

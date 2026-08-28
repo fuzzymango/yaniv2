@@ -105,11 +105,32 @@ export function createSocketServer(
     const state = rooms.getState(roomCode);
     if (!state) return;
 
-    for (const member of membersOf(roomCode)) {
+    const members = membersOf(roomCode);
+    const connected = connectedPlayers(members);
+    for (const member of members) {
       const playerId = member.data.session?.playerId;
       if (!playerId) continue;
-      member.emit("gameStateUpdate", serializeStateForPlayer(state, playerId));
+      member.emit("gameStateUpdate", serializeStateForPlayer(state, playerId, connected));
     }
+  }
+
+  /**
+   * Who is there right now: the player ids behind one snapshot of a room's connections
+   * (issue #146).
+   *
+   * Over the very sockets the send below is about to walk, which is the whole reason
+   * connection is derived rather than stored (docs/adr/0013) — the answer is read off the
+   * connections that exist at the moment a position is published, so there is no flag
+   * anywhere for a drop to leave stale. Taken from the snapshot rather than the room, so
+   * every view of one position agrees about who was there when it was built.
+   */
+  function connectedPlayers(members: YanivSocket[]): ReadonlySet<string> {
+    const present = new Set<string>();
+    for (const member of members) {
+      const playerId = member.data.session?.playerId;
+      if (playerId) present.add(playerId);
+    }
+    return present;
   }
 
   /**
@@ -296,9 +317,11 @@ export function createSocketServer(
      * a seat its owner gave up and be handed every broadcast after it. Leaving is final,
      * and the server is what says so.
      *
-     * The position goes back in the ack alone. Nothing is broadcast, because nothing
-     * about the table has changed — a resume is invisible to everyone else, who are
-     * never told who is connected in the first place.
+     * The position goes back in the ack, and the room is published to behind it: a seat
+     * that was away is being sat back down at, which is news to everyone looking at that
+     * seat (issue #146). It was invisible until connection reached the wire, and the ack
+     * still comes first — the returning client is answered by the event it sent, the way
+     * every other action here is, and the broadcast reaches it as one more position.
      */
     socket.on("resumeSeat", async (request, ack) => {
       if (socket.data.session) {
@@ -319,22 +342,37 @@ export function createSocketServer(
         return;
       }
 
+      socket.data.session = { playerId, roomCode };
+      await socket.join(roomCode);
+
       /*
        * One live connection per seat, and the newer one wins. A second tab is not
        * co-presence: two connections acting as one player would each be shown a table
        * the other could move out from under it. Dropped rather than merely unbound, so
        * the device it belongs to finds out — an unbound socket would sit there looking
        * connected and refusing every tap.
+       *
+       * *After* this connection is seated, not before: the drop publishes the room
+       * (issue #146), and evicting first would broadcast one position with this seat
+       * absent from the room's sockets — a reload would blink "away" at everybody on its
+       * way back to the table.
        */
       for (const member of membersOf(roomCode)) {
         if (member.id === socket.id) continue;
         if (member.data.session?.playerId === playerId) member.disconnect();
       }
 
-      socket.data.session = { playerId, roomCode };
-      await socket.join(roomCode);
-
-      ack({ ok: true, value: { view: serializeStateForPlayer(state, playerId) } });
+      ack({
+        ok: true,
+        value: {
+          view: serializeStateForPlayer(
+            state,
+            playerId,
+            connectedPlayers(membersOf(roomCode)),
+          ),
+        },
+      });
+      broadcastState(roomCode);
     });
 
     /**
@@ -481,17 +519,29 @@ export function createSocketServer(
       broadcastState(session.roomCode);
     });
 
-    /*
-     * There is deliberately no `disconnect` handler. A dropped connection costs the room
-     * nothing: the seat, the player and the room are left exactly as they were, and the
-     * player behind them comes back through `resumeSeat`. Backgrounding a phone's browser
-     * tab drops a socket with no chance to react, and that must not end five other
-     * people's match.
+    /**
+     * A connection going away, which costs the room nothing and is told to it anyway.
+     *
+     * **Nothing is mutated here.** The seat, the player and the room are left exactly as
+     * they were, and the player behind them comes back through `resumeSeat`: backgrounding
+     * a phone's browser tab drops a socket with no chance to react, and that must not end
+     * five other people's match. The turn, if it was theirs, still waits for them.
+     *
+     * What is new (issue #146) is the broadcast. Connection is derived from the live
+     * sockets at the moment a position is published (docs/adr/0013), so the socket that has
+     * just gone is already out of the room's set — and this republishes the same position
+     * to whoever is left, which is the only way they learn a seat has gone quiet. A table
+     * waiting on somebody who is not there explains itself rather than merely stopping.
      *
      * The cost is a room nobody ever comes back to, and nobody closes, living until the
      * server restarts — an accepted leak for this pass, of the same shape as rooms being
      * in memory at all. See CLAUDE.md.
      */
+    socket.on("disconnect", () => {
+      const session = socket.data.session;
+      if (!session) return;
+      broadcastState(session.roomCode);
+    });
   });
 
   return io;

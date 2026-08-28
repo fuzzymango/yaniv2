@@ -191,6 +191,40 @@ player for the life of the room, and a glance says who is still in.
 - **The viewer's own row is never dimmed.** It is the row they are reading the table from, and
   the bar where their hand was already says they are out, in words (issue #143).
 
+## One slot per seat says what is up with the player behind it
+
+**A table that has gone quiet explains itself** (issue #146). Each seat's label carries one
+status slot, holding one word or nothing: **left**, **away** or **watching**, in that
+priority (`status.ts`, `seatStatus`). A player who dropped is not somebody the table is idly
+waiting on, and a player who gave the seat up is not somebody to wait for at all.
+
+- **A priority, not a set of badges.** A seat can be several of these at once — somebody who
+  left is out of the match and has no connection either — so the slot says the most final
+  thing that is true of it. Left beats away beats watching, and "watching" is the one thing
+  it must never say of a table nobody is looking at.
+- **Nothing at all is the ordinary case, and covers two seats**: somebody playing, and a
+  **bot**. A bot is connected always and watching never, so it falls out of the rule rather
+  than being a case in it — which is what makes an empty slot unambiguous. No client is told
+  which seats are bots, and none needs to be.
+- **The word comes off the wire, not off the screen.** `connected` and `spectating` are sent
+  for every seat, derived by the server from the sockets in the room at the moment it
+  publishes ([ADR-0013](adr/0013-connection-derived-from-the-live-sockets.md)). A client
+  that worked out "watching" for itself would have to know which seats were bots.
+- **Brighter than the marks beside it, on purpose.** An out seat is faded to a little over a
+  third by `.table-seat--out`, and opacity on a parent is a ceiling its children cannot climb
+  back out of — so the one thing on a dimmed seat still worth reading gets full ink and a
+  stronger border. Only **away** is coloured, being the one that may yet change; a table with
+  three watchers should not look like a table with three problems.
+- **The same slot in both phases.** A scored round draws it exactly as a live one does: who
+  is there is as true while the table waits on the deal as while it waits on a turn.
+- **The lobby's roster rows carry it too**, off the same `seatStatus`. Only "away" can come
+  up there — nobody is out of a match that has not been dealt, and a player who leaves a
+  lobby is spliced out of the roster — and it is worth saying for the same reason: a room
+  waiting to start should not be waiting on a phone that locked itself.
+- **The viewer's own row has no slot**, and needs none. They are connected by definition,
+  they have not left, and if they are watching the bar where their hand was says so in words
+  (issue #143).
+
 ## And the finished match is that table with the standings over it
 
 **The same table once more** (issue #130). A match ending used to replace the felt with a bare

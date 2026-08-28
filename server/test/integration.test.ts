@@ -4,7 +4,7 @@ import type { Card, DrawAction } from "@yaniv/shared";
 import { canCallYaniv, handValue, legalDiscards } from "@yaniv/shared";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
-import { serializeStateForPlayer } from "../src/serialize.ts";
+import { NO_CONNECTIONS, serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState, GameStateActive } from "../src/state.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { unwrap } from "./helpers.ts";
@@ -202,7 +202,7 @@ describe("full match simulation", () => {
       if (state.phase !== "playing") break;
 
       for (const viewer of state.players) {
-        const wire = JSON.stringify(serializeStateForPlayer(state, viewer.id));
+        const wire = JSON.stringify(serializeStateForPlayer(state, viewer.id, NO_CONNECTIONS));
         const visible = new Set([
           ...state.round.hands[viewer.id]!.map((c) => c.id),
           ...state.round.lastDiscard.map((c) => c.id),

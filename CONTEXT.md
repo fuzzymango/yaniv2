@@ -286,6 +286,28 @@ seat, and which of the two put it there follows from the score and from whether 
 given up — as spectating follows from that and a live connection. One fact, and no second
 source of truth to disagree with it.
 
+## Connected, and away
+
+**Connected** is whether there is a live socket behind a seat *right now*. It is a fact
+about a connection and not about the match: a player who has dropped is still in the match,
+still holds their hand, and the turn still waits for them. **Away** is the word the table
+uses for the opposite — somebody who might be back in ten seconds, as against somebody who
+has **left** (above), which is final.
+
+It is **derived from the room's live sockets whenever a position is published, and stored
+nowhere** ([ADR-0013](docs/adr/0013-connection-derived-from-the-live-sockets.md)): the
+broadcast already walks those sockets, so it already knows, and `GameState` keeps its
+freedom from anything to do with transport. Two consequences worth stating: a **bot** is
+connected always, having no connection to lose, and a viewer's own seat is connected by
+construction, the payload existing because there is a socket to send it down.
+
+Every seat carries it on the wire, which is what lets a table say why it has gone quiet. The
+**status slot** is where each seat says so — one word, by priority: **left**, then **away**,
+then **watching**, and nothing at all for a bot or for somebody playing (`status.ts`,
+`docs/client-table.md`) — on the felt, and on the lobby's roster rows, where only "away"
+can come up. Nothing acts on it: a seat whose player is away is not skipped,
+timed out or played by a bot.
+
 ## Turn order vs. seating
 
 One list until elimination, because until then they were equal, and two things that were

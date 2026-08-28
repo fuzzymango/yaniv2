@@ -21,6 +21,17 @@ import type {
 import { inMatch, spectating } from "./state.ts";
 
 /**
+ * No sockets to ask about: what a caller with no transport under it passes for
+ * `connectedPlayerIds` (issue #146).
+ *
+ * There are two, and both are reading a view rather than sending one — a bot deciding its
+ * turn (`botTurns.ts`) and the in-process demo harness (`scripts/play.ts`). Neither has a
+ * connection to report and neither reads the field, so this says exactly that rather than
+ * inventing a set. Anything that *publishes* a view knows who is there and says so.
+ */
+export const NO_CONNECTIONS: ReadonlySet<string> = new Set();
+
+/**
  * Names come from the result itself, not from the roster: a scored round is a record of
  * who played it, and it says what to draw at a seat rather than which seat to draw it at.
  */
@@ -48,10 +59,30 @@ function toRoundResultView(result: RoundResult): RoundResultView {
  * and both views carry it so a client can draw every seat in its correct state.
  *
  * One helper for the two views and both phases, so a seat cannot read as out to one
- * viewer and in to another.
+ * viewer and in to another. Connection is public on the same grounds and arrives the same
+ * way: as an answer already worked out for this publication (`connectedTo` below).
  */
-function standingOf(player: Player): MatchStanding {
-  return { outInRound: player.outInRound, departed: player.departed };
+function standingOf(player: Player, connected: boolean): MatchStanding {
+  return { outInRound: player.outInRound, departed: player.departed, connected };
+}
+
+/**
+ * Whether somebody is there behind one seat, at the moment this payload is being built
+ * (issue #146, docs/adr/0013).
+ *
+ * The live socket set is the whole of it, plus two seats that are never away for reasons
+ * that have nothing to do with sockets. **The viewer**, because this payload exists on
+ * account of the connection it is about to go down — asking the set about them would let a
+ * caller hand a client a view of itself as gone. **A bot**, because there is no connection
+ * for one to lose: the server plays it, and the absence of any marker at its seat is what
+ * says it is a bot rather than somebody who has stepped away.
+ */
+function connectedTo(
+  player: Player,
+  viewerPlayerId: string,
+  live: ReadonlySet<string>,
+): boolean {
+  return player.id === viewerPlayerId || player.isBot || live.has(player.id);
 }
 
 /**
@@ -76,11 +107,38 @@ function selfViewOf(
     id: viewer.id,
     name: viewer.name,
     score: viewer.score,
-    ...standingOf(viewer),
+    // Connected, and not asked: see `connectedTo`. A viewer is by definition somebody
+    // there to be sent this, which is also what makes their own shape decidable here.
+    ...standingOf(viewer, true),
   };
-  return spectating(viewer)
+  return spectating(viewer, true)
     ? { ...seat, spectating: true }
     : { ...seat, spectating: false, hand, slapdownEligible };
+}
+
+/**
+ * One other seat, in whichever phase — everything public about a player who is not the
+ * viewer, and nothing else: there is no `hand` field here to leave empty.
+ *
+ * Presence is passed in rather than asked for twice: whether somebody is behind this seat
+ * is one fact, and it decides both what the standing says and whether the seat is watching
+ * the match. `spectating` is worked out here for every seat by the same predicate that
+ * decides the viewer's own shape — which seats are bots is not on the wire, so a client
+ * could not tell a watcher from one.
+ */
+function opponentViewOf(
+  player: Player,
+  connected: boolean,
+  handSize: number,
+): OpponentView {
+  return {
+    id: player.id,
+    name: player.name,
+    score: player.score,
+    ...standingOf(player, connected),
+    spectating: spectating(player, connected),
+    handSize,
+  };
 }
 
 /**
@@ -165,10 +223,16 @@ function toMoveHistoryView(
  *
  * Throws if `viewerPlayerId` is not in the game — callers are expected to have
  * established membership already, so that is a defect rather than a rule violation.
+ *
+ * `connectedPlayerIds` is who has a live socket in the room right now, handed in rather
+ * than read off the state: connection is a fact about the transport, and `GameState` has
+ * none (issue #146, docs/adr/0013). Required rather than defaulted, so a call site that
+ * knows cannot forget to say — the two that genuinely do not know pass `NO_CONNECTIONS`.
  */
 export function serializeStateForPlayer(
   state: GameState,
   viewerPlayerId: string,
+  connectedPlayerIds: ReadonlySet<string>,
 ): PlayerGameView {
   const viewer = state.players.find((p) => p.id === viewerPlayerId);
   if (!viewer) {
@@ -177,6 +241,10 @@ export function serializeStateForPlayer(
     );
   }
 
+  /** One seat's presence, over the set and the two seats that never consult it. */
+  const connected = (player: Player): boolean =>
+    connectedTo(player, viewerPlayerId, connectedPlayerIds);
+
   if (state.phase === "lobby") {
     // Nobody is out of a match that has not been dealt, so this is always the playing
     // shape — arrived at by the same derivation as every other phase, rather than by
@@ -184,13 +252,7 @@ export function serializeStateForPlayer(
     const you: SelfView = selfViewOf(viewer, [], false);
     const opponents: OpponentView[] = state.players
       .filter((p) => p.id !== viewerPlayerId)
-      .map((p) => ({
-        id: p.id,
-        name: p.name,
-        score: p.score,
-        ...standingOf(p),
-        handSize: 0,
-      }));
+      .map((p) => opponentViewOf(p, connected(p), 0));
 
     return {
       roomCode: state.roomCode,
@@ -231,15 +293,9 @@ export function serializeStateForPlayer(
 
   const opponents: OpponentView[] = state.players
     .filter((p) => p.id !== viewerPlayerId)
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      score: p.score,
-      ...standingOf(p),
-      // Zero for a seat that is out: it holds no hand, the round having been dealt
-      // without it — the same absence a client draws an empty seat from.
-      handSize: round.hands[p.id]?.length ?? 0,
-    }));
+    // Zero cards for a seat that is out: it holds no hand, the round having been dealt
+    // without it — the same absence a client draws an empty seat from.
+    .map((p) => opponentViewOf(p, connected(p), round.hands[p.id]?.length ?? 0));
 
   const revealing = state.phase === "roundEnd" || state.phase === "gameEnd";
 

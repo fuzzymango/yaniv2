@@ -51,6 +51,8 @@ import {
 import { PlayingCard } from "../shared/PlayingCard.tsx";
 import { seatBox } from "../ghosts.ts";
 import type { Zone } from "../seating.ts";
+import type { SeatStatus } from "../status.ts";
+import { STATUS_LABEL, seatStatus } from "../status.ts";
 
 /**
  * One side of the felt, holding the seats `seatZones` dealt it, in the order it dealt them —
@@ -77,6 +79,12 @@ interface SeatProps {
    * round on the screen is still theirs and their hand in it is there to be read.
    */
   wentOut?: boolean;
+  /**
+   * What is up with the player behind this seat, or null when nothing is: gone for good,
+   * away, or watching a match they are out of (issue #146). One slot per seat, said in one
+   * word, and empty for the two ordinary cases — somebody playing, and a bot.
+   */
+  status?: SeatStatus | null;
   /** What else the label says about them: their score, their count, what a round cost them. */
   detail: ReactNode;
   /** Their cards, however the screen using this draws them. */
@@ -89,6 +97,7 @@ export function Seat({
   isTurn = false,
   isOut = false,
   wentOut = false,
+  status = null,
   detail,
   children,
 }: SeatProps) {
@@ -103,6 +112,16 @@ export function Seat({
       {children}
       <p className="table-seat__label">
         <span className="table-seat__name">{name}</span>
+        {/*
+          Immediately after the name, and before the numbers: it is a fact about the person
+          rather than about their round, and it is the reason somebody is looking at this
+          seat at all when it is there to be read.
+        */}
+        {status && (
+          <span className={`seat__status seat__status--${status}`}>
+            {STATUS_LABEL[status]}
+          </span>
+        )}
         {detail}
       </p>
     </div>
@@ -285,6 +304,9 @@ export function CascadeReveal({ cards, zone }: { cards: readonly Card[]; zone: Z
  * A seat the match has gone on without is this same seat, darkened where it has always sat
  * (issue #144): the round was dealt without them, so the fan they are holding is empty and
  * the count says zero — which is what being out looks like, not a case to draw differently.
+ *
+ * What is *up* with the player behind it is the label's status slot (issue #146), read off
+ * the same view by `seatStatus` — one word or none, and none is a bot or somebody playing.
  */
 export function OpponentSeat({
   zone,
@@ -303,6 +325,7 @@ export function OpponentSeat({
       name={opponent.name}
       isTurn={isTurn}
       isOut={isOut}
+      status={seatStatus(opponent)}
       detail={
         <>
           <span className="player__cards">{opponent.handSize} cards</span>

@@ -24,6 +24,7 @@ import { SettingsPanel } from "../settings/SettingsPanel.tsx";
 import { SettingsValues } from "../settings/SettingsValues.tsx";
 import { WayOut } from "../shared/WayOut.tsx";
 import { bySeat } from "../seating.ts";
+import { STATUS_LABEL, seatStatus } from "../status.ts";
 
 interface LobbyProps {
   view: PlayerGameView;
@@ -72,17 +73,33 @@ export function Lobby({
       */}
       <div className="lobby__body">
         <ul className="seats">
-          {seats.map((seat) => (
-            <li className="seat" key={seat.id}>
-              <span className="seat__name">{seat.name}</span>
-              {/*
-                "you" can only be decided here — it depends on whose screen this is, which
-                is why it is never stored or sent over the wire.
-              */}
-              {seat.id === view.you.id && <span className="seat__mark">you</span>}
-              {seat.id === view.hostId && <span className="seat__mark">host</span>}
-            </li>
-          ))}
+          {seats.map((seat) => {
+            const status = seatStatus(seat);
+            return (
+              <li className="seat" key={seat.id}>
+                <span className="seat__name">{seat.name}</span>
+                {/*
+                  "you" can only be decided here — it depends on whose screen this is, which
+                  is why it is never stored or sent over the wire.
+                */}
+                {seat.id === view.you.id && <span className="seat__mark">you</span>}
+                {seat.id === view.hostId && <span className="seat__mark">host</span>}
+                {/*
+                  The same status slot the felt's seats carry (issue #146), off the same
+                  rule. In a lobby only one of its three words can ever come up — nobody is
+                  out of a match that has not been dealt, and a player who leaves one is
+                  spliced out of the roster — so this row says "away" or nothing. Worth
+                  saying here for the reason it is worth saying at the table: a room waiting
+                  to start should not be waiting on somebody whose phone locked itself.
+                */}
+                {status && (
+                  <span className={`seat__status seat__status--${status}`}>
+                    {STATUS_LABEL[status]}
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
 
         {/*
