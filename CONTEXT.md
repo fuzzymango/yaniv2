@@ -287,15 +287,20 @@ viewer-relative sweep of the seats reads from.
 
 ## Standings
 
-The final table of a finished match: every player who played it, ordered lowest score
-first, with the winner (or winners, on a tie) marked. Not the same thing as the roster —
-the standings are the record of a match that is over, so they include a player who has
-exited to the main menu since it ended, marked as **departed**. Their name and final score
-come from the round result that ended the match, which carries its own copy of both; the
-roster no longer holds either. A departed player can still be the winner, and is still
-shown as one. Level scores are separated by where the two were sitting, so every screen
-lists the same match the same way round; a player who has left has no seat to be placed by
-and sits after whoever stayed.
+The final table of a finished match: every player who played it, ordered by **how long they
+lasted** — the one player still in the match at the top, then the rest by the round they
+went out in, latest first. Outlasting somebody places you above them whatever the two of you
+finished on, because that is what winning is now (`docs/rules.md` §7); least is best only
+*within* a round, where two players eliminated in the same one are separated by their final
+scores — and, if even those are level, by an arbitrary but fixed order every screen reads
+the same way round, since a match that is over must not finish two ways depending on who is
+looking at it.
+
+The standings are read off the **roster**, which from the first deal is append-only and so
+carries every player who was ever in the match — including one who has since exited to the
+main menu, marked as **departed**, with the score and the round they left frozen on their
+seat. Nothing is rebuilt from the last round's record: the round says who played it, not who
+was in the match.
 
 Who is on the standings, and in what order, is `standings` in `shared/src` — one answer for
 both clients, the same way the rulebook is (see

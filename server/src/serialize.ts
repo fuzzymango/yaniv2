@@ -20,8 +20,8 @@ import type {
 import { inMatch } from "./state.ts";
 
 /**
- * Names come from the result itself, not from the roster: a player may have given their
- * seat up since the match ended, and the round they played is still theirs.
+ * Names come from the result itself, not from the roster: a scored round is a record of
+ * who played it, and it says what to draw at a seat rather than which seat to draw it at.
  */
 function toRoundResultView(result: RoundResult): RoundResultView {
   return {

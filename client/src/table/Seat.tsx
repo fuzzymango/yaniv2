@@ -65,15 +65,23 @@ interface SeatProps {
   name: string;
   /** Whether the table is waiting on this player — the whole seat says so, not one row of it. */
   isTurn?: boolean;
+  /**
+   * Whether the round just scored took this player out of the match (docs/rules.md §7).
+   * Marks the label, and only at round end — a seat drawn mid-round is a seat still in it.
+   */
+  isOut?: boolean;
   /** What else the label says about them: their score, their count, what a round cost them. */
   detail: ReactNode;
   /** Their cards, however the screen using this draws them. */
   children: ReactNode;
 }
 
-export function Seat({ zone, name, isTurn = false, detail, children }: SeatProps) {
+export function Seat({ zone, name, isTurn = false, isOut = false, detail, children }: SeatProps) {
+  // The two things a seat's label can be ringed for, and it is never both: a scored round
+  // has no turn to be waiting on.
+  const state = `${isTurn ? " table-seat--turn" : ""}${isOut ? " table-seat--out" : ""}`;
   return (
-    <div className={`table-seat table-seat--${zone} ${isTurn ? "table-seat--turn" : ""}`}>
+    <div className={`table-seat table-seat--${zone}${state}`}>
       {children}
       <p className="table-seat__label">
         <span className="table-seat__name">{name}</span>

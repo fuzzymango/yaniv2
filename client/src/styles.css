@@ -367,6 +367,18 @@ body {
   letter-spacing: 0.08em;
 }
 
+/*
+ * The one mark that is news rather than a note: this round took that player out of the
+ * match (docs/rules.md §7, issue #142). Louder than its siblings — which say how a score
+ * was arrived at — and the only thing added to a scored round, so a round that eliminated
+ * somebody and one that did not stay the same screen in two states.
+ */
+.seat__mark--out {
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .lobby__actions {
   display: flex;
   flex-direction: column;
@@ -900,6 +912,15 @@ body {
 }
 
 /*
+ * Who the round just scored took out of the match — the same ring whose turn it is wears,
+ * in the colour the news actually is, and on the same one upright row (issue #142). The two
+ * cannot be on at once: a scored round has no turn to be waiting on.
+ */
+.table-seat--out .table-seat__label {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+/*
  * The fan. Its size comes from `fanFootprint` and its push off the edge from
  * `fanOverhang`, both inline, both in card widths — nothing about the arc is written
  * twice, here or there.
@@ -1067,6 +1088,11 @@ body {
 /* Whose turn it is, for the viewer's own row — the same ring an opponent's label wears. */
 .you--turn {
   box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* And the round that took them out, in the same place a seat's is (issue #142). */
+.you--out {
+  box-shadow: inset 0 0 0 1px var(--danger);
 }
 
 .player__name {

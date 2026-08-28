@@ -215,9 +215,11 @@ export interface RoundState {
 export interface PlayerRoundResult {
   playerId: string;
   /**
-   * Copied in when the round is scored rather than looked up later. A finished round is
-   * a record of who played it, and a seat can be given up once the match ends — after
-   * which the roster no longer has a name to resolve.
+   * Copied in when the round is scored rather than looked up later, so a finished round is
+   * a self-contained record of who played it: the round says what to draw at a seat, and
+   * never which seat (issue #78). Not load-bearing for recovering a name the roster has
+   * lost — from the first deal the roster is append-only, so it keeps every player who was
+   * ever in the match, departed or not.
    */
   name: string;
   hand: Card[];

@@ -182,7 +182,8 @@ function renderRoundResult(result: RoundResultView, viewerId: string): string[] 
 }
 
 /**
- * Final standings, lowest score first — in Yaniv, least is best.
+ * Final standings, in the order players lasted — the survivor first, then whoever went out
+ * latest, since a match is won by being the last one left (docs/rules.md §7).
  *
  * Who is on them, and in what order, is `standings` in `shared`: it is the same question
  * the browser client answers, and a match that is already over cannot be allowed to finish

@@ -47,6 +47,7 @@ import type {
   PlayerGameView,
   PlayerRoundResultView,
   RoundResultView,
+  SelfView,
 } from "@yaniv/shared";
 import { handValue } from "@yaniv/shared";
 import { CardsInFlight, useCardFlight } from "./CardsInFlight.tsx";
@@ -100,19 +101,28 @@ interface TableProps {
 function ScoredDetail({
   player,
   result,
+  isOut,
 }: {
   player: PlayerRoundResultView;
   result: RoundResultView;
+  /** Whether this round is the one that took them out of the match — the `OUT` tag. */
+  isOut: boolean;
 }) {
   return (
     <>
       {/*
         The line above the felt says who did what; these say it again where the numbers are,
         so a seat that gained 30 or nothing can be read without going back up to find out why.
+
+        The mark for going out is one of them rather than a sentence of its own (issue #142):
+        a round that ended somebody's match and one that did not are the same screen in two
+        states, and the hand and the score below are the round they actually played, recorded
+        before they are dimmed out of the next one.
       */}
       {player.playerId === result.callerId && <span className="seat__mark">yaniv</span>}
       {player.playerId === result.assaferId && <span className="seat__mark">assaf</span>}
       {player.milestoneReduction > 0 && <span className="seat__mark">milestone</span>}
+      {isOut && <span className="seat__mark seat__mark--out">out</span>}
       <span className="player__score">
         {scoreLabel(player.scoreAfter, player.delta, player.milestoneReduction)}
       </span>
@@ -231,6 +241,15 @@ export function Table({
     result?.players.find((player) => player.playerId === id) ?? null;
 
   /**
+   * Whether the round on the screen is the one that took this seat out of the match
+   * (docs/rules.md §7). Read off the seat's own standing against the round being *shown*
+   * rather than against `view.roundNumber`: they are the same number at `roundEnd`, and
+   * the record is what the rest of this screen is drawing.
+   */
+  const wentOut = (player: SelfView | OpponentView): boolean =>
+    result !== null && player.outInRound === result.roundNumber;
+
+  /**
    * One opponent in their zone, in whichever of the two shapes the phase calls for — the
    * fan they were holding, or the same hand face up in the same seat.
    *
@@ -240,6 +259,7 @@ export function Table({
    */
   const seatFor = (zone: Zone, opponent: OpponentView) => {
     const row = scored(opponent.id);
+    const isOut = wentOut(opponent);
     if (result === null || row === null) {
       return (
         <OpponentSeat
@@ -254,7 +274,8 @@ export function Table({
       <Seat
         zone={zone}
         name={opponent.name}
-        detail={<ScoredDetail player={row} result={result} />}
+        isOut={isOut}
+        detail={<ScoredDetail player={row} result={result} isOut={isOut} />}
         key={opponent.id}
       >
         <CascadeReveal cards={row.hand} zone={zone} />
@@ -264,6 +285,7 @@ export function Table({
 
   /** The viewer's own row of the round, for the footer under their revealed hand. */
   const yourRound = scored(view.you.id);
+  const youWentOut = wentOut(view.you);
 
   /*
    * What the one line above the felt says, and how loudly. Four things can be true of a
@@ -542,10 +564,12 @@ export function Table({
           up and that number is there to be read off them, so the row says where the round
           left this player instead, in the words every seat's label uses.
         */}
-        <footer className={`you ${live && yourTurn ? "you--turn" : ""}`}>
+        <footer
+          className={`you ${live && yourTurn ? "you--turn" : ""} ${youWentOut ? "you--out" : ""}`}
+        >
           <span className="player__name">{view.you.name}</span>
           {result !== null && yourRound !== null ? (
-            <ScoredDetail player={yourRound} result={result} />
+            <ScoredDetail player={yourRound} result={result} isOut={youWentOut} />
           ) : (
             <>
               <span className="you__value">{handValue(view.you.hand)} in hand</span>

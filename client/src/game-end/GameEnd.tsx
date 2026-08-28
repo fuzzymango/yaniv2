@@ -14,8 +14,9 @@
  * ended sooner than anybody expected is answered by the score it ended at), and this screen
  * is the only place left to ask from.
  *
- * Lowest score first, because in Yaniv least is best (docs/rules.md §7) — and everyone the
- * match named, not only whoever is still seated. Both of those are `standings` in `shared`,
+ * Ordered by how long each player lasted, because that is what the match was decided on
+ * (docs/rules.md §7) — and everyone the match named, not only whoever is still seated,
+ * the roster keeping every seat it ever had. Both of those are `standings` in `shared`,
  * where the terminal harness reads them from too: how a row is drawn is this screen's
  * business, but where the rows come from is the same question on both, and two answers to
  * it are two chances to disagree about a match that is already over.
@@ -107,8 +108,12 @@ export function GameEnd({
           <h1 className="final__headline" id="final-headline">
             {headline}
           </h1>
-          {/* Least is best, and it is the one rule of this screen worth saying out loud. */}
-          <p className="code__hint">Lowest score wins.</p>
+          {/*
+            The one rule of this screen worth saying out loud — and since elimination it is
+            no longer "lowest score wins": the order is who outlasted whom, and a column of
+            totals that does not run smallest-first would otherwise read as broken.
+          */}
+          <p className="code__hint">Last player standing wins.</p>
         </header>
 
         {/*

@@ -65,6 +65,14 @@ the page, and nobody has to be re-found. What changes is what changed:
   every one of them down the page at the one moment they must not move.
 - **The Yaniv call becomes the deal** — the host's control, or the reason there is none, in
   the slot the call was in.
+- **Anybody the round took out of the match is tagged `OUT`** (issue #142), on their label
+  beside the marks saying how the score was arrived at, with the same ring round it that
+  whose-turn-it-is wears — in the colour the news actually is, and the two can never be on
+  together. It is *all* that is added: no prose, and the eliminated player's hand and round
+  score are still shown, so a round that ended somebody's match and one that did not are the
+  same screen in two states. Whose round it was is the seat's own `outInRound` against the
+  round being drawn, not the viewer's `roundNumber` — the record is what the rest of the
+  screen is reading.
 
 Seats are placed by the live roster sorted by `byRelativeSeat` in **both** phases, and the
 round's own record is looked up by id against whoever is already in a zone. Two placements
