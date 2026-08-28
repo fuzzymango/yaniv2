@@ -40,6 +40,13 @@ export type Command =
 export function parseCommand(input: string, view: PlayerGameView): Command {
   const line = input.trim().toLowerCase();
   if (line === "q" || line === "quit") return { kind: "quit" };
+  /*
+   * The two commands that mean one thing in every phase, answered above the cascade rather
+   * than inside each of its arms: quitting the harness, and giving up the seat — which a
+   * player may do at any point, mid-round included (issue #147). Sent for anyone and
+   * refused to nobody, and whether the round can spare them is the server's to work out.
+   */
+  if (line === "menu") return { kind: "menu" };
 
   /**
    * In the lobby nobody holds a hand and nothing is on the table, so none of the card
@@ -51,12 +58,9 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
    *
    * Whether the typist is actually the host is not checked here — the server owns that,
    * and answers `NOT_HOST`. A second opinion in the harness could only ever disagree.
-   * `menu` is sent for anyone and refused to nobody: leaving a lobby costs the rest of
-   * the table nothing, the host's role migrating to the next seat (docs/adr/0012).
    */
   if (view.phase === "lobby") {
     if (line === "start") return { kind: "start" };
-    if (line === "menu") return { kind: "menu" };
     if (line === "") return { kind: "noop" };
     return { kind: "invalid", message: "waiting in the lobby — 'start' begins the match" };
   }
@@ -69,7 +73,6 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
    */
   if (view.phase === "gameEnd") {
     if (line === "again") return { kind: "again" };
-    if (line === "menu") return { kind: "menu" };
     if (line === "") return { kind: "noop" };
     return {
       kind: "invalid",
@@ -92,7 +95,6 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
    */
   const you = view.you;
   if (you.spectating) {
-    if (line === "menu") return { kind: "menu" };
     return {
       kind: "invalid",
       message: "you are out of the match — watching; 'menu' asks to leave the room",

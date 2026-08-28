@@ -517,6 +517,14 @@ export function createSocketServer(
       // who left, and then the table they are left with.
       io.to(session.roomCode).emit("playerLeft", name);
       broadcastState(session.roomCode);
+      /*
+       * And the same tail every in-game action has (`act`), for the same reason: leaving
+       * mid-round hands the turn on where it was the leaver's (issue #147), and a turn
+       * handed to a bot is the server's to take. Without this a table would sit on a seat
+       * with no connection behind it — a wedge of exactly the kind the withdrawal from the
+       * round exists to prevent.
+       */
+      runBotTurns(session.roomCode);
     });
 
     /**

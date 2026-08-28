@@ -231,9 +231,11 @@ export function playAgain(
  *   That is what makes "out of the match, and gone" representable at all — a spliced-out
  *   seat cannot be drawn darkened at the table it played, or listed in its standings.
  *
- * Only from the lobby or a finished match: leaving mid-round would abandon a hand and a
- * turn order that the round is still being played against, which is out of scope (see
- * CLAUDE.md's room lifecycle notes).
+ * **From any phase** (issue #147): nobody is trapped at a table that has gone quiet, and a
+ * player the match has gone on without should not have to sit out somebody else's round to
+ * get up. Mid-round the leaver is taken out of the round on the spot (`withdrawFromRound`
+ * below) rather than the round being abandoned around them, and a departure that leaves
+ * one player in the match ends it there and then.
  *
  * The host leaves like anybody else — what is special is the room left behind. In the
  * lobby the role migrates to the next remaining seat, so a room full of people is not
@@ -247,9 +249,6 @@ export function playAgain(
  * folded in around a transition rather than baked into one.
  */
 export function removePlayer(state: GameState, playerId: string): ActionResult {
-  if (state.phase !== "lobby" && state.phase !== "gameEnd") {
-    return err("WRONG_PHASE", "You can only leave from the lobby or a finished match");
-  }
   const player = getPlayer(state, playerId);
   if (!player || player.departed) {
     return err("PLAYER_NOT_FOUND", "You are not in this game");
@@ -266,16 +265,72 @@ export function removePlayer(state: GameState, playerId: string): ActionResult {
     });
   }
 
+  const players = updatePlayer(state.players, playerId, {
+    departed: true,
+    // Left where it is if they were already out: the round a seat stopped playing is
+    // the round it stopped playing, and being eliminated in round 3 is not undone by
+    // walking off after round 7.
+    outInRound: player.outInRound ?? state.roundNumber,
+  });
+
+  /*
+   * The match ends when one player is left in it (docs/rules.md §7), and a departure is
+   * now one of the two ways that happens — until issue #147 every exit from `playing` went
+   * through a Yaniv call. Dealing the next round to a single person is not a position the
+   * rules have, so the match ends where the leaver left it: mid-round, with no scored
+   * round behind it, which is a `gameEnd` the serializer already sends without a reveal.
+   *
+   * Not asked at `gameEnd`, where the match is over and its winner is a matter of record:
+   * the last player leaving a finished match does not unwin it for them.
+   *
+   * `<= 1` rather than `=== 1` on `callYaniv`'s reasoning: a departure from an active
+   * phase leaves at least one player in the match, two being the fewest a phase other than
+   * `gameEnd` can have, and a wedged room is the wrong price for being wrong about that.
+   */
+  const survivors = players.filter(inMatch);
+  const over = state.phase !== "gameEnd" && survivors.length <= 1;
+
   return ok({
     ...state,
-    players: updatePlayer(state.players, playerId, {
-      departed: true,
-      // Left where it is if they were already out: the round a seat stopped playing is
-      // the round it stopped playing, and being eliminated in round 3 is not undone by
-      // walking off after round 7.
-      outInRound: player.outInRound ?? state.roundNumber,
-    }),
+    phase: over ? "gameEnd" : state.phase,
+    players,
+    round: state.phase === "playing" ? withdrawFromRound(state.round, playerId) : state.round,
+    winnerIds: over ? survivors.map((p) => p.id) : state.winnerIds,
   });
+}
+
+/**
+ * Take a seat out of the round being played, leaving the round playable by whoever is
+ * left (issue #147).
+ *
+ * Four facts, and each of them is a way the round would otherwise be wrong about a player
+ * who is not there:
+ *
+ * - The **hand goes to the buried pile**, not out of the pack. Every card dealt is still
+ *   in the round, so a draw pile that empties reshuffles into as many cards as it should;
+ *   dropping them would quietly shrink the deck for everyone still playing.
+ * - They come out of **turn order**, which is what stops the turn ever reaching them.
+ * - If the turn was **theirs**, it moves along — read off the order they were still in, so
+ *   it lands on the seat that was next rather than on whoever inherited their index.
+ * - Their **slapdown window** closes. It is a fact about a hand that no longer exists, and
+ *   `slapDown` would find no card to put down (docs/rules.md §9).
+ *
+ * `lastMove`, `lastSlapdown` and the history are left exactly as they are: those moves
+ * happened, and a player leaving does not unplay them.
+ */
+function withdrawFromRound(round: RoundState, playerId: string): RoundState {
+  const { [playerId]: hand = [], ...hands } = round.hands;
+  return {
+    ...round,
+    hands,
+    buried: [...round.buried, ...hand],
+    turnOrder: round.turnOrder.filter((id) => id !== playerId),
+    currentTurnPlayerId:
+      round.currentTurnPlayerId === playerId
+        ? nextPlayerId(round)
+        : round.currentTurnPlayerId,
+    slapdown: round.slapdown?.playerId === playerId ? null : round.slapdown,
+  };
 }
 
 /**
@@ -306,12 +361,16 @@ export function startNextRound(
   if (!inMatch(requester)) {
     return err("NOT_IN_MATCH", "Only a player still in the match can deal the next round");
   }
-  // The round's winner, who is guaranteed still in the match: their delta was 0 and a
-  // reduction only subtracts, so the round they won cannot have taken them out
-  // (docs/rules.md §7). The fallback is the first seat still playing rather than the host,
-  // who may be out by now — a starter absent from `turnOrder` would open a round holding
-  // no hand, and hand on to nobody.
-  const starter = state.lastRoundResult?.winnerId ?? playersInMatch(state)[0]!.id;
+  /*
+   * The round's winner, where they are still in the match to take it. Scoring cannot have
+   * taken them out — their delta was 0 and a reduction only subtracts (docs/rules.md §7) —
+   * but *leaving* can, and does, now that a seat may be given up at a scored round
+   * (issue #147). The fallback is the first seat still playing rather than the host, who
+   * may be out by now: a starter absent from `turnOrder` would open a round holding no
+   * hand, and hand on to nobody.
+   */
+  const winner = state.lastRoundResult && getPlayer(state, state.lastRoundResult.winnerId);
+  const starter = winner && inMatch(winner) ? winner.id : playersInMatch(state)[0]!.id;
   return ok(dealRound(state, starter, rng));
 }
 

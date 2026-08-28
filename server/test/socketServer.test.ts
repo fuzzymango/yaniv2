@@ -1177,6 +1177,16 @@ describe("play again and exit to menu", () => {
   }
 
   /**
+   * Turn this room's bot off before it is dealt, so the seats a test asserts over are
+   * exactly the humans it sat down. The whole settings object goes, as the wire requires
+   * (docs/adr/0006), read off the lobby the host is already looking at.
+   */
+  async function seatNoBots(host: Seat): Promise<void> {
+    const lobby = await host.watcher.until((v) => v.phase === "lobby", "the lobby");
+    expectOk(await ask(host.client, "updateSettings", { ...lobby.settings, botCount: 0 }));
+  }
+
+  /**
    * Play a table out to a finished match, acting for every human seat with `decideTurn` —
    * the same judgement the server gives its bots, fed each player's own view over the
    * wire, standing in for a client exactly as it does in the full-match test above.
@@ -1539,20 +1549,90 @@ describe("play again and exit to menu", () => {
       expectOk(await ask(host!.client, "joinRoom", opened.roomCode, "Ada"));
     });
 
-    // Host and guest are turned away by the same rule, but reach it down different
-    // paths — the host's leave is checked before the room would be closed, the guest's
-    // by the transition that would have freed their seat.
-    it("refuses to leave mid-match, where quitting is still a disconnect", async () => {
-      const { seats } = await openLobby(["Ada", "Grace"]);
-      expectOk(await ask(seats[0]!.client, "startGame"));
+    /**
+     * Mid-round, over the wire (issue #147). Nobody is trapped at a table that has gone
+     * quiet, and whoever stays is told a seat has gone rather than left wondering why the
+     * hand in front of them has shrunk by one.
+     */
+    it("lets a player leave mid-round, and tells the table they have gone", async () => {
+      const { seats } = await openLobby(["Ada", "Grace", "Alan"]);
+      const [host, guest] = seats;
+      // No bot, so the seats this asserts over are exactly the three humans above.
+      await seatNoBots(host!);
+      expectOk(await ask(host!.client, "startGame"));
+      await host!.watcher.until((v) => v.phase === "playing", "the deal");
 
-      assert.equal(
-        expectError(await ask(seats[0]!.client, "exitToMenu")).code,
-        "WRONG_PHASE",
+      const announced = nextEvent<string>(host!.client, "playerLeft");
+      host!.watcher.reset();
+      expectOk(await ask(guest!.client, "exitToMenu"));
+
+      assert.equal(await announced, "Grace");
+      const table = await host!.watcher.until(
+        (v) => v.opponents.some((o) => o.id === guest!.id && o.departed),
+        "the seat to be marked as given up",
       );
-      assert.equal(
-        expectError(await ask(seats[1]!.client, "exitToMenu")).code,
-        "WRONG_PHASE",
+      assert.equal(table.phase, "playing", "the round carries on for whoever stayed");
+      assert.ok(!table.turnOrder.includes(guest!.id), "and it is played without them");
+      assert.ok(
+        table.seating.includes(guest!.id),
+        "the seat keeps its place at the table it played at",
+      );
+    });
+
+    /**
+     * A departure is now the second way a match ends — until this, every exit from
+     * `playing` went through a Yaniv call. There is no round left to deal to one person.
+     */
+    it("ends the match when leaving mid-round leaves one player in it", async () => {
+      const { seats } = await openLobby(["Ada", "Grace"]);
+      const [host, guest] = seats;
+      await seatNoBots(host!);
+      expectOk(await ask(host!.client, "startGame"));
+      await host!.watcher.until((v) => v.phase === "playing", "the deal");
+
+      host!.watcher.reset();
+      expectOk(await ask(guest!.client, "exitToMenu"));
+
+      const finished = await host!.watcher.until(
+        (v) => v.phase === "gameEnd",
+        "the match to end on the departure",
+      );
+      assert.deepEqual(finished.winnerIds, [host!.id], "the player left standing wins it");
+    });
+
+    /**
+     * The turn moving on is only half of not wedging: where it moves on *to* a bot, the
+     * server has to play it, exactly as it does when a turn is handed over by a move.
+     */
+    it("plays the bot's turn when the departure hands it one", async () => {
+      const { seats } = await openLobby(["Ada", "Grace"]);
+      const [host, guest] = seats;
+      // The suite's own room: two humans and the one bot, seated in that order, so the
+      // seat after Grace is the bot's and her leaving is what hands it the turn.
+      expectOk(await ask(host!.client, "startGame"));
+      const dealt = await host!.watcher.until((v) => v.phase === "playing", "the deal");
+
+      // Bots play with no think time here, so the turn only ever comes to rest on a human:
+      // one turn from the host at most puts it on the seat about to be given up.
+      if (dealt.currentTurnPlayerId === host!.id) {
+        host!.watcher.reset();
+        const decision = decideTurn(dealt);
+        if (decision.type !== "turn") assert.fail("the opening hand is not a Yaniv call");
+        expectOk(await ask(host!.client, "takeTurn", decision.action));
+      }
+      await host!.watcher.until(
+        (v) => v.phase === "playing" && v.currentTurnPlayerId === guest!.id,
+        "the turn to reach the seat that is leaving",
+      );
+
+      host!.watcher.reset();
+      expectOk(await ask(guest!.client, "exitToMenu"));
+
+      // Without the bot being run the table would sit on a turn belonging to a seat with
+      // no connection behind it, and this would time out.
+      await host!.watcher.until(
+        (v) => v.phase !== "playing" || v.currentTurnPlayerId === host!.id,
+        "the bot to take the turn the departure handed it",
       );
     });
 

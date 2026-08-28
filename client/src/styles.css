@@ -643,6 +643,21 @@ body {
   font-size: 0.85rem;
 }
 
+/*
+ * The two answers to a question asked behind one of these, side by side and the same size:
+ * neither is the safe one to fall on by accident, so neither is drawn as the one meant to
+ * be tapped. Staying is first and holds the focus, being the answer a panel opened by a
+ * misplaced thumb wants.
+ */
+.modal__choice {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.modal__choice > .button {
+  flex: 1;
+}
+
 /* --- cards, drawn rather than loaded --- */
 
 /*

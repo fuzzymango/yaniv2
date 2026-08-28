@@ -187,6 +187,19 @@ it, and no round can empty the match. It follows that the next round always has 
 player (§6), and that "exactly one left" is reachable from every position rather than a
 condition play might step over.
 
+**Leaving.** A player may give up their seat at any point, and doing so takes them out of
+the match on the same terms as elimination: no further hands, no further turns, nothing more
+scored, and no way back into that match. Mid-round they are taken out of the round they are
+in rather than the round being abandoned — the hand they were holding is **buried** (§5), so
+the pack the rest of the round is played from is still whole, they come out of the turn
+order, and the turn passes to the next player if it was theirs. They are scored for nothing
+that round, whatever they were holding when they got up.
+
+A departure is therefore the second way a match can end: if it leaves exactly one player,
+that player wins it there and then, and no further round is dealt. Unlike elimination this
+*can* be reached from a round that was never scored, so a match may end with no final round
+to show.
+
 A finished match may be **played again** by the same table: every score returns to 0, every
 elimination is cleared so that everyone still in the room is back in the match, the round
 count starts over, and round 1 is dealt straight away with its opening player drawn at

@@ -30,9 +30,10 @@ Two distinct concepts, easy to conflate because both sit "before the game":
   server-side, has a code, and players are staged in it up to the player cap.
 
 **Exit to main menu** is the action that leaves a room and returns to the main menu, and
-it is the only way out of a room there is. It is available in the lobby and at `gameEnd`
-only — not mid-match (`playing`/`roundEnd`), where a seat cannot be given up part-way
-through a hand.
+it is the only way out of a room there is. It is available **in every phase**, to players
+and spectators alike: nobody is trapped at a table that has gone quiet, and a seat given up
+mid-round is taken out of the round on the spot rather than the round being abandoned
+around it (`docs/rules.md` §7, "Out of the match" below).
 
 It means the same thing whoever invokes it, and it costs the rest of the table nothing.
 Before the first deal the leaver is removed from `players` entirely — their seat is freed,
@@ -265,9 +266,11 @@ own:
 
 - **Eliminated** — out because their total passed the room's max score when a round was
   scored (`docs/rules.md` §7). They are still in the room.
-- **Left** — out because they gave up their seat. Leaving is final: there is no way back
-  into a match once out of it. This is the same seat the **standings** call *departed*
-  (below), named from the match's side rather than the scoreboard's.
+- **Left** — out because they gave up their seat, from any phase, mid-round included.
+  Leaving is final: there is no way back into a match once out of it, and the server says
+  so rather than trusting a client to forget — a resume presented for a departed seat is
+  refused. This is the same seat the **standings** call *departed* (below), named from the
+  match's side rather than the scoreboard's.
 
 The two are disjoint, and provably so rather than by convention: a player who left cannot
 also be over the line, because crossing it would have taken them out at that round's

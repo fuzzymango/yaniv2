@@ -150,9 +150,9 @@ describe("parseCommand", () => {
   it("reads 'menu' as leaving the lobby, distinct from quitting the harness", () => {
     assert.deepEqual(parseCommand("menu", lobbyView()), { kind: "menu" });
     assert.deepEqual(parseCommand("q", lobbyView()), { kind: "quit" });
-    // Mid-round there is no leaving without dropping the connection, so the word is
-    // just another unreadable line.
-    assert.equal(parseCommand("menu", midRoundView()).kind, "invalid");
+    // And mid-round, where it means the same thing (issue #147): a seat may be given up
+    // in any phase, so the harness sends the word from every one of them.
+    assert.deepEqual(parseCommand("menu", midRoundView()), { kind: "menu" });
   });
 
   it("still quits from the lobby, and ignores a stray enter there", () => {

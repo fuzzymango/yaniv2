@@ -135,15 +135,18 @@ the full experience minus the acting.
   cannot draw a hand for somebody who is not holding one — the same guarantee `OpponentView`
   has always given about everybody else's cards.
 - **The hand slot becomes a bar of about the same height** (`.spectating`), saying they are out
-  and carrying the way out and nothing else — and nothing at all at `gameEnd`, where the panel
+  and carrying nothing else — and nothing at all at `gameEnd`, where the panel
   over the table carries its own and the bottom of the screen is given up as the topbar is. The size is the whole point: a bar the hand's
   height leaves every seat, the felt and the pile where they were, which is what makes
   spectating read as staying rather than as being moved somewhere. Its `min-height` is derived
   from `--hand-card-w`, the one place the hand's card size is named, so the two cannot drift.
-- **One control in it, and it is the existing one.** `WayOut`, which since #145 reads "Leave
-  the room" for everybody and asks nothing before it acts: nobody's exit costs anyone else
-  their match any more (docs/adr/0012). Nothing else in the bar should read as a move, so the
-  Yaniv slot renders empty for a spectator too. The scored-round branch of that slot is
+- **No control in it, since issue #147.** The bar carried a `WayOut` until anybody could leave
+  at any time; now the corner beside the settings carries one leave for everybody looking at
+  the table, watcher and player alike, and a second button saying the same thing lower down the
+  same screen would be two answers to one tap. That one asks before it acts
+  (`LeaveTable.tsx`) — nobody's exit costs anyone else their match (docs/adr/0012), but this is
+  the one taken from inside a match that then goes on without them. Nothing in the bar should
+  read as a move, so the Yaniv slot renders empty for a spectator too. The scored-round branch of that slot is
   deliberately untouched *as a slot* — it now offers the deal to any viewer still in the match
   and the line to whoever is only watching, which is the server's rule (`NOT_IN_MATCH`) drawn
   rather than a rule of this screen's.

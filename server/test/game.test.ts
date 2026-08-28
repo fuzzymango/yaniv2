@@ -1857,6 +1857,29 @@ describe("startNextRound", () => {
     assert.equal(next.round.currentTurnPlayerId, "p2");
   });
 
+  /**
+   * The winner may have walked off between the scoring and the deal now that leaving is
+   * allowed in every phase (issue #147). An opener absent from turn order would hold no
+   * hand and hand on to nobody, so the deal falls back to whoever is still playing.
+   */
+  it("opens on a seat still in the match when the round's winner has left", () => {
+    const scored = finished();
+    const three = {
+      ...scored,
+      players: [...scored.players, { ...scored.players[0]!, id: "p3", name: "Third" }],
+    };
+    const gone = unwrap(removePlayer(three, "p2"));
+
+    const next = unwrap(startNextRound(gone, "p1", rng()));
+
+    assert.equal(next.phase, "playing");
+    assert.deepEqual(next.round.turnOrder, ["p1", "p3"]);
+    assert.ok(
+      next.round.turnOrder.includes(next.round.currentTurnPlayerId),
+      "the opener is dealt a hand",
+    );
+  });
+
   it("carries scores forward but clears the previous result", () => {
     const next = unwrap(startNextRound(finished(), "p1", rng()));
     assert.equal(next.players.find((p) => p.id === "p1")!.score, 37);
@@ -2250,9 +2273,198 @@ describe("removePlayer", () => {
     expectErr(removePlayer(makeState({ phase: "lobby" }), "ghost"), "PLAYER_NOT_FOUND");
   });
 
-  it("rejects leaving mid-match", () => {
-    expectErr(removePlayer(makeState({ phase: "playing" }), "p1"), "WRONG_PHASE");
-    expectErr(removePlayer(makeState({ phase: "roundEnd" }), "p1"), "WRONG_PHASE");
+  /**
+   * Mid-round (issue #147). The hand goes to the buried pile rather than out of the deck:
+   * the rest of the round is still played against a full pack, and a reshuffle would
+   * otherwise come up short by however many cards the leaver was holding.
+   */
+  it("buries the hand of a player leaving mid-round, and drops them from turn order", () => {
+    const playing = makeState({
+      phase: "playing",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      hands: {
+        p1: ["hearts-3", "hearts-4"],
+        p2: ["spades-5", "spades-6"],
+        p3: ["diamonds-7", "diamonds-8"],
+      },
+      currentTurnPlayerId: "p1",
+    });
+
+    const after = unwrap(removePlayer(playing, "p2"));
+
+    assert.equal(after.phase, "playing");
+    assert.ok(after.round);
+    assert.deepEqual(after.round.turnOrder, ["p1", "p3"]);
+    assert.equal(after.round.hands["p2"], undefined, "no hand is held at a seat that is gone");
+    assert.deepEqual(ids(after.round.buried), ["spades-5", "spades-6"]);
+    assert.deepEqual(allCardIds(after), allCardIds(playing), "no card leaves the round");
+  });
+
+  /** Otherwise the table wedges on a turn belonging to somebody who is not there. */
+  it("passes the turn along when the player leaving held it", () => {
+    const playing = makeState({
+      phase: "playing",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      currentTurnPlayerId: "p2",
+    });
+
+    const after = unwrap(removePlayer(playing, "p2"));
+
+    assert.ok(after.round);
+    assert.equal(after.round.currentTurnPlayerId, "p3", "the seat that was next, not the first");
+  });
+
+  it("leaves the turn where it is when it was somebody else's", () => {
+    const playing = makeState({
+      phase: "playing",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      currentTurnPlayerId: "p1",
+    });
+
+    const after = unwrap(removePlayer(playing, "p3"));
+
+    assert.ok(after.round);
+    assert.equal(after.round.currentTurnPlayerId, "p1");
+  });
+
+  /** A window is a fact about a hand, and the hand has gone with its owner (§9). */
+  it("closes the slapdown window of the player leaving, and nobody else's", () => {
+    const playing = makeState({
+      phase: "playing",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      hands: { p1: [], p2: ["spades-5"], p3: [] },
+      slapdown: { playerId: "p2", cardId: "spades-5" },
+      currentTurnPlayerId: "p3",
+    });
+
+    assert.equal(unwrap(removePlayer(playing, "p2")).round?.slapdown, null);
+    assert.equal(unwrap(removePlayer(playing, "p1")).round?.slapdown?.playerId, "p2");
+  });
+
+  /**
+   * The other half of the leaver being out as of this round: they are not in its turn
+   * order, so nothing scores them for it, and the moves they did play stand.
+   */
+  it("scores the leaver for nothing that round, and keeps the moves they played", () => {
+    const playing = makeState({
+      phase: "playing",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      hands: { p1: ["hearts-3"], p2: ["spades-5"], p3: ["diamonds-4"] },
+      moveHistory: [
+        {
+          kind: "turn",
+          playerId: "p2",
+          discardedIds: ["clubs-2"],
+          drawSource: "deck",
+          drawnCardId: "spades-5",
+        },
+      ],
+      currentTurnPlayerId: "p1",
+    });
+
+    const after = unwrap(removePlayer(playing, "p2"));
+    assert.equal(after.round?.moveHistory.length, 1, "their turn still happened");
+
+    const p1Turn = unwrap(
+      takeTurn(after, "p1", { discardCardIds: ["hearts-3"], draw: { source: "deck" } }, rng()),
+    );
+    const scored = unwrap(callYaniv(p1Turn, "p3"));
+
+    assert.equal(
+      scored.lastRoundResult!.players.find((p) => p.playerId === "p2"),
+      undefined,
+      "a seat that is gone is not in the round it left",
+    );
+    assert.equal(scored.players.find((p) => p.id === "p2")!.score, 0);
+  });
+
+  /**
+   * New with issue #147: until now every exit from `playing` went through a Yaniv call.
+   * A departure that leaves one player is the match over — dealing a round to a single
+   * person is not a position the rules have (docs/rules.md §7).
+   */
+  it("ends the match when a departure leaves one player in it", () => {
+    const playing = makeState({
+      phase: "playing",
+      players: [{ id: "p1" }, { id: "p2" }],
+      hands: { p1: ["hearts-3"], p2: ["spades-5"] },
+      currentTurnPlayerId: "p1",
+    });
+
+    const after = unwrap(removePlayer(playing, "p2"));
+
+    assert.equal(after.phase, "gameEnd");
+    assert.deepEqual(after.winnerIds, ["p1"]);
+  });
+
+  /**
+   * The one thing this new `gameEnd` does not have is a round to show, and it must not
+   * find an old one: `roundResult` is sent in both revealing phases, so a stale record
+   * would be drawn as *this* match's final table — hands and totals from a round that has
+   * already been superseded, over seats holding something else. The invariant that saves
+   * it is `dealRound`'s, which clears the last result with every deal, and this is what
+   * says so out loud.
+   */
+  it("ends a mid-round match with no scored round to reveal", () => {
+    const playing = makeState({
+      phase: "playing",
+      players: [{ id: "p1" }, { id: "p2" }],
+      hands: { p1: ["hearts-3"], p2: ["spades-5"] },
+      roundNumber: 4,
+    });
+
+    const after = unwrap(removePlayer(playing, "p2"));
+
+    assert.equal(after.phase, "gameEnd");
+    assert.equal(after.lastRoundResult, null, "no round of this match has been scored");
+  });
+
+  it("ends a scored round's match when a departure leaves one player in it", () => {
+    const scored = makeState({
+      phase: "roundEnd",
+      players: [{ id: "p1" }, { id: "p2" }],
+      roundNumber: 3,
+    });
+
+    const after = unwrap(removePlayer(scored, "p2"));
+
+    assert.equal(after.phase, "gameEnd");
+    assert.deepEqual(after.winnerIds, ["p1"]);
+  });
+
+  it("plays on when the departure leaves more than one player in the match", () => {
+    const playing = makeState({
+      phase: "playing",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+    });
+
+    const after = unwrap(removePlayer(playing, "p2"));
+
+    assert.equal(after.phase, "playing");
+    assert.equal(after.winnerIds, null);
+  });
+
+  /** A watcher was not in the match to begin with, so their leaving ends nothing. */
+  it("changes neither the round nor the match when a spectator leaves mid-round", () => {
+    const playing = makeState({
+      phase: "playing",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3", outInRound: 2 }],
+      hands: { p1: ["hearts-3"], p2: ["spades-5"] },
+      currentTurnPlayerId: "p1",
+      roundNumber: 3,
+    });
+
+    const after = unwrap(removePlayer(playing, "p3"));
+
+    assert.equal(after.phase, "playing");
+    assert.deepEqual(after.round?.turnOrder, ["p1", "p2"]);
+    assert.equal(after.round?.currentTurnPlayerId, "p1");
+    assert.deepEqual(ids(after.round!.buried), []);
+    assert.equal(
+      after.players.find((p) => p.id === "p3")!.outInRound,
+      2,
+      "the round they were eliminated in stands",
+    );
   });
 
   it("leaves the input state untouched", () => {

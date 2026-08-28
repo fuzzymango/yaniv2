@@ -786,26 +786,57 @@ describe("the session core", () => {
   });
 
   /**
-   * Nobody is left holding a way to end anybody else's game (docs/adr/0012): mid-round
-   * there is no way out of a room at all, which is the same refusal it always was, and
-   * the round plays on around whoever asked.
+   * Mid-round is a way out like any other (issue #147): nobody is trapped at a table that
+   * has gone quiet. The leaver lands on the menu on the ack alone, exactly as they do from
+   * the lobby — the server stops publishing to a connection it has turned out of a room —
+   * and the round carries on for whoever stayed, one seat shorter.
    */
-  it("refuses a leave mid-round, leaving the player at the table", async () => {
+  it("leaves a room mid-round, and the round plays on without them", async () => {
     const server = await startServer(7);
     try {
       const [host, guest] = await twoHumanMatch(server);
+      const guestId = guest.getSnapshot().view!.you.id;
 
       guest.exitToMenu();
 
-      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "WRONG_PHASE");
-      assert.equal(refused.view!.phase, "playing", "and the round they are in plays on");
-      assert.equal(refused.busy, false, "with the controls back");
-      assert.equal(
-        host.getSnapshot().view!.phase,
-        "playing",
-        "the other table is untouched by them asking",
+      const gone = await waitForSnapshot(guest, "the menu", (s) => s.view === null && !s.busy);
+      assert.equal(gone.error, null, "leaving is not something to be refused any more");
+
+      const stayed = await waitForSnapshot(
+        host,
+        "the seat to be marked as given up",
+        (s) => s.view?.opponents.some((o) => o.id === guestId && o.departed) ?? false,
       );
+      assert.equal(stayed.view!.phase, "playing", "the round plays on for whoever stayed");
+      assert.ok(
+        !stayed.view!.turnOrder.includes(guestId),
+        "and it is played without the seat that went",
+      );
+      assert.ok(
+        stayed.view!.seating.includes(guestId),
+        "which still holds its place at the table",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  /** The credential goes with the seat mid-round too: leaving means something (#147). */
+  it("forgets the seat of a player who leaves mid-round", async () => {
+    const server = await startServer(7);
+    try {
+      const tokens = fakeTokens();
+      const host = await server.openSession(tokens.store);
+      host.createRoom("Ada");
+      await waitForSnapshot(host, "the room", (s) => s.view !== null && !s.busy);
+      host.startGame();
+      await waitForSnapshot(host, "the deal", (s) => s.view?.phase === "playing");
+      assert.ok(tokens.stored(), "seated, so there is a seat to claim back");
+
+      host.exitToMenu();
+      await waitForSnapshot(host, "the menu", (s) => s.view === null && !s.busy);
+
+      assert.equal(tokens.stored(), null, "a seat given up mid-round is not one to return to");
     } finally {
       await server.close();
     }

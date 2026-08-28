@@ -102,10 +102,14 @@ gone on without them, **left** when they have given the seat up. A bot says noth
 which is how you tell one. Nothing is done about it: their seat keeps its place and their
 turn still waits for them.
 
-Everybody has the same way out — "leave the room", in the lobby and at a finished match —
-which frees their own seat and leaves the table playing for whoever remains. Nobody holds a
-control that ends anybody else's match: the host owns the lobby and retires at the first
-deal, and a room ends when its last seat leaves (`docs/adr/0012`).
+Everybody has the same way out — "leave the room", from **any** point in a match, whether you
+are still playing or only watching — which frees their own seat and leaves the table playing
+for whoever remains. Leave mid-round and the round carries on without you: the cards you were
+holding go to the bottom of the discard pile, the turn moves along if it was yours, and you are
+scored for nothing that round. It is final, so the table asks first, and if it leaves one
+player they have won the match there and then. Nobody holds a control that ends anybody
+else's match: the host owns the lobby and retires at the first deal, and a room ends when its
+last seat leaves (`docs/adr/0012`).
 
 **Play in the terminal (`play`).** A real socket client, so it needs a server running.
 Start the server first:
@@ -145,7 +149,7 @@ Everyone plays through to a winner. At the prompt:
 | Input | Meaning |
 |---|---|
 | `start` | (host only) begin the match once everyone has arrived |
-| `menu` | (in the lobby, or at a finished match) leave the room for the main menu |
+| `menu` | leave the room for the main menu — from any phase, mid-round included |
 | `1` or `2 3 4` | discard those cards by hand position, drawing from the deck |
 | `1 3 t2` | the same, but take face-up card 2 off the table instead |
 | `yaniv` | call Yaniv |

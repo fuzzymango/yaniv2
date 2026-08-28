@@ -56,7 +56,7 @@ import { MoveHistory } from "./MoveHistory.tsx";
 import { PlayingCard, cardLabel } from "../shared/PlayingCard.tsx";
 import { CascadeReveal, OpponentSeat, Seat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "../settings/SettingsDialog.tsx";
-import { WayOut } from "../shared/WayOut.tsx";
+import { LeaveTable } from "./LeaveTable.tsx";
 import type { CardFlight } from "../flight.ts";
 import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
@@ -91,7 +91,11 @@ interface TableProps {
   onNextRound: () => void;
   /** The tap on the pile that sheds the just-drawn card, while a window is open. */
   onSlapDown: () => void;
-  /** Give the seat up. Offered where the hand was, to a player who is only watching. */
+  /**
+   * Give the seat up, from any phase and whether or not there is still a hand to give up
+   * with it (issue #147). Offered in the corner beside the settings, behind the one
+   * question this screen asks before it acts — see `LeaveTable.tsx`.
+   */
   onExit: () => void;
 }
 
@@ -378,13 +382,18 @@ export function Table({
         ref={rootRef}
       >
         {/*
-          The corner every in-match screen carries, and the room's locked settings are the
-          whole of it: one tap away and nowhere on the table itself — what a Yaniv may be
-          called on is worth being able to check, and worth nothing at all in front of a
-          player who is looking at their hand.
+          The corner every in-match screen carries: the room's locked settings, one tap away
+          and nowhere on the table itself — what a Yaniv may be called on is worth being able
+          to check, and worth nothing at all in front of a player who is looking at their
+          hand — and, beside it, the way out of a match still being played (issue #147).
 
-          There is nothing else here any more. The host's close-room icon stood beside it
-          until issue #145, and no control on a running table ends anybody's match now
+          One leave for everybody looking at this table, player and watcher alike, in one
+          place: the bar where a watcher's hand would be carried the only copy of it until
+          this, and a second control saying the same thing lower down the same screen would
+          be two answers to one tap. It asks before it acts, where every other way out does
+          not, because this is the one taken from inside a match that goes on without them
+          (`LeaveTable.tsx`). The host's close-room icon that stood here until issue #145 is
+          not coming back — no control on a running table ends anybody else's match
           (docs/adr/0012).
 
           Gone once the match is over: the panel over this table carries its own settings
@@ -393,6 +402,7 @@ export function Table({
         */}
         {!over && (
           <div className="topbar">
+            <LeaveTable busy={busy} onExit={onExit} />
             <SettingsDialog settings={view.settings} />
           </div>
         )}
@@ -588,10 +598,9 @@ export function Table({
 
           Where there are no cards to lay out, the row says why (issue #143): a bar of about
           the same height, so the felt and every seat above it keep the position they had
-          while this player was still playing. One control in it and no other — nothing here
-          should read as a move — and it is the `WayOut` every other screen offers, which
-          reads "Leave the room" for everybody now that no seat can end anybody else's match
-          (docs/adr/0012).
+          while this player was still playing. No control in it at all — nothing here should
+          read as a move, and the way out moved to the corner with issue #147, where it is
+          the same one control for a watcher and for a player still holding cards.
 
           Nothing at all at `gameEnd`: the panel over this table carries its own way out,
           and the bottom of the screen is given up there exactly as the topbar is.
@@ -628,7 +637,6 @@ export function Table({
             <span className="spectating__said">
               You are out of the match — watching the rest of it.
             </span>
-            <WayOut busy={busy} onExit={onExit} />
           </div>
         )}
 
