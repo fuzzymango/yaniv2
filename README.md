@@ -89,6 +89,15 @@ they were Assafed is said on the same line that was telling you whose turn it wa
 Yaniv button becomes "deal the next round" in the same place — for anybody still in the
 match, since nobody is host once the cards are out (`docs/adr/0012`).
 
+A round that takes somebody past the room's max score takes **them** out of the match rather
+than ending it for everyone (`docs/rules.md` §7): they are tagged `OUT` on the round that did
+it, and from the next deal their seat sits where it always has, darkened, while the rest play
+shorter and shorter rounds until one player is left — and that player wins, whatever they are
+holding. If it is you, the table stays exactly as it was and the row your hand was in says you
+are out: you go on watching the game you were playing, with the same hands hidden from you as
+before, and nothing left to play — leaving, in the same corner as ever, is the one control
+still yours.
+
 Reloading the tab, or backgrounding it and coming back, costs you nothing: the server holds
 your seat through a dropped connection, and the page claims it back with a credential it
 keeps in `localStorage` — a spinner while it asks, and then the same lobby, hand or
@@ -172,12 +181,14 @@ player moves (`docs/rules.md` §9). Against a bot that is the second and a half 
 against a person however long they take, so it is winnable either way — type it quickly.
 
 Leaving with `menu` is not quitting: the connection stays up and you land back at the main
-menu, free to create or join another room. It works the same way from the lobby and from a
-finished match, and it means the same thing whoever types it — your seat is freed and the
-others carry on without you. Leaving a lobby you made hands it to the next seat, so the
-room is not stranded. Mid-match there is still no graceful exit; `q` or Ctrl-D just drops
-the connection, which leaves the room standing with your seat held open for a minute — the
-harness cannot resume it, and after that the room is swept if nobody else is there.
+menu, free to create or join another room. It works from **any** phase — the lobby, a round
+being played, a scored round, a finished match — and it means the same thing whoever types
+it: your seat is freed and the others carry on without you. Type it mid-round and the round
+goes on without you too, your hand buried and the turn moved along. Leaving a lobby you made
+hands it to the next seat, so the room is not stranded. `q` or Ctrl-D is the other exit and
+is not the same one: it drops the connection without giving the seat up, which leaves the
+room standing and the seat held — this harness cannot resume it, and a minute after the last
+person in the room drops, the room is swept (`docs/adr/0015`).
 
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot

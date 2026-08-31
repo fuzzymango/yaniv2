@@ -191,12 +191,14 @@ round, until one player is left — and that player wins, whatever they are hold
 it to disagree; *why* is derived — **eliminated** is out with a score past the limit, **left**
 is out with **`Player.departed`** — and the two are disjoint by the rules, not by convention.
 From the first deal the **roster is append-only**: leaving marks a seat rather than splicing it
-out, which is what makes "out, and gone" representable. In the lobby it still splices.
+out, which is what makes "out, and gone" representable. In the lobby it still splices, there
+being no match record for a seat to be part of yet — `docs/adr/0016`.
 
 Membership in `players` therefore no longer means membership in the match, and every seat count
 and map over it asks `inMatch` (`state.ts`): `dealRound`, `randomOpener`, the minimum to start,
-`seatBots`, `playAgain`, the serializer's `turnOrder`. A missed one is a live bug, not a type
-error — the riskiest part of the change, and not the rule.
+`seatBots`, the serializer's `turnOrder`. A missed one is a live bug, not a type error — the
+riskiest part of the change, and not the rule. `playAgain` is the deliberate exception: it
+counts the seats that are still somebody's, so last match's losers are in the next one.
 
 ### The discard pile is two parts, not a flat array
 

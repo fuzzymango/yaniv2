@@ -309,6 +309,12 @@ seat, and which of the two put it there follows from the score and from whether 
 given up — as spectating follows from that and a live connection. One fact, and no second
 source of truth to disagree with it.
 
+A seat being out is why the **roster outlives the player behind it**: from the first deal it
+is append-only, so leaving marks a seat rather than removing it, and membership in the roster
+stops meaning membership in the match
+([ADR-0016](docs/adr/0016-seats-outlive-their-players.md)). Before the first deal there is no
+match to be out of, and a leaver is spliced out of the lobby as they always were.
+
 ## Connected, and away
 
 **Connected** is whether there is a live socket behind a seat *right now*. It is a fact
@@ -366,8 +372,9 @@ scores — and, if even those are level, by an arbitrary but fixed order every s
 the same way round, since a match that is over must not finish two ways depending on who is
 looking at it.
 
-The standings are read off the **roster**, which from the first deal is append-only and so
-carries every player who was ever in the match — including one who has since exited to the
+The standings are read off the **roster**, which from the first deal is append-only
+([ADR-0016](docs/adr/0016-seats-outlive-their-players.md)) and so carries every player who was
+ever in the match — including one who has since exited to the
 main menu, marked as **departed**, with the score and the round they left frozen on their
 seat. Nothing is rebuilt from the last round's record: the round says who played it, not who
 was in the match.

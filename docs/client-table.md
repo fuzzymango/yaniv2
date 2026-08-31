@@ -76,17 +76,19 @@ the page, and nobody has to be re-found. What changes is what changed:
 
 Seats are placed by the live roster sorted by `byRelativeSeat` in **both** phases, and the
 round's own record is looked up by id against whoever is already in a zone. Two placements
-could disagree; one cannot. (Mid-round leaving is impossible, so the round's recorded order
-and `turnOrder` agree here in every real case — reusing one calculation forecloses the drift
-by construction rather than by invariant.) A `roundEnd` with a null `roundResult` — a wire
-state the server does not produce — still falls through to `Room.tsx`.
+could disagree; one cannot — which matters more since a player can leave mid-round (#147) and
+the round's recorded order can therefore differ from the roster the table is drawn off. The
+record is asked what a seat *scored*, never where it sits; a seat with no record in the round
+being drawn is simply one the round has nothing to say about. A `roundEnd` with a null
+`roundResult` — a wire state the server does not produce — still falls through to `Room.tsx`.
 
-`byRelativeSeat` sorts turn order relative to the viewer's own seat rather than absolute
-position, so the sweep round the felt always starts with the next player to act after them —
-`bySeat` reads the same way round on every screen only starting from the same seat on every
-screen, which the table has no use for since the viewer's own seat is never one of the zones.
-The lobby's roster listing (`Lobby.tsx`) is a different case — every seat, the viewer's own
-included, is listed in one place — and keeps the absolute `bySeat`.
+`byRelativeSeat` sorts the **roster** relative to the viewer's own seat rather than absolutely,
+so the sweep round the felt starts from the seat next along from theirs — `bySeat` reads the
+same way round on every screen only starting from the same seat on every screen, which the
+table has no use for since the viewer's own seat is never one of the zones. The anchor is
+their own seat and not the next player to act, for a reason that belongs with the wire's two
+lists below. The lobby's roster listing (`Lobby.tsx`) is a different case — every seat, the viewer's own included, is
+listed in one place — and keeps the absolute `bySeat`.
 
 `seatZones` then fills the zones in **contiguous runs**, not round-robin (issue #116): the
 first opponents go to the left column, the next to the top, the last to the right, so a
@@ -94,6 +96,12 @@ doubled zone holds two players who act one after the other. The per-zone counts 
 round-robin's — every zone filled before any doubles, `right` never doubling at all — and only
 which opponents land in each changes. A round-robin fed a viewer-relative order seated the 1st
 and 4th opponents side by side, which is turn order in neither direction.
+
+The list being dealt round is roster order, which is turn order with the seats that are out
+still standing in their places: neighbours on the felt still act one after the other, with
+whoever is out passed over rather than moved. `seatZones` is told none of that — it reads the
+order it is handed and nothing else, which is why one function seats a live round, a scored
+one and a finished match alike.
 
 The **left column alone is reversed**. The DOM draws a column top-down and the viewer's own
 hand sits at the bottom of the screen, so the earliest of the two has to be the lower for the
@@ -168,8 +176,10 @@ player for the life of the room, and a glance says who is still in.
   seating" in `CONTEXT.md`). The two lists were equal until elimination separated them, and
   `turnOrder` now shrinks: a table sorted by it would slide every remaining player one seat
   along at the moment somebody went out — a rearrangement nobody made, mid-match. The roster is
-  append-only from the first deal, so nobody moves. With nobody out the two are the same list
-  and the table is seated exactly as it always was.
+  append-only from the first deal ([ADR-0016](adr/0016-seats-outlive-their-players.md)), so
+  nobody moves — and a seat whose player has **left** holds its place exactly as an eliminated
+  one does, dim and marked, rather than being spliced out from under whoever sat after it.
+  With nobody out the two are the same list and the table is seated exactly as it always was.
 - **The wire carries both lists.** A client cannot recover the roster's order from what it is
   sent — the viewer is lifted out of `opponents` into `you`, leaving a hole exactly where the
   seat a viewer-relative sweep anchors on would be. So `PlayerGameView.seating` is the roster in
