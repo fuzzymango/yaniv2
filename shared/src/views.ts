@@ -3,11 +3,50 @@ import type { RoomSettings } from "./settings.ts";
 
 export type Phase = "lobby" | "playing" | "roundEnd" | "gameEnd";
 
-/** The viewing player. Always includes their own hand. */
-export interface SelfView {
+/**
+ * What a seat's standing in the match is, on the wire: the round it stopped playing in and
+ * whether it has been given up for good. Carried by both views below, and identically —
+ * being out is a public fact about a table, so there is nothing here to redact.
+ *
+ * Two fields rather than a "state", for the reason the domain model has two (see `Player`
+ * in `server/src/state.ts`): out-ness is one fact, and which of its two causes applies is
+ * derived — **eliminated** is `outInRound !== null` with a score past `settings.maxScore`,
+ * **left** is `outInRound !== null` with `departed`. docs/rules.md §7.
+ */
+export interface MatchStanding {
+  /** The round this seat stopped playing, or null while it is still in the match. */
+  outInRound: number | null;
+  /** Whether this seat has been given up for good. Never true in the lobby, where a
+   * player who leaves is simply gone from the roster. */
+  departed: boolean;
+  /**
+   * Whether somebody is there behind this seat right now — a live connection, and nothing
+   * about the match itself (issue #146). False is a player who has dropped: their seat is
+   * held, their turn still waits for them, and the table says so rather than going quiet
+   * for no stated reason.
+   *
+   * Derived by the server from the sockets in the room at the moment it publishes and
+   * never stored, so there is no flag here to go stale (docs/adr/0013). True for a bot,
+   * which is never away: the server is always there for it, and a bot's absence of any
+   * marker is what says it is one.
+   */
+  connected: boolean;
+}
+
+/**
+ * What the viewing player is, whichever of the two they are: who they are, and where they
+ * stand in the match. Everything the standings read (`standings.ts`) is here, so a seat
+ * that has stopped playing still answers for itself.
+ */
+export interface SeatView extends MatchStanding {
   id: string;
   name: string;
   score: number;
+}
+
+/** The viewing player, while they are still in the match. Always includes their own hand. */
+export interface PlayingSelfView extends SeatView {
+  spectating: false;
   /** Empty during `lobby`, when no round is dealt. */
   hand: Card[];
   /**
@@ -22,14 +61,50 @@ export interface SelfView {
 }
 
 /**
+ * The viewing player, once the match has gone on without them: they watch the same table,
+ * with the same things hidden, and have no move to make on it (docs/rules.md §7).
+ *
+ * Deliberately has **no `hand` and no `slapdownEligible` field at all** — not empty ones —
+ * on exactly the principle `OpponentView` below embodies: a spectator holding cards is
+ * unrepresentable rather than merely wrong, and a screen cannot draw a hand out of a
+ * shape that has none. What it keeps is what a seat is still asked for after it stops
+ * playing: its name, its frozen score and its standing.
+ */
+export interface SpectatingSelfView extends SeatView {
+  spectating: true;
+}
+
+/**
+ * The viewing player, tagged by whether they are still playing. Clients narrow it once,
+ * at the top, beside the phase branch they already make.
+ *
+ * Tagged rather than told apart by asking `outInRound !== null`: the tag is what makes the
+ * two shapes distinguishable to the type system, and a seat that is out is not always a
+ * spectator — a bot never spectates, and neither does a player who has left. What decides
+ * it is the server's, and `serialize.ts` derives it in one place.
+ */
+export type SelfView = PlayingSelfView | SpectatingSelfView;
+
+/**
  * Everyone else. Deliberately has no `hand` field at all — not an optional one — so
  * there is no shape where an opponent's cards could be populated by accident.
  */
-export interface OpponentView {
+export interface OpponentView extends MatchStanding {
   id: string;
   name: string;
   score: number;
   handSize: number;
+  /**
+   * Whether this seat is *watching* the match rather than playing it: out of it, not gone,
+   * connected, and somebody rather than a bot. The same derivation that tags the viewer's
+   * own view above, made once on the server and sent for every seat, so a table cannot
+   * decide for itself who is looking at it (issue #146).
+   *
+   * Sent rather than derived here because the last of those conditions is not on the wire
+   * at all: nothing tells a client which seats are bots, and nothing should — a bot is
+   * exactly the seat that carries no marker.
+   */
+  spectating: boolean;
 }
 
 /**
@@ -146,7 +221,13 @@ export interface PlayerGameView {
   roomCode: string;
   phase: Phase;
   roundNumber: number;
-  hostId: string;
+  /**
+   * Whose lobby this is, and **null from the first deal onward**: the role is the lobby's
+   * — the settings and the start — and it retires when the cards go out (docs/adr/0012).
+   * Null rather than a stale id so no screen can draw a host at a table that has none, and
+   * so a client cannot gate a mid-match control on being one.
+   */
+  hostId: string | null;
   /**
    * The room's live settings — present in every phase, not just `lobby`. Load-bearing
    * for a client's own pre-turn legality check (`isLegalCall`), not just display: a
@@ -157,7 +238,25 @@ export interface PlayerGameView {
 
   you: SelfView;
   opponents: OpponentView[];
-  /** Seating order by player id, including the viewer. */
+  /**
+   * Where everybody sits, by player id: the room's roster in its own order, the viewer
+   * included and every seat that has gone out with them. Append-only from the first deal,
+   * so a seat's place in this list is fixed for the life of the room and a table drawn
+   * off it does not rearrange itself around whoever is left (issue #144).
+   *
+   * A list beside `turnOrder` rather than the roster's own order recovered from `you` and
+   * `opponents`: the viewer is lifted out of `opponents`, so the roster as sent has a hole
+   * in it exactly where the seat a viewer-relative sweep has to start from would be.
+   *
+   * Holds every id in `you` and `opponents` and no others. See "Turn order vs. seating"
+   * in CONTEXT.md.
+   */
+  seating: string[];
+  /**
+   * The order play moves in, by player id, including the viewer while they are still in
+   * the match — and only the players who are. Not seating: `seating` above is, and it
+   * keeps the seats this list drops. See "Turn order vs. seating" in CONTEXT.md.
+   */
   turnOrder: string[];
 
   /** Null outside an active round. */
@@ -190,6 +289,10 @@ export interface PlayerGameView {
 
   /** Populated only in `roundEnd` and `gameEnd`, where all hands are revealed. */
   roundResult: RoundResultView | null;
-  /** Populated only in `gameEnd`. Multiple ids on a tie. */
+  /**
+   * Populated only in `gameEnd`, and always with exactly one id: the match ends when one
+   * player is left in it, and that player wins (docs/rules.md §7). A list because it has
+   * always been one, and because a client renders a list of one no differently.
+   */
   winnerIds: string[] | null;
 }

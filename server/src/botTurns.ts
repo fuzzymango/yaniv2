@@ -11,19 +11,18 @@
  * win the slapdown window their own turn just opened, which same-tick bot turns made
  * unreachable (ADR-0005).
  *
- * Nothing here knows what a socket is: the runner is handed a room manager, a clock and
- * a callback, exactly as the loop it replaced was.
+ * Nothing here knows what a socket is: the runner is handed a room manager, the room
+ * timer registry and a callback, exactly as the loop it replaced was.
  */
 
 import type { PlayerGameView } from "@yaniv/shared";
 import type { BotAction } from "./bot.ts";
 import { decideTurn } from "./bot.ts";
-import type { Clock } from "./clock.ts";
-import { systemClock } from "./clock.ts";
 import { BOT_THINK_MS } from "./config.ts";
 import { callYaniv, takeTurn } from "./game.ts";
 import type { RoomManager } from "./roomManager.ts";
-import { serializeStateForPlayer } from "./serialize.ts";
+import type { RoomTimers } from "./roomTimers.ts";
+import { NO_CONNECTIONS, serializeStateForPlayer } from "./serialize.ts";
 import type { GameStateActive } from "./state.ts";
 
 /** Injected so a test can drive a deliberately broken bot. Defaults to the real one. */
@@ -67,8 +66,9 @@ export function playBotTurn(
   // The bot decides from the same payload a client receives, never from raw state. Read
   // now rather than when the turn was scheduled: an action may have landed during the
   // pause — a slapdown is the case that matters — and the bot plays the position in
-  // front of it, so a slapped card is one it can see and take.
-  const decision = decide(serializeStateForPlayer(state, playerId));
+  // front of it, so a slapped card is one it can see and take. Who is connected is not
+  // part of that judgement and no connection is being served here, hence `NO_CONNECTIONS`.
+  const decision = decide(serializeStateForPlayer(state, playerId, NO_CONNECTIONS));
   const result =
     decision.type === "yaniv"
       ? rooms.apply(roomCode, (s) => callYaniv(s, playerId))
@@ -89,8 +89,6 @@ export function playBotTurn(
 }
 
 export interface BotTurnRunnerOptions {
-  /** Defaults to real time. A test drives one by hand instead. */
-  clock?: Clock;
   /** How long a bot waits before its turn. Zero for a suite about something else. */
   thinkTimeMs?: number;
 }
@@ -104,6 +102,11 @@ export interface BotTurnRunnerOptions {
  * bot's turn twice. A second request while one is pending is therefore a no-op — not a
  * restart, which would punish the slapper with a slower game, and not an immediate play,
  * which would punish them with a faster opponent.
+ *
+ * That "one pending run" is now the registry's `botTurn` purpose rather than a `Map` kept
+ * here: one room holds one timer per purpose by construction, and abandoning a room's
+ * pending turn is `cancelRoom` at the seam that destroys rooms, along with everything
+ * else that room had waiting.
  */
 export interface BotTurnRunner {
   /**
@@ -111,23 +114,14 @@ export interface BotTurnRunner {
    * each through `onTurnPlayed` as it happens. Returns at once; nothing waits on it.
    */
   run: (roomCode: string, onTurnPlayed: (playerId: string) => void) => void;
-  /**
-   * Abandon a room's pending turn. A stale timer is already harmless — the turn it would
-   * play is refused by a room that has gone or a phase that has moved on — so this is
-   * about not leaving an entry behind for a room code that may be issued again.
-   */
-  cancel: (roomCode: string) => void;
 }
 
 export function createBotTurnRunner(
   rooms: RoomManager,
+  timers: RoomTimers,
   options: BotTurnRunnerOptions = {},
 ): BotTurnRunner {
-  const clock = options.clock ?? systemClock;
   const thinkTimeMs = options.thinkTimeMs ?? BOT_THINK_MS;
-
-  /** The rooms with a turn already waiting on the clock, and how to call it off. */
-  const pending = new Map<string, () => void>();
 
   /**
    * Wait out think time, take the turn, then do it again for whatever seat it hands over
@@ -136,19 +130,9 @@ export function createBotTurnRunner(
    * decision an ordinary uncaught exception rather than an unhandled rejection.
    */
   function schedule(roomCode: string, onTurnPlayed: (playerId: string) => void): void {
-    if (!botSeatToPlay(rooms, roomCode)) {
-      pending.delete(roomCode);
-      return;
-    }
+    if (!botSeatToPlay(rooms, roomCode)) return;
 
-    // A clock that fires synchronously — a test's, held or otherwise — runs the whole
-    // chain inside this call, so the entry is recorded only if there is still something
-    // to record it for. Whatever the inner scheduling left behind is the live one.
-    let fired = false;
-    const cancel = clock.after(thinkTimeMs, () => {
-      fired = true;
-      pending.delete(roomCode);
-
+    timers.set(roomCode, "botTurn", thinkTimeMs, () => {
       const playerId = playBotTurn(rooms, roomCode);
       // The seat stopped being one to play during the pause: the round ended under it,
       // or the room went. Either way there is nothing to publish and nothing to chain.
@@ -157,17 +141,12 @@ export function createBotTurnRunner(
       onTurnPlayed(playerId);
       schedule(roomCode, onTurnPlayed);
     });
-    if (!fired) pending.set(roomCode, cancel);
   }
 
   return {
     run: (roomCode, onTurnPlayed) => {
-      if (pending.has(roomCode)) return;
+      if (timers.has(roomCode, "botTurn")) return;
       schedule(roomCode, onTurnPlayed);
-    },
-    cancel: (roomCode) => {
-      pending.get(roomCode)?.();
-      pending.delete(roomCode);
     },
   };
 }

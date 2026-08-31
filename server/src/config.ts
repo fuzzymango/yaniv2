@@ -30,6 +30,31 @@ export const BOT_NAMES = [
  */
 export const BOT_THINK_MS = 1500;
 
+/**
+ * How long a scored round is left up before the server deals it on, in the one case
+ * where nobody left in the match can deal it themselves: every seat still playing is a
+ * bot, and a spectator is watching (`autoDeal.ts`, issue #148).
+ *
+ * Long enough to read the round that just finished — the hands are face up and the
+ * scores have just moved — and not so long that a watched match stops looking like one
+ * being played. A property of this server rather than of a room, like bot think time
+ * above: not a setting, not on the wire, not locked at the first deal.
+ */
+export const AUTO_DEAL_MS = 10_000;
+
+/**
+ * How long a room stands with no human connected to it before the server drops it
+ * (`roomSweep.ts`, issue #150).
+ *
+ * A grace period rather than a reaction: a reload is a disconnect, and a seat is resumable
+ * precisely so a drop costs nothing (docs/adr/0013), so a lone human against bots must not
+ * lose their match to the seconds their socket was gone. A minute is long enough for a
+ * reload, a tunnel or a backgrounded tab coming forward, and short enough that abandoned
+ * tables do not pile up in memory. Operational, like the two above: not a setting, not on
+ * the wire.
+ */
+export const ROOM_SWEEP_MS = 60_000;
+
 export const ROOM_CODE_LENGTH = 4;
 
 /** Room code alphabet, with visually ambiguous characters (O/0, I/1) removed. */

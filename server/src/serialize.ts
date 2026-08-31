@@ -2,10 +2,12 @@ import type {
   Card,
   DrawSource,
   LastMoveView,
+  MatchStanding,
   MoveHistoryEntryView,
   OpponentView,
   PlayerGameView,
   RoundResultView,
+  SeatView,
   SelfView,
 } from "@yaniv/shared";
 import { sortHand } from "@yaniv/shared";
@@ -13,12 +15,25 @@ import type {
   GameState,
   LastMove,
   MoveHistoryEntry,
+  Player,
   RoundResult,
 } from "./state.ts";
+import { inMatch, spectating } from "./state.ts";
 
 /**
- * Names come from the result itself, not from the roster: a player may have given their
- * seat up since the match ended, and the round they played is still theirs.
+ * No sockets to ask about: what a caller with no transport under it passes for
+ * `connectedPlayerIds` (issue #146).
+ *
+ * There are two, and both are reading a view rather than sending one — a bot deciding its
+ * turn (`botTurns.ts`) and the in-process demo harness (`scripts/play.ts`). Neither has a
+ * connection to report and neither reads the field, so this says exactly that rather than
+ * inventing a set. Anything that *publishes* a view knows who is there and says so.
+ */
+export const NO_CONNECTIONS: ReadonlySet<string> = new Set();
+
+/**
+ * Names come from the result itself, not from the roster: a scored round is a record of
+ * who played it, and it says what to draw at a seat rather than which seat to draw it at.
  */
 function toRoundResultView(result: RoundResult): RoundResultView {
   return {
@@ -36,6 +51,107 @@ function toRoundResultView(result: RoundResult): RoundResultView {
       scoreAfter: p.scoreAfter,
     })),
   };
+}
+
+/**
+ * Where a seat stands in the match, for either view. Nothing is redacted: whether a player
+ * is still in it is a public fact about a table — every other seat watched them go out —
+ * and both views carry it so a client can draw every seat in its correct state.
+ *
+ * One helper for the two views and both phases, so a seat cannot read as out to one
+ * viewer and in to another. Connection is public on the same grounds and arrives the same
+ * way: as an answer already worked out for this publication (`connectedTo` below).
+ */
+function standingOf(player: Player, connected: boolean): MatchStanding {
+  return { outInRound: player.outInRound, departed: player.departed, connected };
+}
+
+/**
+ * Whether somebody is there behind one seat, at the moment this payload is being built
+ * (issue #146, docs/adr/0013).
+ *
+ * The live socket set is the whole of it, plus two seats that are never away for reasons
+ * that have nothing to do with sockets. **The viewer**, because this payload exists on
+ * account of the connection it is about to go down — asking the set about them would let a
+ * caller hand a client a view of itself as gone. **A bot**, because there is no connection
+ * for one to lose: the server plays it, and the absence of any marker at its seat is what
+ * says it is a bot rather than somebody who has stepped away.
+ */
+function connectedTo(
+  player: Player,
+  viewerPlayerId: string,
+  live: ReadonlySet<string>,
+): boolean {
+  return player.id === viewerPlayerId || player.isBot || live.has(player.id);
+}
+
+/**
+ * The viewer's own view, in whichever of its two shapes they are entitled to (issue #143).
+ *
+ * The tag is `spectating` from `state.ts` and nothing else, so which shape a seat gets is
+ * one derivation rather than one per phase — and a spectator's shape carries no hand and
+ * no eligibility field to fill in, which is what makes "a spectator holding cards" not a
+ * mistake this function could make.
+ *
+ * **It widens nothing.** Everything below this line is about the viewer's own seat: a
+ * spectator's payload is an active player's minus a hand, never plus anything, because
+ * being knocked out must not turn a player into an oracle for a friend still playing.
+ * One function for both phases, so the lobby and a dealt round cannot answer differently.
+ */
+function selfViewOf(
+  viewer: Player,
+  hand: Card[],
+  slapdownEligible: boolean,
+): SelfView {
+  const seat: SeatView = {
+    id: viewer.id,
+    name: viewer.name,
+    score: viewer.score,
+    // Connected, and not asked: see `connectedTo`. A viewer is by definition somebody
+    // there to be sent this, which is also what makes their own shape decidable here.
+    ...standingOf(viewer, true),
+  };
+  return spectating(viewer, true)
+    ? { ...seat, spectating: true }
+    : { ...seat, spectating: false, hand, slapdownEligible };
+}
+
+/**
+ * One other seat, in whichever phase — everything public about a player who is not the
+ * viewer, and nothing else: there is no `hand` field here to leave empty.
+ *
+ * Presence is passed in rather than asked for twice: whether somebody is behind this seat
+ * is one fact, and it decides both what the standing says and whether the seat is watching
+ * the match. `spectating` is worked out here for every seat by the same predicate that
+ * decides the viewer's own shape — which seats are bots is not on the wire, so a client
+ * could not tell a watcher from one.
+ */
+function opponentViewOf(
+  player: Player,
+  connected: boolean,
+  handSize: number,
+): OpponentView {
+  return {
+    id: player.id,
+    name: player.name,
+    score: player.score,
+    ...standingOf(player, connected),
+    spectating: spectating(player, connected),
+    handSize,
+  };
+}
+
+/**
+ * Where everybody sits: the roster in its own order, unfiltered (issue #144).
+ *
+ * The whole of it, out and departed seats included, and the same list for every viewer —
+ * a table that is being drawn round the felt has a place for each of them, and dropping a
+ * seat here is what would slide everybody else along it. `inMatch` is turn order's filter
+ * and not this one; the two lists were equal until elimination made them different
+ * questions ("Turn order vs. seating" in CONTEXT.md).
+ */
+function seatingOf(state: GameState): string[] {
+  return state.players.map((p) => p.id);
 }
 
 /**
@@ -107,10 +223,16 @@ function toMoveHistoryView(
  *
  * Throws if `viewerPlayerId` is not in the game — callers are expected to have
  * established membership already, so that is a defect rather than a rule violation.
+ *
+ * `connectedPlayerIds` is who has a live socket in the room right now, handed in rather
+ * than read off the state: connection is a fact about the transport, and `GameState` has
+ * none (issue #146, docs/adr/0013). Required rather than defaulted, so a call site that
+ * knows cannot forget to say — the two that genuinely do not know pass `NO_CONNECTIONS`.
  */
 export function serializeStateForPlayer(
   state: GameState,
   viewerPlayerId: string,
+  connectedPlayerIds: ReadonlySet<string>,
 ): PlayerGameView {
   const viewer = state.players.find((p) => p.id === viewerPlayerId);
   if (!viewer) {
@@ -119,17 +241,18 @@ export function serializeStateForPlayer(
     );
   }
 
+  /** One seat's presence, over the set and the two seats that never consult it. */
+  const connected = (player: Player): boolean =>
+    connectedTo(player, viewerPlayerId, connectedPlayerIds);
+
   if (state.phase === "lobby") {
-    const you: SelfView = {
-      id: viewer.id,
-      name: viewer.name,
-      score: viewer.score,
-      hand: [],
-      slapdownEligible: false,
-    };
+    // Nobody is out of a match that has not been dealt, so this is always the playing
+    // shape — arrived at by the same derivation as every other phase, rather than by
+    // this branch knowing it.
+    const you: SelfView = selfViewOf(viewer, [], false);
     const opponents: OpponentView[] = state.players
       .filter((p) => p.id !== viewerPlayerId)
-      .map((p) => ({ id: p.id, name: p.name, score: p.score, handSize: 0 }));
+      .map((p) => opponentViewOf(p, connected(p), 0));
 
     return {
       roomCode: state.roomCode,
@@ -139,7 +262,10 @@ export function serializeStateForPlayer(
       settings: state.settings,
       you,
       opponents,
-      turnOrder: state.players.map((p) => p.id),
+      seating: seatingOf(state),
+      // Every seat, a lobby being a table nobody has gone out of yet — but read off the
+      // same rule the dealt rounds' turn order is built by, rather than off the roster.
+      turnOrder: state.players.filter(inMatch).map((p) => p.id),
       currentTurnPlayerId: null,
       drawPileCount: 0,
       lastDiscard: [],
@@ -154,28 +280,22 @@ export function serializeStateForPlayer(
 
   const round = state.round;
 
-  const you: SelfView = {
-    id: viewer.id,
-    name: viewer.name,
-    score: viewer.score,
+  const you: SelfView = selfViewOf(
+    viewer,
     // Sorted here rather than in the engine: hand order is presentation, and this
     // is the one place every client is guaranteed to go through.
-    hand: sortHand(round.hands[viewer.id] ?? []),
+    sortHand(round.hands[viewer.id] ?? []),
     // Told only to whoever holds the window: an open window is a fact about the holder's
     // hand, so it goes no further. Gated on the phase the same way `currentTurnPlayerId`
     // below is — both are answers about a round still being played.
-    slapdownEligible:
-      state.phase === "playing" && round.slapdown?.playerId === viewer.id,
-  };
+    state.phase === "playing" && round.slapdown?.playerId === viewer.id,
+  );
 
   const opponents: OpponentView[] = state.players
     .filter((p) => p.id !== viewerPlayerId)
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      score: p.score,
-      handSize: round.hands[p.id]?.length ?? 0,
-    }));
+    // Zero cards for a seat that is out: it holds no hand, the round having been dealt
+    // without it — the same absence a client draws an empty seat from.
+    .map((p) => opponentViewOf(p, connected(p), round.hands[p.id]?.length ?? 0));
 
   const revealing = state.phase === "roundEnd" || state.phase === "gameEnd";
 
@@ -183,10 +303,13 @@ export function serializeStateForPlayer(
     roomCode: state.roomCode,
     phase: state.phase,
     roundNumber: state.roundNumber,
-    hostId: state.hostId,
+    // The role retired with the first deal, and this is where that is said: a round has
+    // been dealt, so there is no host to name. docs/adr/0012.
+    hostId: null,
     settings: state.settings,
     you,
     opponents,
+    seating: seatingOf(state),
     turnOrder: round.turnOrder,
     currentTurnPlayerId: state.phase === "playing" ? round.currentTurnPlayerId : null,
     drawPileCount: round.drawPile.length,

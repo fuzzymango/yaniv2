@@ -14,16 +14,19 @@
  * ended sooner than anybody expected is answered by the score it ended at), and this screen
  * is the only place left to ask from.
  *
- * Lowest score first, because in Yaniv least is best (docs/rules.md §7) — and everyone the
- * match named, not only whoever is still seated. Both of those are `standings` in `shared`,
+ * Ordered by how long each player lasted, because that is what the match was decided on
+ * (docs/rules.md §7) — and everyone the match named, not only whoever is still seated,
+ * the roster keeping every seat it ever had. Both of those are `standings` in `shared`,
  * where the terminal harness reads them from too: how a row is drawn is this screen's
  * business, but where the rows come from is the same question on both, and two answers to
  * it are two chances to disagree about a match that is already over.
  *
- * Nothing here decides anything. Only the host may deal another match and the server is
- * what says so, answering anyone else with `NOT_HOST`; a table that has shrunk below two is
- * refused with `NOT_ENOUGH_PLAYERS`, and that refusal is shown rather than anticipated —
- * unlike a discard, there is no rulebook a client could read it out of.
+ * Nothing here decides anything. Anyone still in the room may deal another match — the
+ * player the match went on without included, and a match may have been won by a bot with
+ * nobody else in it (docs/adr/0012) — so the control is offered to whoever is looking at
+ * this panel. A table that has shrunk below two is refused with `NOT_ENOUGH_PLAYERS`, and
+ * that refusal is shown rather than anticipated: unlike a discard, there is no rulebook a
+ * client could read it out of.
  */
 
 import type { GameError, PlayerGameView } from "@yaniv/shared";
@@ -37,8 +40,6 @@ interface GameEndProps {
   busy: boolean;
   onPlayAgain: () => void;
   onExit: () => void;
-  /** End the room. The host's way out of this screen — see `WayOut.tsx`. */
-  onCloseRoom: () => void;
 }
 
 /** How a seat that has been given up is marked, the same word the terminal harness uses. */
@@ -56,9 +57,7 @@ export function GameEnd({
   busy,
   onPlayAgain,
   onExit,
-  onCloseRoom,
 }: GameEndProps) {
-  const isHost = view.hostId === view.you.id;
   const placings = standings(view);
   const winnerIds = view.winnerIds ?? [];
 
@@ -88,10 +87,7 @@ export function GameEnd({
 
   return (
     <div className="final">
-      {/*
-        Alone in the bar here, as it is on the table: closing the room is in the row of
-        controls on the panel, which this screen has and the table does not.
-      */}
+      {/* Alone in the bar here, as it is on the table — see `SettingsDialog.tsx`. */}
       <div className="topbar">
         <SettingsDialog settings={view.settings} />
       </div>
@@ -107,8 +103,12 @@ export function GameEnd({
           <h1 className="final__headline" id="final-headline">
             {headline}
           </h1>
-          {/* Least is best, and it is the one rule of this screen worth saying out loud. */}
-          <p className="code__hint">Lowest score wins.</p>
+          {/*
+            The one rule of this screen worth saying out loud — and since elimination it is
+            no longer "lowest score wins": the order is who outlasted whom, and a column of
+            totals that does not run smallest-first would otherwise read as broken.
+          */}
+          <p className="code__hint">Last player standing wins.</p>
         </header>
 
         {/*
@@ -147,23 +147,17 @@ export function GameEnd({
           rather than a page to fill.
         */}
         <div className="final__actions">
-          {isHost ? (
-            <button
-              className="button button--primary"
-              type="button"
-              onClick={onPlayAgain}
-              disabled={busy}
-            >
-              Play again
-            </button>
-          ) : (
-            // Its own class rather than `notice`, which carries news that has just arrived.
-            // This is a standing fact about the screen, as it is in the lobby.
-            <p className="hint">The host deals another match.</p>
-          )}
+          <button
+            className="button button--primary"
+            type="button"
+            onClick={onPlayAgain}
+            disabled={busy}
+          >
+            Play again
+          </button>
 
-          {/* The lobby's two ways out, meaning the same thing here — see `WayOut.tsx`. */}
-          <WayOut isHost={isHost} busy={busy} onExit={onExit} onCloseRoom={onCloseRoom} />
+          {/* The lobby's way out, meaning the same thing here — see `WayOut.tsx`. */}
+          <WayOut busy={busy} onExit={onExit} />
         </div>
 
         {error && (

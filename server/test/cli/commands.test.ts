@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { callYaniv } from "../../src/game.ts";
-import { serializeStateForPlayer } from "../../src/serialize.ts";
+import { NO_CONNECTIONS, serializeStateForPlayer } from "../../src/serialize.ts";
 import { parseCommand, parseMainMenuCommand } from "../../scripts/cli/commands.ts";
 import { makeState, unwrap } from "../helpers.ts";
 
@@ -28,6 +28,7 @@ function midRoundView() {
       currentTurnPlayerId: "p1",
     }),
     "p1",
+    NO_CONNECTIONS,
   );
 }
 
@@ -42,6 +43,7 @@ function lobbyView() {
       ],
     }),
     "p1",
+    NO_CONNECTIONS,
   );
 }
 
@@ -63,7 +65,7 @@ function gameEndView() {
       "p1",
     ),
   );
-  return serializeStateForPlayer(ended, "p1");
+  return serializeStateForPlayer(ended, "p1", NO_CONNECTIONS);
 }
 
 describe("parseCommand", () => {
@@ -148,9 +150,9 @@ describe("parseCommand", () => {
   it("reads 'menu' as leaving the lobby, distinct from quitting the harness", () => {
     assert.deepEqual(parseCommand("menu", lobbyView()), { kind: "menu" });
     assert.deepEqual(parseCommand("q", lobbyView()), { kind: "quit" });
-    // Mid-round there is no leaving without dropping the connection, so the word is
-    // just another unreadable line.
-    assert.equal(parseCommand("menu", midRoundView()).kind, "invalid");
+    // And mid-round, where it means the same thing (issue #147): a seat may be given up
+    // in any phase, so the harness sends the word from every one of them.
+    assert.deepEqual(parseCommand("menu", midRoundView()), { kind: "menu" });
   });
 
   it("still quits from the lobby, and ignores a stray enter there", () => {
@@ -202,7 +204,7 @@ describe("parseCommand", () => {
       ),
     );
 
-    assert.deepEqual(parseCommand("", serializeStateForPlayer(ended, "p1")), {
+    assert.deepEqual(parseCommand("", serializeStateForPlayer(ended, "p1", NO_CONNECTIONS)), {
       kind: "next",
     });
     // Mid-round the same keystroke is just an accident: do nothing, ask again.

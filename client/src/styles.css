@@ -151,16 +151,6 @@ body {
   color: #1c1917;
 }
 
-/*
- * The one control in this client that ends something for other people. Coloured rather
- * than filled: it is the answer to a question already being asked in a panel, so it needs
- * to be findable and not shouted.
- */
-.button--danger {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
 .notice {
   margin: 0;
   padding: 0.75rem;
@@ -367,6 +357,48 @@ body {
   letter-spacing: 0.08em;
 }
 
+/*
+ * The one mark that is news rather than a note: this round took that player out of the
+ * match (docs/rules.md §7, issue #142). Louder than its siblings — which say how a score
+ * was arrived at — and the only thing added to a scored round, so a round that eliminated
+ * somebody and one that did not stay the same screen in two states.
+ */
+.seat__mark--out {
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/*
+ * The status slot: one word about the player rather than about their round — left, away, or
+ * watching (issue #146). A chip like the marks above, because it sits in the same row and
+ * reads at the same glance, but in lower case and unspaced: those are stamps on a scored
+ * round, this is a note about somebody.
+ *
+ * Brighter than a mark deliberately. A seat that is out wears `.table-seat--out`, which
+ * fades the whole seat to a little over a third (issue #144), and opacity on the seat is a
+ * ceiling its children cannot climb back out of — so the one thing on a dimmed seat worth
+ * reading is given the full ink and a stronger border to survive the fade.
+ */
+.seat__status {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid rgb(255 255 255 / 45%);
+  border-radius: 0.75rem;
+  color: var(--ink);
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+}
+
+/*
+ * Away is the one that may yet change, and the only one the table is arguably waiting on —
+ * so it is the one that catches an eye. Left and watching are settled facts and stay plain:
+ * a table with three watchers should not look like a table with three problems.
+ */
+.seat__status--away {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .lobby__actions {
   display: flex;
   flex-direction: column;
@@ -536,9 +568,9 @@ body {
 }
 
 /*
- * The corner of every in-match screen: the settings once they are locked, and — for the
- * host, and nowhere the host has a row of controls to put it in — closing the room. Never
- * more than those two, and nothing else about either anywhere else on the screen.
+ * The corner of every in-match screen, and the settings once they are locked are the whole
+ * of it: nothing else about the room is anywhere on the screen, and nothing else belongs
+ * up here — the close-room icon that used to sit beside it went with docs/adr/0012.
  */
 .topbar {
   display: flex;
@@ -563,16 +595,6 @@ body {
 .topbar__button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-}
-
-/*
- * Ending the room, which is not the same kind of thing as reading the settings — so it is
- * the one icon up here that carries a colour. Still dim beside the game itself: a host
- * looking for it will find it, and nobody else has to look past it every turn.
- */
-.topbar__button--danger {
-  color: var(--danger);
-  opacity: 0.75;
 }
 
 .topbar__icon {
@@ -619,6 +641,21 @@ body {
   margin: 0;
   color: var(--ink-dim);
   font-size: 0.85rem;
+}
+
+/*
+ * The two answers to a question asked behind one of these, side by side and the same size:
+ * neither is the safe one to fall on by accident, so neither is drawn as the one meant to
+ * be tapped. Staying is first and holds the focus, being the answer a panel opened by a
+ * misplaced thumb wants.
+ */
+.modal__choice {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.modal__choice > .button {
+  flex: 1;
 }
 
 /* --- cards, drawn rather than loaded --- */
@@ -698,6 +735,14 @@ body {
  */
 .table {
   --card-w: min(4.0rem, 15vw);
+  /*
+   * How big a card in the viewer's own hand is — a little larger than the ones on the
+   * felt, since those are the ones a player picks out one at a time. Named here rather
+   * than inside `.hand` because the spectator's bar reserves the row that hand would have
+   * filled (issue #143), and a bar sized off its own copy of this number would drift out
+   * of step with the hand it stands in for.
+   */
+  --hand-card-w: min(4.0rem, 16vw);
 
   position: relative;
   justify-content: flex-start;
@@ -900,6 +945,30 @@ body {
 }
 
 /*
+ * Who the round just scored took out of the match — the same ring whose turn it is wears,
+ * in the colour the news actually is, and on the same one upright row (issue #142). The two
+ * cannot be on at once: a scored round has no turn to be waiting on.
+ */
+.table-seat--went-out .table-seat__label {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+/*
+ * A seat the match has gone on without (issue #144): still exactly where it was, and dimmed
+ * — the table does not close up around whoever is left, so a seat means one player for the
+ * life of the room and a glance says who is still in.
+ *
+ * The whole seat rather than its label, which is the opposite of the ring above and is the
+ * difference between news and a standing fact: the ring is a thing that just happened to one
+ * row, this is the seat entire receding — cards, name and score together — behind the ones
+ * still being played. Opacity alone, so nothing moves and no card in flight has to be told
+ * about it.
+ */
+.table-seat--out {
+  opacity: 0.38;
+}
+
+/*
  * The fan. Its size comes from `fanFootprint` and its push off the edge from
  * `fanOverhang`, both inline, both in card widths — nothing about the arc is written
  * twice, here or there.
@@ -1067,6 +1136,15 @@ body {
 /* Whose turn it is, for the viewer's own row — the same ring an opponent's label wears. */
 .you--turn {
   box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/*
+ * And the round that took them out, in the same place a seat's is (issue #142). The viewer's
+ * own row is never dimmed the way an out seat is (issue #144): it is the row they are reading
+ * the table from, and the bar where their hand was already says they are out in words.
+ */
+.you--went-out {
+  box-shadow: inset 0 0 0 1px var(--danger);
 }
 
 .player__name {
@@ -1428,7 +1506,7 @@ body {
  * exists to avoid (issue #78).
  */
 .hand {
-  --card-w: min(4.0rem, 16vw);
+  --card-w: var(--hand-card-w);
 
   display: flex;
   justify-content: center;
@@ -1437,6 +1515,33 @@ body {
   /* Room above for a chosen card to rise into without moving the row. */
   padding: 0.75rem 0 0;
   list-style: none;
+}
+
+/*
+ * The row the hand was in, for a player the match has gone on without (issue #143).
+ *
+ * Sized off the hand's own card width and aspect so it holds about the room a hand held:
+ * everything above it — the felt, the seats, the line saying how the round is going — keeps
+ * the position it had while this player was still playing, which is the whole of what
+ * "spectating feels like staying" comes down to on this screen.
+ *
+ * One control in it, and centred with the sentence rather than pushed to an edge: there is
+ * nothing else here to tell it apart from, and nothing else here that should read as a move.
+ */
+.spectating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: calc(var(--hand-card-w) * 7 / 5 + 0.75rem);
+  padding: 0.75rem 0 0;
+  text-align: center;
+}
+
+.spectating__said {
+  color: var(--ink-dim);
+  font-size: 0.9rem;
 }
 
 /* Chosen, and not yet sent anywhere. */

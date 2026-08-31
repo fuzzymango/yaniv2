@@ -51,6 +51,8 @@ import {
 import { PlayingCard } from "../shared/PlayingCard.tsx";
 import { seatBox } from "../ghosts.ts";
 import type { Zone } from "../seating.ts";
+import type { SeatStatus } from "../status.ts";
+import { STATUS_LABEL, seatStatus } from "../status.ts";
 
 /**
  * One side of the felt, holding the seats `seatZones` dealt it, in the order it dealt them —
@@ -65,18 +67,61 @@ interface SeatProps {
   name: string;
   /** Whether the table is waiting on this player — the whole seat says so, not one row of it. */
   isTurn?: boolean;
+  /**
+   * Whether the match has gone on without this player (docs/rules.md §7, issue #144). The
+   * seat stays exactly where it is and is drawn darkened, in every phase and whoever is
+   * behind it — a bot's seat dims like anybody else's, so a glance says who is left.
+   */
+  isOut?: boolean;
+  /**
+   * Whether the round just scored is the one that took them out. The news rather than the
+   * standing: it marks the label at round end, where `isOut` says nothing yet, because the
+   * round on the screen is still theirs and their hand in it is there to be read.
+   */
+  wentOut?: boolean;
+  /**
+   * What is up with the player behind this seat, or null when nothing is: gone for good,
+   * away, or watching a match they are out of (issue #146). One slot per seat, said in one
+   * word, and empty for the two ordinary cases — somebody playing, and a bot.
+   */
+  status?: SeatStatus | null;
   /** What else the label says about them: their score, their count, what a round cost them. */
   detail: ReactNode;
   /** Their cards, however the screen using this draws them. */
   children: ReactNode;
 }
 
-export function Seat({ zone, name, isTurn = false, detail, children }: SeatProps) {
+export function Seat({
+  zone,
+  name,
+  isTurn = false,
+  isOut = false,
+  wentOut = false,
+  status = null,
+  detail,
+  children,
+}: SeatProps) {
+  // What a seat can be other than ordinary, and no two of them are ever on at once: a
+  // scored round has no turn to be waiting on, and a seat the round just took out is not
+  // dimmed until the next one is dealt.
+  const state = `${isTurn ? " table-seat--turn" : ""}${isOut ? " table-seat--out" : ""}${
+    wentOut ? " table-seat--went-out" : ""
+  }`;
   return (
-    <div className={`table-seat table-seat--${zone} ${isTurn ? "table-seat--turn" : ""}`}>
+    <div className={`table-seat table-seat--${zone}${state}`}>
       {children}
       <p className="table-seat__label">
         <span className="table-seat__name">{name}</span>
+        {/*
+          Immediately after the name, and before the numbers: it is a fact about the person
+          rather than about their round, and it is the reason somebody is looking at this
+          seat at all when it is there to be read.
+        */}
+        {status && (
+          <span className={`seat__status seat__status--${status}`}>
+            {STATUS_LABEL[status]}
+          </span>
+        )}
         {detail}
       </p>
     </div>
@@ -255,21 +300,32 @@ export function CascadeReveal({ cards, zone }: { cards: readonly Card[]; zone: Z
  * The count is in words as well as in cards because most of the fan is off the edge of the
  * screen by design — the fan says *a hand*, and exactly how big it is stays a number worth
  * reading rather than counting, which is what the text row this replaces always said.
+ *
+ * A seat the match has gone on without is this same seat, darkened where it has always sat
+ * (issue #144): the round was dealt without them, so the fan they are holding is empty and
+ * the count says zero — which is what being out looks like, not a case to draw differently.
+ *
+ * What is *up* with the player behind it is the label's status slot (issue #146), read off
+ * the same view by `seatStatus` — one word or none, and none is a bot or somebody playing.
  */
 export function OpponentSeat({
   zone,
   opponent,
   isTurn,
+  isOut,
 }: {
   zone: Zone;
   opponent: OpponentView;
   isTurn: boolean;
+  isOut: boolean;
 }) {
   return (
     <Seat
       zone={zone}
       name={opponent.name}
       isTurn={isTurn}
+      isOut={isOut}
+      status={seatStatus(opponent)}
       detail={
         <>
           <span className="player__cards">{opponent.handSize} cards</span>

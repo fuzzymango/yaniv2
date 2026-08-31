@@ -8,8 +8,9 @@
  * things to look past on every turn. Behind an icon they cost a tap on the rare occasion
  * anybody wants them, which is usually once: "why is Yaniv not lighting up at seven?"
  *
- * The bar it sits in belongs to the screen rather than to this component, because the host
- * has a second icon in it — closing the room (`WayOut.tsx`).
+ * The bar it sits in belongs to the screen rather than to this component. It is the only
+ * thing in that bar now (docs/adr/0012), but the bar is the screen's furniture and this is
+ * one control put into it.
  *
  * Read-only for everybody, host included, because by now they are read-only *for*
  * everybody: `startGame` locks them for the life of the room and `playAgain` never passes

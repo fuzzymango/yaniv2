@@ -83,24 +83,24 @@ export interface ClientToServerEvents {
    * `SLAPDOWN_NOT_AVAILABLE`, the same as never having had a window at all.
    */
   slapDown: (ack: Ack<null>) => void;
+  /**
+   * Deal the next round from a scored one. Asked by any player still in the match —
+   * nobody is host once the cards have gone out (docs/adr/0012) — and refused to a seat
+   * the match has gone on without with `NOT_IN_MATCH`.
+   */
   startNextRound: (ack: Ack<null>) => void;
-  /** Host only, from a finished match: another match for the same table, dealt at once. */
+  /**
+   * From a finished match: another match for the same table, dealt at once. Asked by
+   * anyone still in the room, spectators included — a match may have been won by a bot,
+   * and a bot asks for nothing. docs/adr/0012.
+   */
   playAgain: (ack: Ack<null>) => void;
   /**
-   * Leave the room, from the lobby or a finished match. What that costs the rest of the
-   * table is the server's decision, not the caller's: a non-host frees their own seat,
-   * the host closes the room. See CONTEXT.md.
+   * Leave the room, from the lobby or a finished match. It costs the rest of the table
+   * nothing: the seat is freed or marked, and the room plays on for whoever remains —
+   * there is no longer any way for one player to end everyone else's game. See CONTEXT.md.
    */
   exitToMenu: (ack: Ack<null>) => void;
-  /**
-   * Host only: end the room for everyone, from any phase. The one way a room is closed
-   * other than by the game's own rules — a dropped connection no longer does it.
-   *
-   * Unlike `exitToMenu` this is not gated on the phase: a table that has stopped going
-   * anywhere mid-round is exactly the one a host needs to be able to end. Everyone else
-   * hears `roomClosed`; the closer hears their own ack instead. `NOT_HOST` otherwise.
-   */
-  closeRoom: (ack: Ack<null>) => void;
 }
 
 export interface ServerToClientEvents {
@@ -108,11 +108,5 @@ export interface ServerToClientEvents {
   gameStateUpdate: (view: PlayerGameView) => void;
   playerJoined: (playerName: string) => void;
   playerLeft: (playerName: string) => void;
-  /**
-   * The room is gone and this connection is no longer in it. Distinct from a state
-   * update because there is no longer a state to publish — it is the last thing a
-   * player hears about that room.
-   */
-  roomClosed: (reason: string) => void;
   errorMessage: (error: GameError) => void;
 }

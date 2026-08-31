@@ -36,7 +36,10 @@ multi-deck support is ever added, ids must gain a copy suffix or become UUIDs.
 - Each player is dealt **5 cards**.
 - After dealing, one card is turned face up from the draw pile to start the discard.
   That card is available to be picked up by the first player.
-- Turn order is join order, and does not change between rounds.
+- Turn order is join order, and covers the players still in the match: a player who goes
+  out (§7) drops out of it, and everyone left keeps their relative order. Where a player
+  sits at the table is a separate thing and does not change — a seat stays where it was for
+  the life of the room, whether or not its player is still in the match.
 - The player who opens round 1 is chosen **uniformly at random** from the seated
   players (see [ADR-0001](adr/0001-random-starting-player.md)). In every later round,
   the player who *won* the previous round starts (see §6).
@@ -142,25 +145,66 @@ otherwise the caller.
 
 ---
 
-## 7. Scoring and end of match
+## 7. Scoring, elimination and the end of the match
 
-Round scores accumulate. The match ends as soon as any player's total is **greater than
-100**. The player with the **lowest** total wins; ties mean multiple winners.
+Round scores accumulate.
 
 Whenever a round adds to a player's total (a positive score for that round) and the
 resulting total lands **exactly** on a multiple of 50, that player's score drops by 50 on
-the spot, before the match-end check runs — which can pull them back under 100 and save
-them from busting. The round winner (whose own delta is 0) never triggers this, even if
-already sitting on a multiple of 50, and a round that jumps past a multiple without landing
-on it exactly (45 → 53, say) triggers nothing. At most one reduction per player per round,
-however large the delta. Landing on 100 is not special-cased as a first or only trigger —
-150, 200 and every later multiple of 50 reduce exactly the same way. Always on, for every
-match — there is no setting that turns it off.
+the spot, before the elimination check below — which can pull them back under the limit and
+save them from going out. The round winner (whose own delta is 0) never triggers this, even
+if already sitting on a multiple of 50, and a round that jumps past a multiple without
+landing on it exactly (45 → 53, say) triggers nothing. At most one reduction per player per
+round, however large the delta. Landing on 100 is not special-cased as a first or only
+trigger — 150, 200 and every later multiple of 50 reduce exactly the same way. Always on,
+for every match — there is no setting that turns it off.
 
-A finished match may be **played again** by the same table: every score returns to 0, the
-round count starts over, and round 1 is dealt straight away with its opening player drawn
-at random exactly as in §2. Anyone who has left in the meantime is simply not in the new
-match — their seat is not refilled.
+**Elimination.** Once a round is scored, a player whose total is **strictly greater than
+the room's max score** — 100 unless the room says otherwise — is **out of the match**. They
+are dealt no further hands, take no further turns, and score nothing more; their total is
+frozen where it stood when they went out. Everyone else plays on.
+
+The order is fixed and the milestone rule depends on it: the round's scores are added
+first, then any milestone reduction is applied, and only then is each total compared with
+the limit. So a total landing exactly on a milestone is reduced *before* the comparison —
+at the default limit, a player who would otherwise be out on 150 is on 100 and still in.
+
+**The match ends when exactly one player is left in it, and that player is the winner.**
+Not the lowest total: the winner is whoever outlasted everybody, and their score is the
+record of how they got there rather than the thing being compared.
+
+A **two-player** match needs no special case, and there is deliberately none. One of the
+two crossing the line leaves exactly one player in the match, so the round that knocks
+somebody out is the round that ends the match — which is what a two-player game has always
+done.
+
+**Zero survivors is unrepresentable.** Every round has a player who scores nothing for it —
+the round winner, who is the Assafer if there was an Assaf and the caller otherwise (§6),
+and whose delta is 0 by that rule rather than by what they happened to be holding. Both
+scoring and the milestone rule only ever leave a total where it was or lower it, so that
+player's total cannot have risen. Whoever wins a round therefore cannot be knocked out by
+it, and no round can empty the match. It follows that the next round always has its opening
+player (§6), and that "exactly one left" is reachable from every position rather than a
+condition play might step over.
+
+**Leaving.** A player may give up their seat at any point, and doing so takes them out of
+the match on the same terms as elimination: no further hands, no further turns, nothing more
+scored, and no way back into that match. Mid-round they are taken out of the round they are
+in rather than the round being abandoned — the hand they were holding is **buried** (§5), so
+the pack the rest of the round is played from is still whole, they come out of the turn
+order, and the turn passes to the next player if it was theirs. They are scored for nothing
+that round, whatever they were holding when they got up.
+
+A departure is therefore the second way a match can end: if it leaves exactly one player,
+that player wins it there and then, and no further round is dealt. Unlike elimination this
+*can* be reached from a round that was never scored, so a match may end with no final round
+to show.
+
+A finished match may be **played again** by the same table: every score returns to 0, every
+elimination is cleared so that everyone still in the room is back in the match, the round
+count starts over, and round 1 is dealt straight away with its opening player drawn at
+random exactly as in §2. Anyone who has left in the meantime is simply not in the new match
+— their seat is not refilled.
 
 ---
 

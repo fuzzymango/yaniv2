@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { callYaniv, removePlayer } from "../../src/game.ts";
-import { serializeStateForPlayer } from "../../src/serialize.ts";
+import { NO_CONNECTIONS, serializeStateForPlayer } from "../../src/serialize.ts";
 import { renderMainMenu, renderView } from "../../scripts/cli/render.ts";
 import { makeState, unwrap } from "../helpers.ts";
 
@@ -29,6 +29,7 @@ function lobbyView(viewerId: string) {
       ],
     }),
     viewerId,
+    NO_CONNECTIONS,
   );
 }
 
@@ -52,7 +53,7 @@ function roundEndView(viewerId: string, graceHand: string[]) {
       "p1",
     ),
   );
-  return serializeStateForPlayer(ended, viewerId);
+  return serializeStateForPlayer(ended, viewerId, NO_CONNECTIONS);
 }
 
 describe("renderView", () => {
@@ -115,6 +116,7 @@ describe("renderView", () => {
         currentTurnPlayerId: "p1",
       }),
       "p1",
+      NO_CONNECTIONS,
     );
 
     const frame = plain(renderView(view));
@@ -141,6 +143,7 @@ describe("renderView", () => {
         currentTurnPlayerId: "p1",
       }),
       "p1",
+      NO_CONNECTIONS,
     );
 
     const frame = plain(renderView(view));
@@ -172,13 +175,14 @@ describe("renderView", () => {
         serializeStateForPlayer(
           makeState({ ...table, slapdown: { playerId: "p1", cardId: "spades-7" } }),
           "p1",
+          NO_CONNECTIONS,
         ),
       ),
     );
     assert.match(open, /slap/i, "the word that takes it is on the screen");
 
     const shut = plain(
-      renderView(serializeStateForPlayer(makeState(table), "p1")),
+      renderView(serializeStateForPlayer(makeState(table), "p1", NO_CONNECTIONS)),
     );
     assert.doesNotMatch(shut, /slap/i, "and is not offered when there is no window");
   });
@@ -200,6 +204,7 @@ describe("renderView", () => {
         slapdown: { playerId: "p1", cardId: "spades-7" },
       }),
       "p2",
+      NO_CONNECTIONS,
     );
 
     assert.doesNotMatch(plain(renderView(view)), /slap/i);
@@ -257,7 +262,7 @@ describe("renderView", () => {
   }
 
   it("shows final standings and the winner when the match is over", () => {
-    const view = serializeStateForPlayer(endedMatch(), "p1");
+    const view = serializeStateForPlayer(endedMatch(), "p1", NO_CONNECTIONS);
     assert.equal(view.phase, "gameEnd", "fixture should end the match");
 
     const frame = plain(renderView(view));
@@ -268,17 +273,15 @@ describe("renderView", () => {
     assert.doesNotMatch(frame, /Grace \(you\)/, "and nobody else's");
   });
 
-  it("offers the host another match, and everyone else the wait", () => {
-    const view = serializeStateForPlayer(endedMatch(), "p1");
+  /** Anyone still in the room may deal another match, so everyone reads the same line. */
+  it("offers another match to everybody, in the same words", () => {
+    for (const seat of ["p1", "p2"]) {
+      const frame = plain(renderView(serializeStateForPlayer(endedMatch(), seat, NO_CONNECTIONS)));
 
-    const host = plain(renderView(view));
-    assert.match(host, /again/i, "the host is told they can deal another match");
-    assert.match(host, /menu/i, "and that they can leave instead");
-
-    const guest = plain(renderView(serializeStateForPlayer(endedMatch(), "p2")));
-    assert.match(guest, /waiting/i, "only the host may replay, so everyone else waits");
-    assert.match(guest, /menu/i, "but leaving is anyone's to do");
-    assert.doesNotMatch(guest, /type again/i);
+      assert.match(frame, /type again/i, `${seat} is told they can deal another match`);
+      assert.match(frame, /menu/i, "and that they can leave instead");
+      assert.doesNotMatch(frame, /waiting for the host/i);
+    }
   });
 
   /**
@@ -288,7 +291,7 @@ describe("renderView", () => {
    */
   it("keeps a departed player in the standings, named and marked as gone", () => {
     const left = unwrap(removePlayer(endedMatch(), "p2"));
-    const frame = plain(renderView(serializeStateForPlayer(left, "p1")));
+    const frame = plain(renderView(serializeStateForPlayer(left, "p1", NO_CONNECTIONS)));
 
     assert.match(frame, /Grace \(left\)\s+115/, "who left, and what they finished on");
     assert.match(frame, /Ada \(you\)\s+0/, "alongside whoever stayed");
@@ -314,7 +317,7 @@ describe("renderView", () => {
     assert.equal(ended.phase, "gameEnd", "fixture should end the match");
     assert.deepEqual(ended.winnerIds, ["p2"], "fixture's winner is the one who leaves");
 
-    const frame = plain(renderView(serializeStateForPlayer(unwrap(removePlayer(ended, "p2")), "p1")));
+    const frame = plain(renderView(serializeStateForPlayer(unwrap(removePlayer(ended, "p2")), "p1", NO_CONNECTIONS)));
 
     assert.match(frame, /← winner/, "a finished match always has one");
   });

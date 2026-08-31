@@ -1,5 +1,10 @@
 # The client is built before reconnect; reconnect gates hosting, not the client
 
+> The room behaviour described below is the position as it stood when this was decided. A
+> dropped connection has not destroyed a room since reconnect landed, and the host-closes
+> asymmetry, `closeRoom` and `roomClosed` are gone with
+> [ADR-0012](0012-the-host-retires-at-the-first-deal.md). The decision itself stands.
+
 A dropped connection destroys its room outright, so a browser refresh ends the match for
 everyone in it. That is a good deal worse in a browser than it was in a terminal, and the
 question was whether reconnect had to land before any client work began.

@@ -63,22 +63,32 @@ the page, and nobody has to be re-found. What changes is what changed:
   what they are for.
 - **The turn line says how the round ended**, in place. A heading above the seats would push
   every one of them down the page at the one moment they must not move.
-- **The Yaniv call becomes the deal** — the host's control, or the reason there is none, in
-  the slot the call was in.
+- **The Yaniv call becomes the deal** — offered to any viewer still in the match, or the line
+  saying what is being waited for, in the slot the call was in (docs/adr/0012).
+- **Anybody the round took out of the match is tagged `OUT`** (issue #142), on their label
+  beside the marks saying how the score was arrived at, with the same ring round it that
+  whose-turn-it-is wears — in the colour the news actually is, and the two can never be on
+  together. It is *all* that is added: no prose, and the eliminated player's hand and round
+  score are still shown, so a round that ended somebody's match and one that did not are the
+  same screen in two states. Whose round it was is the seat's own `outInRound` against the
+  round being drawn, not the viewer's `roundNumber` — the record is what the rest of the
+  screen is reading.
 
 Seats are placed by the live roster sorted by `byRelativeSeat` in **both** phases, and the
 round's own record is looked up by id against whoever is already in a zone. Two placements
-could disagree; one cannot. (Mid-round leaving is impossible, so the round's recorded order
-and `turnOrder` agree here in every real case — reusing one calculation forecloses the drift
-by construction rather than by invariant.) A `roundEnd` with a null `roundResult` — a wire
-state the server does not produce — still falls through to `Room.tsx`.
+could disagree; one cannot — which matters more since a player can leave mid-round (#147) and
+the round's recorded order can therefore differ from the roster the table is drawn off. The
+record is asked what a seat *scored*, never where it sits; a seat with no record in the round
+being drawn is simply one the round has nothing to say about. A `roundEnd` with a null
+`roundResult` — a wire state the server does not produce — still falls through to `Room.tsx`.
 
-`byRelativeSeat` sorts turn order relative to the viewer's own seat rather than absolute
-position, so the sweep round the felt always starts with the next player to act after them —
-`bySeat` reads the same way round on every screen only starting from the same seat on every
-screen, which the table has no use for since the viewer's own seat is never one of the zones.
-The lobby's roster listing (`Lobby.tsx`) is a different case — every seat, the viewer's own
-included, is listed in one place — and keeps the absolute `bySeat`.
+`byRelativeSeat` sorts the **roster** relative to the viewer's own seat rather than absolutely,
+so the sweep round the felt starts from the seat next along from theirs — `bySeat` reads the
+same way round on every screen only starting from the same seat on every screen, which the
+table has no use for since the viewer's own seat is never one of the zones. The anchor is
+their own seat and not the next player to act, for a reason that belongs with the wire's two
+lists below. The lobby's roster listing (`Lobby.tsx`) is a different case — every seat, the viewer's own included, is
+listed in one place — and keeps the absolute `bySeat`.
 
 `seatZones` then fills the zones in **contiguous runs**, not round-robin (issue #116): the
 first opponents go to the left column, the next to the top, the last to the right, so a
@@ -86,6 +96,12 @@ doubled zone holds two players who act one after the other. The per-zone counts 
 round-robin's — every zone filled before any doubles, `right` never doubling at all — and only
 which opponents land in each changes. A round-robin fed a viewer-relative order seated the 1st
 and 4th opponents side by side, which is turn order in neither direction.
+
+The list being dealt round is roster order, which is turn order with the seats that are out
+still standing in their places: neighbours on the felt still act one after the other, with
+whoever is out passed over rather than moved. `seatZones` is told none of that — it reads the
+order it is handed and nothing else, which is why one function seats a live round, a scored
+one and a finished match alike.
 
 The **left column alone is reversed**. The DOM draws a column top-down and the viewer's own
 hand sits at the bottom of the screen, so the earliest of the two has to be the lower for the
@@ -113,6 +129,115 @@ Three things still separate the revealed hand from the played one (issues #56, #
   since issue #130 it is a panel floating over the same seated table, which reveals the final
   round through the codepath above while the standings sit in front of it.
 
+## Watching it, once the match has gone on without you
+
+**The same table again** (issue #143). A player whose total crosses the room's max score is out
+of the match and stays in the room as a **spectator**: no dialog to answer, no screen to be
+moved to, and everything above the bottom of the screen exactly as it was a moment before —
+the felt, the seats, the turn line and the move-history drawer all keep working. Watching is
+the full experience minus the acting.
+
+- **The wire says which of the two they are, not the screen.** `SelfView` is a tagged union,
+  and `Table.tsx` narrows it once at the top (`yours`) beside the phase branch it already
+  makes. A spectator's variant has no `hand` and no `slapdownEligible` at all, so this screen
+  cannot draw a hand for somebody who is not holding one — the same guarantee `OpponentView`
+  has always given about everybody else's cards.
+- **The hand slot becomes a bar of about the same height** (`.spectating`), saying they are out
+  and carrying nothing else — and nothing at all at `gameEnd`, where the panel
+  over the table carries its own and the bottom of the screen is given up as the topbar is. The size is the whole point: a bar the hand's
+  height leaves every seat, the felt and the pile where they were, which is what makes
+  spectating read as staying rather than as being moved somewhere. Its `min-height` is derived
+  from `--hand-card-w`, the one place the hand's card size is named, so the two cannot drift.
+- **No control in it, since issue #147.** The bar carried a `WayOut` until anybody could leave
+  at any time; now the corner beside the settings carries one leave for everybody looking at
+  the table, watcher and player alike, and a second button saying the same thing lower down the
+  same screen would be two answers to one tap. That one asks before it acts
+  (`LeaveTable.tsx`) — nobody's exit costs anyone else their match (docs/adr/0012), but this is
+  the one taken from inside a match that then goes on without them. Nothing in the bar should
+  read as a move, so the Yaniv slot renders empty for a spectator too. The scored-round branch of that slot is
+  deliberately untouched *as a slot* — it now offers the deal to any viewer still in the match
+  and the line to whoever is only watching, which is the server's rule (`NOT_IN_MATCH`) drawn
+  rather than a rule of this screen's.
+- **The round that took them out still reveals their hand**, in the row the bar otherwise
+  fills. That round was scored with them in it, so its own record holds the cards they played,
+  and they are read off `roundResult` exactly as every other seat's are — being dimmed out of
+  the next round does not retract the last one. From the following deal on there is no record
+  of theirs to find, and the bar is what the row says.
+- **The footer keeps their name and their frozen total** and drops the hand value, since there
+  is no hand to weigh — the same row in the same place, saying only what is still true.
+
+## An out seat keeps its place, darkened
+
+**The table does not close up around whoever is left** (issue #144). To everyone still playing,
+an eliminated seat stays exactly where it has sat all match, drawn dim — so a seat means one
+player for the life of the room, and a glance says who is still in.
+
+- **Seating comes off the roster, not off turn order** (`seating.ts`, and "Turn order vs.
+  seating" in `CONTEXT.md`). The two lists were equal until elimination separated them, and
+  `turnOrder` now shrinks: a table sorted by it would slide every remaining player one seat
+  along at the moment somebody went out — a rearrangement nobody made, mid-match. The roster is
+  append-only from the first deal ([ADR-0016](adr/0016-seats-outlive-their-players.md)), so
+  nobody moves — and a seat whose player has **left** holds its place exactly as an eliminated
+  one does, dim and marked, rather than being spliced out from under whoever sat after it.
+  With nobody out the two are the same list and the table is seated exactly as it always was.
+- **The wire carries both lists.** A client cannot recover the roster's order from what it is
+  sent — the viewer is lifted out of `opponents` into `you`, leaving a hole exactly where the
+  seat a viewer-relative sweep anchors on would be. So `PlayerGameView.seating` is the roster in
+  its own order, every seat included, beside the `turnOrder` that holds only the players still
+  playing. The sweep anchors on the viewer's **own** seat rather than on the next player to act,
+  which is what keeps it meaningful for a spectator: they are seated like everybody else and are
+  not in turn order at all.
+- **Dim is the whole seat, and it is opacity.** Cards, name and score recede together, because
+  this is a standing fact about a seat rather than news about one row of it — which is what the
+  red ring on the label is, and why they are two classes (`.table-seat--out` against
+  `.table-seat--went-out`). Opacity moves nothing, so a card in flight needs to know nothing
+  about it, and a seat drawn for a hand of five keeps the box it reserved.
+- **Dim from the next deal on, not the round they went out in.** That round is scored with them
+  in it: their hand and what it cost them are exactly what a scored table is for reading, and it
+  wears the `OUT` mark (issue #142) instead. `Table.tsx` asks it as one question — out, and out
+  before the round on the screen. At `gameEnd` that leaves the last player knocked out undimmed,
+  deliberately: the round on the screen is the one that just ended the match, their hand in it is
+  the reason it ended, and dimming the cards everybody has come to look at to say what the
+  standings over them already say would be the wrong trade.
+- **A bot's seat dims like anybody else's.** Who is behind a seat is not what being out looks
+  like, and the table would read as two rules if it were.
+- **The viewer's own row is never dimmed.** It is the row they are reading the table from, and
+  the bar where their hand was already says they are out, in words (issue #143).
+
+## One slot per seat says what is up with the player behind it
+
+**A table that has gone quiet explains itself** (issue #146). Each seat's label carries one
+status slot, holding one word or nothing: **left**, **away** or **watching**, in that
+priority (`status.ts`, `seatStatus`). A player who dropped is not somebody the table is idly
+waiting on, and a player who gave the seat up is not somebody to wait for at all.
+
+- **A priority, not a set of badges.** A seat can be several of these at once — somebody who
+  left is out of the match and has no connection either — so the slot says the most final
+  thing that is true of it. Left beats away beats watching, and "watching" is the one thing
+  it must never say of a table nobody is looking at.
+- **Nothing at all is the ordinary case, and covers two seats**: somebody playing, and a
+  **bot**. A bot is connected always and watching never, so it falls out of the rule rather
+  than being a case in it — which is what makes an empty slot unambiguous. No client is told
+  which seats are bots, and none needs to be.
+- **The word comes off the wire, not off the screen.** `connected` and `spectating` are sent
+  for every seat, derived by the server from the sockets in the room at the moment it
+  publishes ([ADR-0013](adr/0013-connection-derived-from-the-live-sockets.md)). A client
+  that worked out "watching" for itself would have to know which seats were bots.
+- **Brighter than the marks beside it, on purpose.** An out seat is faded to a little over a
+  third by `.table-seat--out`, and opacity on a parent is a ceiling its children cannot climb
+  back out of — so the one thing on a dimmed seat still worth reading gets full ink and a
+  stronger border. Only **away** is coloured, being the one that may yet change; a table with
+  three watchers should not look like a table with three problems.
+- **The same slot in both phases.** A scored round draws it exactly as a live one does: who
+  is there is as true while the table waits on the deal as while it waits on a turn.
+- **The lobby's roster rows carry it too**, off the same `seatStatus`. Only "away" can come
+  up there — nobody is out of a match that has not been dealt, and a player who leaves a
+  lobby is spliced out of the roster — and it is worth saying for the same reason: a room
+  waiting to start should not be waiting on a phone that locked itself.
+- **The viewer's own row has no slot**, and needs none. They are connected by definition,
+  they have not left, and if they are watching the bar where their hand was says so in words
+  (issue #143).
+
 ## And the finished match is that table with the standings over it
 
 **The same table once more** (issue #130). A match ending used to replace the felt with a bare
@@ -122,10 +247,10 @@ reading the same `roundResult` the serializer already populates there — no sec
 codepath, and therefore no way for the final round to be revealed differently from every other
 one. `GameEnd` is drawn over it.
 
-- **The table gives up its controls, and only those.** The topbar (settings, and the host's
-  close-room icon) and the bottom slot (the Yaniv call, or the host's deal) do not render at
-  `gameEnd`: the panel carries a settings icon and both ways out itself, and two of each on one
-  screen would be two answers to the same tap. The felt keeps rendering — the deck count, the
+- **The table gives up its controls, and only those.** The topbar (the settings icon) and the
+  bottom slot (the Yaniv call, or the deal) do not render at `gameEnd`: the panel carries a
+  settings icon and the way out itself, and two of each on one screen would be two answers to
+  the same tap. The felt keeps rendering — the deck count, the
   last discard and the line saying how the final round ended are the context the panel floats
   over, and all three are inert already. The hand and the seats are the scored round's, which is
   untappable by the same branch that makes it untappable at `roundEnd`.

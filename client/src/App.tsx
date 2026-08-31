@@ -72,7 +72,6 @@ export function App({ session }: { session: Session }) {
         onStart={session.startGame}
         onUpdateSettings={session.updateSettings}
         onExit={session.exitToMenu}
-        onCloseRoom={session.closeRoom}
       />
     );
   }
@@ -116,7 +115,7 @@ export function App({ session }: { session: Session }) {
         onCallYaniv={session.callYaniv}
         onNextRound={session.startNextRound}
         onSlapDown={session.slapDown}
-        onCloseRoom={session.closeRoom}
+        onExit={session.exitToMenu}
       />
     );
 
@@ -137,7 +136,6 @@ export function App({ session }: { session: Session }) {
           busy={busy}
           onPlayAgain={session.playAgain}
           onExit={session.exitToMenu}
-          onCloseRoom={session.closeRoom}
         />
       </>
     );

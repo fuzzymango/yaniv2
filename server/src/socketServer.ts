@@ -9,8 +9,11 @@
 import type { Server as HttpServer } from "node:http";
 import type { Ack, ClientToServerEvents, ServerToClientEvents } from "@yaniv/shared";
 import { Server, type Socket } from "socket.io";
+import { createAutoDealer } from "./autoDeal.ts";
 import type { BotTurnRunnerOptions } from "./botTurns.ts";
 import { createBotTurnRunner } from "./botTurns.ts";
+import type { Clock } from "./clock.ts";
+import { systemClock } from "./clock.ts";
 import {
   callYaniv,
   playAgain,
@@ -23,6 +26,8 @@ import {
 } from "./game.ts";
 import { err, ok, type Result } from "./result.ts";
 import type { RoomManager } from "./roomManager.ts";
+import { createRoomSweeper, unattended } from "./roomSweep.ts";
+import { createRoomTimers } from "./roomTimers.ts";
 import type { Rng } from "./rng.ts";
 import { serializeStateForPlayer } from "./serialize.ts";
 import type { ActionResult, GameState } from "./state.ts";
@@ -65,11 +70,15 @@ type YanivSocket = Socket<
  * on and how long they think for, both defaulted, so production construction is one line
  * and unchanged.
  *
- * The runner's own options, rather than a copy of them — the two cannot drift, and there
- * is nothing else here a server is built with. A test seam first: a suite about something
- * other than timing switches the pause off, and one about timing drives the clock by hand.
+ * The runner's own options plus the clock every timer in the server is set on — the one
+ * thing owned here rather than by a behaviour, since the registry it builds is shared by
+ * all of them. A test seam first: a suite about something other than timing switches the
+ * pause off, and one about timing drives the clock by hand.
  */
-export type SocketServerOptions = BotTurnRunnerOptions;
+export interface SocketServerOptions extends BotTurnRunnerOptions {
+  /** Defaults to real time. A test drives one by hand instead. */
+  clock?: Clock;
+}
 
 /** Attach the game's event handlers to a new Socket.io server on `httpServer`. */
 export function createSocketServer(
@@ -78,7 +87,10 @@ export function createSocketServer(
   options: SocketServerOptions = {},
 ): YanivServer {
   const io: YanivServer = new Server(httpServer);
-  const botTurns = createBotTurnRunner(rooms, options);
+  const timers = createRoomTimers(options.clock ?? systemClock);
+  const botTurns = createBotTurnRunner(rooms, timers, options);
+  const autoDeal = createAutoDealer(rooms, timers);
+  const roomSweep = createRoomSweeper(rooms, timers);
 
   /**
    * Send every connection in a room its own view of the current state.
@@ -92,16 +104,61 @@ export function createSocketServer(
    * Never `io.to(room).emit(state)`: the raw state holds every hand and the draw pile
    * order. One send per socket, each through the serializer, is the only shape that
    * cannot leak. See serialize.ts.
+   *
+   * It is also where the room's auto-deal is reconsidered (issue #148), and there is one
+   * reason for that rather than two: the answer turns on the position and on who is
+   * connected, and publishing is the one moment both are in hand and the only moment
+   * either can have changed. Hanging it off each handler instead would make a new one
+   * that forgets it a table that stalls, which is exactly the failure this exists to
+   * remove. `consider` is idempotent, so publishing for any other reason — a seat going
+   * quiet, a seat sat back down at — neither starts a second countdown nor restarts the
+   * one that is running.
    */
   function broadcastState(roomCode: string): void {
     const state = rooms.getState(roomCode);
     if (!state) return;
 
-    for (const member of membersOf(roomCode)) {
+    const members = membersOf(roomCode);
+    const connected = connectedPlayers(members);
+    for (const member of members) {
       const playerId = member.data.session?.playerId;
       if (!playerId) continue;
-      member.emit("gameStateUpdate", serializeStateForPlayer(state, playerId));
+      member.emit("gameStateUpdate", serializeStateForPlayer(state, playerId, connected));
     }
+
+    // The deal it may schedule is `act`'s own tail: the position goes out, and the seat
+    // it opened on is played if it is a bot's — which, here, it always is.
+    autoDeal.consider(roomCode, connected, () => {
+      broadcastState(roomCode);
+      runBotTurns(roomCode);
+    });
+
+    // And the room's own grace period, on the same grounds and out of the same two facts
+    // (issue #150): publishing is when who is connected can have changed, and a sweep
+    // hung off each handler that might empty a room would be one a new handler forgets.
+    // Both considerations are idempotent, so the two live happily on one broadcast — a
+    // room with nobody in it goes on publishing its bots' moves, and neither the deal it
+    // will not get nor the sweep it will is restarted by any of them.
+    roomSweep.consider(roomCode, connected, () => sweepRoom(roomCode));
+  }
+
+  /**
+   * Who is there right now: the player ids behind one snapshot of a room's connections
+   * (issue #146).
+   *
+   * Over the very sockets the send below is about to walk, which is the whole reason
+   * connection is derived rather than stored (docs/adr/0013) — the answer is read off the
+   * connections that exist at the moment a position is published, so there is no flag
+   * anywhere for a drop to leave stale. Taken from the snapshot rather than the room, so
+   * every view of one position agrees about who was there when it was built.
+   */
+  function connectedPlayers(members: YanivSocket[]): ReadonlySet<string> {
+    const present = new Set<string>();
+    for (const member of members) {
+      const playerId = member.data.session?.playerId;
+      if (playerId) present.add(playerId);
+    }
+    return present;
   }
 
   /**
@@ -154,20 +211,62 @@ export function createSocketServer(
   }
 
   /**
-   * Shut a room down and turn everyone in it loose. Only the host does this, so everybody
-   * else is told why rather than being left staring at a table that has stopped
-   * answering. The closer hears it as their own ack instead.
+   * A room with nobody left in it, dropped rather than left running. Nobody is told: the
+   * seat that has just gone was the last one, so there is no connection this could be
+   * news to — which is the whole difference from the host's old close-room button, and
+   * the point of removing it (docs/adr/0012). A room now ends because it is empty, never
+   * because one player decided everyone else's game was over.
    *
-   * A bot mid-think is abandoned along with the rest of it: a room that has ended stops
-   * doing things, and no entry is left behind under a code that may be issued again.
+   * Everything it had waiting on the clock is abandoned along with it — a bot mid-think
+   * today, and whatever else is scheduled per room tomorrow: a room that has ended stops
+   * doing things, and no entry is left behind under a code that may be issued again. One
+   * call, so a new timer is covered by being in the registry rather than by anyone
+   * remembering to cancel it here.
+   *
+   * A room whose players are all *disconnected* is a different question, and it is
+   * `sweepRoom`'s: they still hold their seats, and a reload is a disconnect.
    */
-  function closeRoom(roomCode: string, reason: string, closer: YanivSocket): void {
-    botTurns.cancel(roomCode);
-    for (const member of membersOf(roomCode)) {
-      if (member.id !== closer.id) member.emit("roomClosed", reason);
-      release(member, roomCode);
-    }
+  function destroyRoom(roomCode: string): void {
+    timers.cancelRoom(roomCode);
     rooms.removeRoom(roomCode);
+  }
+
+  /**
+   * The far end of a room's grace period: nobody has been connected to it for
+   * `ROOM_SWEEP_MS`, so it goes (issue #150). Nobody is told — there is no connection left
+   * that this could be news to, which is what makes it the same shape as a room whose last
+   * seat left rather than a match being ended on anybody.
+   *
+   * The question is asked once more before the room is dropped, and against the live
+   * sockets rather than the set the pause was started with. A returning connection cancels
+   * this by publishing (`broadcastState`), and `resumeSeat` seats itself before it
+   * publishes — so a claim landing in the last tick of the minute would otherwise have its
+   * room swept out from under it. One `unattended` call, so the judgement cannot come out
+   * two ways at the two ends of the same pause.
+   */
+  function sweepRoom(roomCode: string): void {
+    const state = rooms.getState(roomCode);
+    if (!state) return;
+    if (!unattended(state, connectedPlayers(membersOf(roomCode)))) return;
+    destroyRoom(roomCode);
+  }
+
+  /**
+   * Every seat *given up*: the humans have all left, or the lobby has emptied. Asked after
+   * a departure, and answered by dropping the room on the spot.
+   *
+   * Bots are counted out rather than waited on. A bot never departs and never asks for
+   * anything, so a table of them with the last human gone is a room playing to nobody —
+   * and, with no player left who could leave, one nothing else would ever end.
+   *
+   * Deliberately **not** `roomSweep.ts`'s `unattended`, which the sweep and this share a
+   * shape with and nothing else: that one asks who is *connected*, and is answered a minute
+   * later because a drop is survivable. Leaving is not, so this is answered at once — and a
+   * room left holding one seat whose player has merely dropped is this one's `false` and
+   * that one's `true`, which is the whole difference between the two exits.
+   */
+  function abandoned(state: GameState): boolean {
+    return state.players.every((p) => p.departed || p.isBot);
   }
 
   io.on("connection", (socket) => {
@@ -177,9 +276,8 @@ export function createSocketServer(
     /**
      * The caller's session and the room behind it, or the rejection to ack instead.
      *
-     * Shared by the two handlers that are not `act`-shaped — leaving and closing —
-     * because both need the room itself to decide what to do, rather than a transition
-     * to apply to it.
+     * Used by the one handler that is not `act`-shaped — leaving — because it needs the
+     * room itself to decide what to do with it, rather than only a transition to apply.
      */
     function currentRoom(): Result<{ session: Session; state: GameState }> {
       const session = socket.data.session;
@@ -264,12 +362,21 @@ export function createSocketServer(
      *
      * A room that has gone is said so plainly, since `joinRoom` already answers that
      * question for any code and there is nothing left to withhold. What is inside one is
-     * a different matter: a wrong token and a player the room never held share a single
-     * code, or a room code would become a way of fishing for the seats behind it.
+     * a different matter: a wrong token, a player the room never held and a seat that has
+     * been given up share a single code, or a room code would become a way of fishing for
+     * the seats behind it.
      *
-     * The position goes back in the ack alone. Nothing is broadcast, because nothing
-     * about the table has changed — a resume is invisible to everyone else, who are
-     * never told who is connected in the first place.
+     * That last case is checked here rather than left to the client forgetting its
+     * credential: a roster is append-only from the first deal, so a departed seat and its
+     * token now outlive the player, and a stale tab holding one would otherwise rebind to
+     * a seat its owner gave up and be handed every broadcast after it. Leaving is final,
+     * and the server is what says so.
+     *
+     * The position goes back in the ack, and the room is published to behind it: a seat
+     * that was away is being sat back down at, which is news to everyone looking at that
+     * seat (issue #146). It was invisible until connection reached the wire, and the ack
+     * still comes first — the returning client is answered by the event it sent, the way
+     * every other action here is, and the broadcast reaches it as one more position.
      */
     socket.on("resumeSeat", async (request, ack) => {
       if (socket.data.session) {
@@ -285,10 +392,13 @@ export function createSocketServer(
       }
 
       const player = getPlayer(state, playerId);
-      if (!player || player.resumeToken !== resumeToken) {
+      if (!player || player.departed || player.resumeToken !== resumeToken) {
         ack(err("INVALID_RESUME_TOKEN", "That seat cannot be resumed"));
         return;
       }
+
+      socket.data.session = { playerId, roomCode };
+      await socket.join(roomCode);
 
       /*
        * One live connection per seat, and the newer one wins. A second tab is not
@@ -296,16 +406,28 @@ export function createSocketServer(
        * the other could move out from under it. Dropped rather than merely unbound, so
        * the device it belongs to finds out — an unbound socket would sit there looking
        * connected and refusing every tap.
+       *
+       * *After* this connection is seated, not before: the drop publishes the room
+       * (issue #146), and evicting first would broadcast one position with this seat
+       * absent from the room's sockets — a reload would blink "away" at everybody on its
+       * way back to the table.
        */
       for (const member of membersOf(roomCode)) {
         if (member.id === socket.id) continue;
         if (member.data.session?.playerId === playerId) member.disconnect();
       }
 
-      socket.data.session = { playerId, roomCode };
-      await socket.join(roomCode);
-
-      ack({ ok: true, value: { view: serializeStateForPlayer(state, playerId) } });
+      ack({
+        ok: true,
+        value: {
+          view: serializeStateForPlayer(
+            state,
+            playerId,
+            connectedPlayers(membersOf(roomCode)),
+          ),
+        },
+      });
+      broadcastState(roomCode);
     });
 
     /**
@@ -406,13 +528,16 @@ export function createSocketServer(
 
     /**
      * Leave the room without dropping the connection — the one exit that is not a
-     * disconnect. Deliberately not `act`-shaped: its two outcomes are not both a
-     * `GameState` a single transition could return, so the branch lives here, where
-     * rooms and connections are owned.
+     * disconnect, and now the only way out of a room there is (docs/adr/0012).
      *
-     * The caller does not choose which outcome they get. A non-host frees their own seat
-     * and the room plays on without them; the host closes it for everyone. See CONTEXT.md
-     * for why the two phases this is allowed from behave identically.
+     * It costs the rest of the table nothing, whoever is leaving: the host is no longer
+     * a special case here, because from the lobby the role migrates to the next seat and
+     * from the first deal there is no role at all. What the leaver's own seat becomes is
+     * the transition's business — spliced out in the lobby, marked once a match exists.
+     *
+     * Deliberately not `act`-shaped: an empty room has to be dropped, and "this room no
+     * longer exists" is not a `GameState` any transition could return, so that branch
+     * lives here, where rooms and connections are owned.
      */
     socket.on("exitToMenu", (ack) => {
       const current = currentRoom();
@@ -422,24 +547,6 @@ export function createSocketServer(
       }
 
       const { session, state } = current.value;
-      if (session.playerId === state.hostId) {
-        /*
-         * The host's leave is put to the same transition as everyone else's — it owns
-         * which phases a player may leave from, and repeating that rule here would give
-         * it two homes to drift between. Only the answer differs: the roster it hands
-         * back is thrown away, and the room closed instead.
-         */
-        const allowed = removePlayer(state, session.playerId);
-        if (!allowed.ok) {
-          ack({ ok: false, error: allowed.error });
-          return;
-        }
-
-        closeRoom(session.roomCode, "the host left the room", socket);
-        ack({ ok: true, value: null });
-        return;
-      }
-
       // Read before the removal, since afterwards there is no player to read it from.
       const name = getPlayer(state, session.playerId)?.name ?? "";
 
@@ -454,52 +561,51 @@ export function createSocketServer(
       release(socket, session.roomCode);
       ack({ ok: true, value: null });
 
+      // The seat that has just gone was the last one: there is nobody to announce it to,
+      // and nothing left for the room to be.
+      if (abandoned(result.value)) {
+        destroyRoom(session.roomCode);
+        return;
+      }
+
       // The leaver is already out of the room, so this reaches exactly whoever stayed:
       // who left, and then the table they are left with.
       io.to(session.roomCode).emit("playerLeft", name);
       broadcastState(session.roomCode);
+      /*
+       * And the same tail every in-game action has (`act`), for the same reason: leaving
+       * mid-round hands the turn on where it was the leaver's (issue #147), and a turn
+       * handed to a bot is the server's to take. Without this a table would sit on a seat
+       * with no connection behind it — a wedge of exactly the kind the withdrawal from the
+       * round exists to prevent.
+       */
+      runBotTurns(session.roomCode);
     });
 
     /**
-     * End the room for everyone, from any phase. The host's alone, and the only thing
-     * that closes a room other than the game's own rules — a dropped connection no
-     * longer does, so without this a table nobody wants to keep playing would have
-     * nothing to end it.
+     * A connection going away, which costs the room nothing and is told to it anyway.
      *
-     * Not gated on the phase, unlike `exitToMenu`: a seat that has gone quiet mid-round
-     * is exactly the table a host needs to be able to abandon, and there is no hand or
-     * turn order left to protect once the room itself is going. Not `act`-shaped for the
-     * same reason `exitToMenu` is not — "the room must be destroyed" is not a `GameState`
-     * any transition could return.
+     * **Nothing is mutated here.** The seat, the player and the room are left exactly as
+     * they were, and the player behind them comes back through `resumeSeat`: backgrounding
+     * a phone's browser tab drops a socket with no chance to react, and that must not end
+     * five other people's match. The turn, if it was theirs, still waits for them.
+     *
+     * What is new (issue #146) is the broadcast. Connection is derived from the live
+     * sockets at the moment a position is published (docs/adr/0013), so the socket that has
+     * just gone is already out of the room's set — and this republishes the same position
+     * to whoever is left, which is the only way they learn a seat has gone quiet. A table
+     * waiting on somebody who is not there explains itself rather than merely stopping.
+     *
+     * It is also what starts the room's grace period, in passing rather than by name: the
+     * broadcast reconsiders the sweep, and a publication with no human behind any seat is
+     * exactly the position that asks for one (issue #150). A room nobody comes back to has
+     * a minute left, and one whose player reloads is republished to before it is up.
      */
-    socket.on("closeRoom", (ack) => {
-      const current = currentRoom();
-      if (!current.ok) {
-        ack({ ok: false, error: current.error });
-        return;
-      }
-
-      const { session, state } = current.value;
-      if (session.playerId !== state.hostId) {
-        ack(err("NOT_HOST", "Only the host can close the room"));
-        return;
-      }
-
-      closeRoom(session.roomCode, "the host closed the room", socket);
-      ack({ ok: true, value: null });
+    socket.on("disconnect", () => {
+      const session = socket.data.session;
+      if (!session) return;
+      broadcastState(session.roomCode);
     });
-
-    /*
-     * There is deliberately no `disconnect` handler. A dropped connection costs the room
-     * nothing: the seat, the player and the room are left exactly as they were, and the
-     * player behind them comes back through `resumeSeat`. Backgrounding a phone's browser
-     * tab drops a socket with no chance to react, and that must not end five other
-     * people's match.
-     *
-     * The cost is a room nobody ever comes back to, and nobody closes, living until the
-     * server restarts — an accepted leak for this pass, of the same shape as rooms being
-     * in memory at all. See CLAUDE.md.
-     */
   });
 
   return io;

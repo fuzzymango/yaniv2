@@ -29,20 +29,46 @@ Two distinct concepts, easy to conflate because both sit "before the game":
 - **Lobby** — `GameState.phase === "lobby"` (see above): a room already exists
   server-side, has a code, and players are staged in it up to the player cap.
 
-**Exit to main menu** is the action that leaves a room and returns to the main menu. It
-is available in the lobby and at `gameEnd` only — not mid-match (`playing`/`roundEnd`),
-where a seat cannot be given up part-way through a hand. **Close room** is the host's
-counterpart and the exception: available in every phase, it ends the room for everyone at
-once, and it is the only thing that ends one early — a disconnect leaves the room and the
-seat exactly as they were. Exiting is asymmetric by who invokes it, the same way in both
-phases:
+**Exit to main menu** is the action that leaves a room and returns to the main menu, and
+it is the only way out of a room there is. It is available **in every phase**, to players
+and spectators alike: nobody is trapped at a table that has gone quiet, and a seat given up
+mid-round is taken out of the round on the spot rather than the round being abandoned
+around it (`docs/rules.md` §7, "Out of the match" below).
 
-- A **non-host** player exiting is removed from `players` entirely — their seat is freed,
-  not held or bot-replaced. The room lives on for whoever remains: the lobby for the rest
-  to join and start, or the finished match's scoreboard for the host to still choose
-  between playing again and exiting.
-- The **host** exiting closes the room outright — every other human player is booted to
-  the main menu, told the room closed because the host quit.
+It means the same thing whoever invokes it, and it costs the rest of the table nothing.
+Before the first deal the leaver is removed from `players` entirely — their seat is freed,
+not held or bot-replaced; from the first deal the roster is append-only, so leaving marks
+the seat instead (**left**, see "Out of the match"). Either way the room lives on for
+whoever remains: the lobby for the rest to join and start, or the finished match's
+scoreboard for whoever is still looking at it.
+
+**A room ends when its last seat leaves**, and there is no control that ends one for
+anybody else: the **close room** action that used to be the host's exception was removed
+with [ADR-0012](docs/adr/0012-the-host-retires-at-the-first-deal.md), along with the
+asymmetry that made a host's exit cost everyone else their match.
+
+A room also ends **unattended** — with no seat held by a human who is connected — for a
+minute, which is the other way out and the one nobody takes deliberately: a tab closed, a
+phone backgrounded. A disconnect still leaves the room and the seat exactly as they were,
+and the minute is why: a reload is a disconnect, and the connection coming back inside it
+cancels the sweep. Out of the match is not out of the room — a spectator is attending one.
+[ADR-0015](docs/adr/0015-the-room-dies-with-its-last-human.md).
+
+## Host
+
+The seat that owns the **lobby**, and only the lobby: the one player who may edit the
+room's settings and deal the first round. Everyone else asking is refused `NOT_HOST`.
+
+**The role retires at that deal.** From `playing` onward nobody is host: the next round is
+dealt by any player still in the match (`NOT_IN_MATCH` to a seat it has gone on without),
+another match by anyone still in the room, spectators included — a match may have been won
+by a bot, and a bot asks for nothing. `PlayerGameView.hostId` is null in every phase but
+the lobby, so no screen can draw a host at a table that has none.
+
+A host who **leaves the lobby** hands the role to the next remaining seat, so a room full
+of people is not stranded by whoever clicked create wandering off. This is the one mutable
+fact about a match, and it is mutable only in the lobby.
+[ADR-0012](docs/adr/0012-the-host-retires-at-the-first-deal.md).
 
 ## Selection
 
@@ -203,6 +229,20 @@ It is also what a **slapdown window** races inside of: the only reason a human's
 round trip to win that race in at all is that the bot behind them is paused rather than
 moving in the same tick (ADR-0011, superseding part of [ADR-0005](docs/adr/0005-slapdown-race-by-event-order.md)).
 
+## Auto-deal
+
+The **auto-deal** is the server dealing a scored round on itself, in the one position where
+nobody at the table can: `roundEnd`, every seat still in the match a **bot**, and a
+**spectator** connected to watch it. Ten seconds (`AUTO_DEAL_MS`), long enough to read the
+round that just finished. Like bot think time it is a fact about this server rather than about
+a room — not a setting, not on the wire — and like it, it is what a watched match's pacing is
+made of. See [ADR-0014](docs/adr/0014-auto-dealing-a-bots-only-table.md).
+
+It is emphatically not a timeout on a player: a human who is merely **away** still holds their
+seat and their turn, and a round they are in is never dealt on without them. The three
+conditions are reconsidered every time a position is published, since that is the only moment
+either the position or who is **connected** can have changed.
+
 ## Slapdown and the slapdown window
 
 A **slapdown** is discarding the card you have just drawn straight back onto the set it
@@ -234,17 +274,110 @@ discarded, which nothing else on the wire reveals, so it reaches the client as
 — the counterpart of a draw target, except that it is the whole pile rather than a card,
 since a player draws one card a turn and so at most one card is ever eligible.
 
+## Out of the match
+
+**Out of the match** is a player who was in a match and is no longer playing it, with the
+consequences `docs/rules.md` §7 gives that. It is a fact about a *match*, not about a room
+or a connection — someone out of the match is still a player of it, listed and scored, and
+the match's record is incomplete without them.
+
+There are exactly two ways to be out, and they are **causes** rather than states of their
+own:
+
+- **Eliminated** — out because their total passed the room's max score when a round was
+  scored (`docs/rules.md` §7). They are still in the room.
+- **Left** — out because they gave up their seat, from any phase, mid-round included.
+  Leaving is final: there is no way back into a match once out of it, and the server says
+  so rather than trusting a client to forget — a resume presented for a departed seat is
+  refused. This is the same seat the **standings** call *departed* (below), named from the
+  match's side rather than the scoreboard's.
+
+The two are disjoint, and provably so rather than by convention: a player who left cannot
+also be over the line, because crossing it would have taken them out at that round's
+scoring, before they had anything to leave. So "out, and over the max score" and "out, and
+departed" name the same players they would if each were stored, which is why neither is.
+
+**Spectator** is what elimination leaves a human doing: out of the match, still in the
+room, still connected. They see the table they saw while playing, with exactly what was
+hidden from them still hidden — being knocked out is not a promotion — and the only action
+left to them is leaving. Bots are never spectators: nothing is watching behind the seat. A
+player who has **left** is not a spectator either, having no connection to the room to
+watch it over; the word names the ones who stayed.
+
+The cause is always **derived**, never a state of its own: out-ness is the one fact about a
+seat, and which of the two put it there follows from the score and from whether the seat was
+given up — as spectating follows from that and a live connection. One fact, and no second
+source of truth to disagree with it.
+
+A seat being out is why the **roster outlives the player behind it**: from the first deal it
+is append-only, so leaving marks a seat rather than removing it, and membership in the roster
+stops meaning membership in the match
+([ADR-0016](docs/adr/0016-seats-outlive-their-players.md)). Before the first deal there is no
+match to be out of, and a leaver is spliced out of the lobby as they always were.
+
+## Connected, and away
+
+**Connected** is whether there is a live socket behind a seat *right now*. It is a fact
+about a connection and not about the match: a player who has dropped is still in the match,
+still holds their hand, and the turn still waits for them. **Away** is the word the table
+uses for the opposite — somebody who might be back in ten seconds, as against somebody who
+has **left** (above), which is final.
+
+It is **derived from the room's live sockets whenever a position is published, and stored
+nowhere** ([ADR-0013](docs/adr/0013-connection-derived-from-the-live-sockets.md)): the
+broadcast already walks those sockets, so it already knows, and `GameState` keeps its
+freedom from anything to do with transport. Two consequences worth stating: a **bot** is
+connected always, having no connection to lose, and a viewer's own seat is connected by
+construction, the payload existing because there is a socket to send it down.
+
+Every seat carries it on the wire, which is what lets a table say why it has gone quiet. The
+**status slot** is where each seat says so — one word, by priority: **left**, then **away**,
+then **watching**, and nothing at all for a bot or for somebody playing (`status.ts`,
+`docs/client-table.md`) — on the felt, and on the lobby's roster rows, where only "away"
+can come up. Nothing acts on it: a seat whose player is away is not skipped,
+timed out or played by a bot.
+
+## Turn order vs. seating
+
+One list until elimination, because until then they were equal, and two things that were
+always distinct:
+
+- **Turn order** is the sequence play moves in — who acts after whom, within a round. It
+  holds only the players still in the match, so a player going out comes out of it and the
+  rest keep their relative order (`docs/rules.md` §2, §7). It is a fact about the round.
+- **Seating** is where a player is drawn at the table: their position in the roster, which
+  a room only ever appends to once it has dealt. It is fixed for the life of the room, so
+  a seat holds its place whether its player is out, gone, or still playing, and the table
+  does not rearrange itself around whoever is left.
+
+Which is why a client seats off the roster and not off turn order: a table redrawn from
+turn order would shuffle every remaining player one place along each time somebody was
+knocked out. Turn order still decides who acts next, and nothing else.
+
+Both lists are on the wire, side by side — `seating` and `turnOrder` — because a client
+cannot recover the first from the roster it is sent: the viewer is lifted out of
+`opponents` into `you`, so the roster as it arrives has a hole in it exactly where the seat
+a viewer-relative sweep anchors on would be. That sweep anchors on the viewer's **own**
+seat rather than on the next player to act, which is also what keeps it meaningful for a
+spectator: they are still seated, and no longer in turn order at all.
+
 ## Standings
 
-The final table of a finished match: every player who played it, ordered lowest score
-first, with the winner (or winners, on a tie) marked. Not the same thing as the roster —
-the standings are the record of a match that is over, so they include a player who has
-exited to the main menu since it ended, marked as **departed**. Their name and final score
-come from the round result that ended the match, which carries its own copy of both; the
-roster no longer holds either. A departed player can still be the winner, and is still
-shown as one. Level scores are separated by where the two were sitting, so every screen
-lists the same match the same way round; a player who has left has no seat to be placed by
-and sits after whoever stayed.
+The final table of a finished match: every player who played it, ordered by **how long they
+lasted** — the one player still in the match at the top, then the rest by the round they
+went out in, latest first. Outlasting somebody places you above them whatever the two of you
+finished on, because that is what winning is now (`docs/rules.md` §7); least is best only
+*within* a round, where two players eliminated in the same one are separated by their final
+scores — and, if even those are level, by an arbitrary but fixed order every screen reads
+the same way round, since a match that is over must not finish two ways depending on who is
+looking at it.
+
+The standings are read off the **roster**, which from the first deal is append-only
+([ADR-0016](docs/adr/0016-seats-outlive-their-players.md)) and so carries every player who was
+ever in the match — including one who has since exited to the
+main menu, marked as **departed**, with the score and the round they left frozen on their
+seat. Nothing is rebuilt from the last round's record: the round says who played it, not who
+was in the match.
 
 Who is on the standings, and in what order, is `standings` in `shared/src` — one answer for
 both clients, the same way the rulebook is (see
@@ -295,9 +428,9 @@ still holding it.
 
 ## Play again
 
-Starts a fresh match in the same room, for the same host and the same seated players
-(minus anyone who has exited to the main menu since the last game ended) — scores,
-hands, and the deck all reset, and the next round is dealt immediately. It does not stop
-at the lobby the way ending a match used to require; only the host may invoke it, and
-only from `gameEnd`. See [ADR-0001](docs/adr/0001-random-starting-player.md) for who
-opens the new match.
+Starts a fresh match in the same room, for the same seated players (minus anyone who has
+exited to the main menu since the last game ended) — scores, eliminations, hands and the
+deck all reset, and the next round is dealt immediately. It does not stop at the lobby the
+way ending a match used to require. **Anyone still in the room may invoke it**, spectators
+included (see "Host"), and only from `gameEnd`. See
+[ADR-0001](docs/adr/0001-random-starting-player.md) for who opens the new match.

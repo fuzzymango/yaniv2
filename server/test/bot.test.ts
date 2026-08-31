@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { chooseDiscard, chooseDraw, decideTurn, shouldCallYaniv } from "../src/bot.ts";
-import { serializeStateForPlayer } from "../src/serialize.ts";
+import { NO_CONNECTIONS, serializeStateForPlayer } from "../src/serialize.ts";
 import { ids, makeState, type StateOptions } from "./helpers.ts";
 
 /** Build the client view the bot actually decides from. */
 function viewFor(options: StateOptions) {
-  return serializeStateForPlayer(makeState(options), "p1");
+  return serializeStateForPlayer(makeState(options), "p1", NO_CONNECTIONS);
 }
 
 describe("shouldCallYaniv", () => {

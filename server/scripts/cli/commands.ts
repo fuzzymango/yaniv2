@@ -40,6 +40,13 @@ export type Command =
 export function parseCommand(input: string, view: PlayerGameView): Command {
   const line = input.trim().toLowerCase();
   if (line === "q" || line === "quit") return { kind: "quit" };
+  /*
+   * The two commands that mean one thing in every phase, answered above the cascade rather
+   * than inside each of its arms: quitting the harness, and giving up the seat — which a
+   * player may do at any point, mid-round included (issue #147). Sent for anyone and
+   * refused to nobody, and whether the round can spare them is the server's to work out.
+   */
+  if (line === "menu") return { kind: "menu" };
 
   /**
    * In the lobby nobody holds a hand and nothing is on the table, so none of the card
@@ -51,12 +58,9 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
    *
    * Whether the typist is actually the host is not checked here — the server owns that,
    * and answers `NOT_HOST`. A second opinion in the harness could only ever disagree.
-   * `menu` is likewise sent for anyone: what it costs the rest of the table depends on
-   * whether the typist is the host, and that too is the server's call.
    */
   if (view.phase === "lobby") {
     if (line === "start") return { kind: "start" };
-    if (line === "menu") return { kind: "menu" };
     if (line === "") return { kind: "noop" };
     return { kind: "invalid", message: "waiting in the lobby — 'start' begins the match" };
   }
@@ -64,17 +68,36 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
   /**
    * A finished match reads like the lobby rather than like a round: the hands on screen
    * are a result, not something anyone can still play from, so the card commands below
-   * are turned down here too. The two moves are the host's replay and anyone's exit —
-   * and, as in the lobby, which of them the typist may actually make is the server's
-   * call, answered with `NOT_HOST`.
+   * are turned down here too. The two moves are open to everyone still in the room: any
+   * of them may deal another match (docs/adr/0012), and any of them may leave.
    */
   if (view.phase === "gameEnd") {
     if (line === "again") return { kind: "again" };
-    if (line === "menu") return { kind: "menu" };
     if (line === "") return { kind: "noop" };
     return {
       kind: "invalid",
       message: "the match is over — 'again' deals another, 'menu' leaves the room",
+    };
+  }
+
+  // A bare enter is the only input whose meaning depends on the phase: it deals the
+  // next round when one has just ended, and is a stray keystroke otherwise. Answered
+  // before anything about hands, because dealing is not a move in one — a watcher may
+  // still type it, and whether they may actually deal is the server's call.
+  if (line === "") {
+    return view.phase === "roundEnd" ? { kind: "next" } : { kind: "noop" };
+  }
+
+  /**
+   * A viewer the match has gone on without holds no cards, so every card command below
+   * is about a hand that is not there (issue #143). What is left them is watching, the
+   * deal above and the way out — the browser client is where spectating is a screen.
+   */
+  const you = view.you;
+  if (you.spectating) {
+    return {
+      kind: "invalid",
+      message: "you are out of the match — watching; 'menu' asks to leave the room",
     };
   }
 
@@ -87,12 +110,6 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
    * disagree with it. The frame says when there is one to take (see `render.ts`).
    */
   if (line === "slap") return { kind: "slap" };
-
-  // A bare enter is the only input whose meaning depends on the phase: it deals the
-  // next round when one has just ended, and is a stray keystroke otherwise.
-  if (line === "") {
-    return view.phase === "roundEnd" ? { kind: "next" } : { kind: "noop" };
-  }
 
   const tokens = line.split(/[\s,]+/).filter(Boolean);
 
@@ -115,7 +132,7 @@ export function parseCommand(input: string, view: PlayerGameView): Command {
     }
   }
 
-  const picked = tokens.map((token) => view.you.hand[Number(token) - 1]);
+  const picked = tokens.map((token) => you.hand[Number(token) - 1]);
   if (picked.some((card) => card === undefined)) {
     return { kind: "invalid", message: "pick cards by number, e.g. '1' or '2 3 4'" };
   }

@@ -126,9 +126,13 @@ export function takeableIds(lastDiscard: readonly Card[]): ReadonlySet<string> {
  * Takes the `SelfView` rather than the whole position, like `isLegalCall` takes a hand:
  * a window belongs to one player and is told to nobody else, and there is nowhere else
  * in a `PlayerGameView` this could be read from.
+ *
+ * Which is also why the tag is narrowed here rather than by each caller: a spectator's
+ * view carries no eligibility field at all (issue #143), and a watcher never holds a
+ * window, so this stays the one place that answers the question for the whole client.
  */
 export function isSlapdownTarget(you: SelfView): boolean {
-  return you.slapdownEligible;
+  return !you.spectating && you.slapdownEligible;
 }
 
 /** Where a tapped source draws from, or null when it is not a card on offer. */
@@ -144,15 +148,17 @@ function drawFrom(source: DrawSource, view: PlayerGameView): DrawAction | null {
  * one action, because the engine has no state in between (see "Turn model" in
  * CLAUDE.md).
  *
- * Null means the interface should not have offered the tap — an illegal selection, or a
- * face-up card that is buried under the ends of the discard. It is not an error to show
- * anybody: nothing was asked for and nothing was refused.
+ * Null means the interface should not have offered the tap — an illegal selection, a
+ * face-up card that is buried under the ends of the discard, or a viewer who is only
+ * watching and holds no cards to build a turn out of (issue #143). It is not an error to
+ * show anybody: nothing was asked for and nothing was refused.
  */
 export function turnFrom(
   selection: readonly string[],
   view: PlayerGameView,
   source: DrawSource,
 ): TurnAction | null {
+  if (view.you.spectating) return null;
   if (!isLegalSelection(selection, view.you.hand)) return null;
 
   const draw = drawFrom(source, view);

@@ -19,7 +19,7 @@ import {
   toggleSelection,
   turnFrom,
 } from "../src/turn.ts";
-import { cards, ids, viewOf } from "./helpers.ts";
+import { cards, ids, spectatorViewOf, viewOf } from "./helpers.ts";
 
 const HAND = cards("hearts-7", "hearts-8", "hearts-9", "spades-7", "joker-1");
 
@@ -185,6 +185,15 @@ describe("isSlapdownTarget", () => {
     });
     assert.equal(isSlapdownTarget(view.you), true);
   });
+
+  /**
+   * A spectator's self view has no eligibility field to read (issue #143), so the one
+   * place both the screen and the session core ask this question is also the one place
+   * that has to know a watcher never holds a window.
+   */
+  it("offers nothing to somebody who is only watching", () => {
+    assert.equal(isSlapdownTarget(spectatorViewOf(cards("clubs-4")).you), false);
+  });
 });
 
 describe("turnFrom", () => {
@@ -227,6 +236,17 @@ describe("turnFrom", () => {
 
   it("offers no turn for a card that is not in the hand", () => {
     assert.equal(turnFrom(["clubs-K"], view, { kind: "deck" }), null);
+  });
+
+  /**
+   * A watcher holds no cards, so there is no selection that could be a discard and no tap
+   * on this table that means anything (issue #143). Answered here, and with the same
+   * silence every other unofferable tap gets: nothing was asked for and nothing refused.
+   */
+  it("offers no turn at all to somebody who is only watching", () => {
+    const watching = spectatorViewOf(cards("clubs-4", "clubs-5", "clubs-6"));
+    assert.equal(turnFrom(["hearts-9"], watching, { kind: "deck" }), null);
+    assert.equal(turnFrom([], watching, { kind: "discard", cardId: "clubs-6" }), null);
   });
 
   it("offers no pickup when nothing is face up", () => {

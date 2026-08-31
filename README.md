@@ -45,7 +45,9 @@ npm run dev                               # terminal 2 — opens on http://local
 Open http://localhost:5173 in your browser. The frontend proxies `/socket.io` requests to
 port 3000, so the client and server talk to each other automatically.
 
-Enter a name, create a room or join one by its code, and the host starts the match.
+Enter a name, create a room or join one by its code, and the host starts the match. The
+host is whoever made the room — or, if they leave before the deal, whoever has been waiting
+longest.
 
 The lobby is where the room is set up, and the host is the only one who can (`docs/adr/0006`):
 how many cards are dealt (5, 6 or 7), what a hand has to be worth to call Yaniv (3, 5, 7 or
@@ -84,19 +86,40 @@ it ends the round. The table you are looking at does not change: everybody stays
 they were playing from and their hand simply turns face up in it, spread out to be read,
 with their new total and what the round added on their own label. Who called and whether
 they were Assafed is said on the same line that was telling you whose turn it was, and the
-Yaniv button becomes the host's "deal the next round" in the same place.
+Yaniv button becomes "deal the next round" in the same place — for anybody still in the
+match, since nobody is host once the cards are out (`docs/adr/0012`).
+
+A round that takes somebody past the room's max score takes **them** out of the match rather
+than ending it for everyone (`docs/rules.md` §7): they are tagged `OUT` on the round that did
+it, and from the next deal their seat sits where it always has, darkened, while the rest play
+shorter and shorter rounds until one player is left — and that player wins, whatever they are
+holding. If it is you, the table stays exactly as it was and the row your hand was in says you
+are out: you go on watching the game you were playing, with the same hands hidden from you as
+before, and nothing left to play — leaving, in the same corner as ever, is the one control
+still yours.
 
 Reloading the tab, or backgrounding it and coming back, costs you nothing: the server holds
 your seat through a dropped connection, and the page claims it back with a credential it
 keeps in `localStorage` — a spinner while it asks, and then the same lobby, hand or
 scoreboard you left. If the connection goes, the screen says so rather than leaving you
 tapping at a dead table, and sits you back down when it returns. Only if the room itself has
-gone are you sent to the main menu, and told why.
+gone are you sent to the main menu, and told why — which happens a minute after the last
+person in it drops, the table being kept that long for exactly this reason (`docs/adr/0015`).
 
-The **host** can close the room from any screen — an icon beside the settings during a
-match, and the way out of the lobby and a finished match — which ends it for everybody and
-is the only thing that does. It asks first. Everyone else has "leave the room", which frees
-their own seat and leaves the table playing.
+While you are away, everybody else's table says so: each seat carries one word about the
+player behind it — **away** while their connection is gone, **watching** once the match has
+gone on without them, **left** when they have given the seat up. A bot says nothing there,
+which is how you tell one. Nothing is done about it: their seat keeps its place and their
+turn still waits for them.
+
+Everybody has the same way out — "leave the room", from **any** point in a match, whether you
+are still playing or only watching — which frees their own seat and leaves the table playing
+for whoever remains. Leave mid-round and the round carries on without you: the cards you were
+holding go to the bottom of the discard pile, the turn moves along if it was yours, and you are
+scored for nothing that round. It is final, so the table asks first, and if it leaves one
+player they have won the match there and then. Nobody holds a control that ends anybody
+else's match: the host owns the lobby and retires at the first deal, and a room ends when its
+last seat leaves (`docs/adr/0012`).
 
 **Play in the terminal (`play`).** A real socket client, so it needs a server running.
 Start the server first:
@@ -127,7 +150,8 @@ straight into a room; without either, the menu offers the same two choices inter
 A bad or expired code typed at the menu shows the error and returns you to the menu to
 try again, rather than ending the session.
 
-The host (first player) types `start` once everyone has joined. A fresh room's bot count
+The host — the first player, or the next seat along if they leave first — types `start`
+once everyone has joined. A fresh room's bot count
 defaults to zero (`docs/adr/0006`) and this harness has no control that changes it — only
 the browser lobby does — so a host alone here is turned away with `NOT_ENOUGH_PLAYERS`.
 Everyone plays through to a winner. At the prompt:
@@ -135,19 +159,19 @@ Everyone plays through to a winner. At the prompt:
 | Input | Meaning |
 |---|---|
 | `start` | (host only) begin the match once everyone has arrived |
-| `menu` | (in the lobby, or at a finished match) leave the room for the main menu |
+| `menu` | leave the room for the main menu — from any phase, mid-round included |
 | `1` or `2 3 4` | discard those cards by hand position, drawing from the deck |
 | `1 3 t2` | the same, but take face-up card 2 off the table instead |
 | `yaniv` | call Yaniv |
 | `slap` | slap down the card you just drew, while the frame says a window is open |
-| enter | deal the next round, once one has ended |
-| `again` | (host only, at a finished match) deal a fresh match to the same table |
+| enter | deal the next round, once one has ended (any player still in the match) |
+| `again` | (at a finished match) deal a fresh match to the same table |
 | `q` or Ctrl-D | quit |
 
 A finished match stops at the standings rather than ending the session. `again` starts
 another one immediately for everyone still seated — scores back to zero, hands dealt, no
-stop at a lobby — and is the host's alone; anyone else is told `NOT_HOST`, and the host is
-told `NOT_ENOUGH_PLAYERS` if too few people are left to play. A seat given up stays given
+stop at a lobby — and anyone still in the room may type it (`docs/adr/0012`), with
+`NOT_ENOUGH_PLAYERS` back if too few people are left to play. A seat given up stays given
 up: nobody is replaced by a bot, and departed players show as `(left)` in the standings so
 the final scores still add up.
 
@@ -157,13 +181,14 @@ player moves (`docs/rules.md` §9). Against a bot that is the second and a half 
 against a person however long they take, so it is winnable either way — type it quickly.
 
 Leaving with `menu` is not quitting: the connection stays up and you land back at the main
-menu, free to create or join another room. It works the same way from the lobby and from a
-finished match, and what it costs the rest of the table depends on who typed it — a guest
-frees only their own seat and the others carry on without them, while the host leaving
-closes the room for everyone, who are told why and returned to their own main menu.
-Mid-match there is still no graceful exit; `q` or Ctrl-D just drops the connection, which
-now leaves the room standing with your seat held open — the harness cannot resume it, and
-has no host control to close the room either.
+menu, free to create or join another room. It works from **any** phase — the lobby, a round
+being played, a scored round, a finished match — and it means the same thing whoever types
+it: your seat is freed and the others carry on without you. Type it mid-round and the round
+goes on without you too, your hand buried and the turn moved along. Leaving a lobby you made
+hands it to the next seat, so the room is not stranded. `q` or Ctrl-D is the other exit and
+is not the same one: it drops the connection without giving the seat up, which leaves the
+room standing and the seat held — this harness cannot resume it, and a minute after the last
+person in the room drops, the room is swept (`docs/adr/0015`).
 
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot
@@ -220,7 +245,8 @@ policy for a seat whose player never comes back. A match plays end to end in the
 create or join, set the room up, deal, take turns, watch a run of bot turns a move at a time,
 call Yaniv, and finish on the standings with another match one tap away. Reconnect is whole — a
 drop leaves the room and the seat alone, and the page presents the seat's token and picks up
-where it left off, whether the socket came back or the whole tab did — and the host can end a
-room outright from any phase. What is missing is what a table does about a player who is
-simply gone: nothing pauses, nothing times out, and nobody is told anyone has dropped
-(`docs/adr/0004`).
+where it left off, whether the socket came back or the whole tab did. What is missing is what
+a table does about a player who is simply gone: their seat is marked **away** for everyone
+else and nothing else happens — nothing pauses, nothing times out, nobody takes their turn.
+The room itself no longer outlives them, at least: one nobody is connected to is dropped a
+minute later (`docs/adr/0015`).

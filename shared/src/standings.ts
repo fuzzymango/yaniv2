@@ -1,17 +1,24 @@
 /**
- * The final table of a finished match: everyone who played it, lowest score first, because
- * in Yaniv least is best (docs/rules.md §7).
+ * The final table of a finished match: everyone who played it, **ordered by how long they
+ * lasted** — the one player still in the match at the top, then the rest by the round they
+ * went out in, latest first (docs/rules.md §7).
+ *
+ * Not lowest score first, which is what a match decided on totals used to want. A match now
+ * ends when one player is left standing, so outlasting somebody places you above them
+ * whatever the two of you are holding: a player eliminated in round 5 on 120 finished the
+ * match ahead of one eliminated in round 2 on 101, having been there for three rounds the
+ * other never saw. Least is best *within* a round — two players out in the same one are
+ * separated by their final scores, so the order is decided rather than arbitrary.
  *
  * Here rather than in either client for the reason the rulebook is (ADR-0002): the browser
  * and the terminal harness both have to answer "who won, and where did everybody finish"
  * from the same `PlayerGameView`, and two copies of that answer are two chances to disagree
  * about a match that is already over. What is left to each of them is how a row is drawn.
  *
- * The standings are not the roster. A player who exits to the main menu from a finished
- * match gives up their seat and leaves `opponents`, but leaving does not undo how the match
- * finished — so their row is rebuilt from the round result, which carries its own copy of
- * their name and their final score for exactly this reason. Dropping it instead would take
- * a departed winner's mark off the board with them. See "Standings" in CONTEXT.md.
+ * **The roster is the whole of it.** From the first deal it is append-only, so a player who
+ * gave up their seat is still in the view — marked `departed`, with the score and the round
+ * they left frozen on it — and there is nothing to rebuild from anywhere else. See
+ * "Standings" in CONTEXT.md.
  *
  * Pure over the view, so it costs `shared` none of its dependency-freedom.
  */
@@ -22,42 +29,52 @@ import type { PlayerGameView } from "./views.ts";
 export interface Standing {
   playerId: string;
   name: string;
-  /** What they finished the match on. */
+  /** What they finished the match on: frozen at the round they went out in, if they did. */
   score: number;
-  /** They have given up their seat since the match ended, and are named from its record. */
+  /** They gave up their seat, and the roster kept it. Still part of the match's record. */
   departed: boolean;
 }
 
+/**
+ * How long a seat lasted, as a number to order by: the round it went out in, or one past
+ * every round there could be while it is still in the match. Written as a comparison rather
+ * than subtracted, because two seats still in the match are both infinite and `Infinity -
+ * Infinity` is `NaN` — a comparator answering `NaN` sorts by nothing at all. The engine
+ * ends a match at one survivor, so that is a position the rules do not reach; a total order
+ * that holds anyway costs one branch.
+ */
+function byLasted(a: number | null, b: number | null): number {
+  if (a === b) return 0;
+  if (a === null) return -1;
+  if (b === null) return 1;
+  return b - a;
+}
+
 export function standings(view: PlayerGameView): Standing[] {
-  const seated: Standing[] = [view.you, ...view.opponents].map((p) => ({
-    playerId: p.id,
-    name: p.name,
-    score: p.score,
-    departed: false,
-  }));
+  const roster = [view.you, ...view.opponents];
 
-  const departed: Standing[] = (view.roundResult?.players ?? [])
-    .filter((p) => !seated.some((s) => s.playerId === p.playerId))
+  return roster
     .map((p) => ({
-      playerId: p.playerId,
+      playerId: p.id,
       name: p.name,
-      // The score the deciding round left them on, which is the score they finished on:
-      // nothing has been scored since, and nothing will be.
-      score: p.scoreAfter,
-      departed: true,
-    }));
-
-  /**
-   * Level scores are broken by where the two were sitting, so the order is the one every
-   * other screen lists the table in and does not shuffle between renders. A player who has
-   * left is in no `turnOrder` to be found in, and sits after whoever stayed.
-   */
-  const seatOf = (playerId: string) => {
-    const seat = view.turnOrder.indexOf(playerId);
-    return seat === -1 ? view.turnOrder.length : seat;
-  };
-
-  return [...seated, ...departed].sort(
-    (a, b) => a.score - b.score || seatOf(a.playerId) - seatOf(b.playerId),
-  );
+      score: p.score,
+      departed: p.departed,
+      outInRound: p.outInRound,
+    }))
+    .sort(
+      (a, b) =>
+        byLasted(a.outInRound, b.outInRound) ||
+        a.score - b.score ||
+        /*
+         * Nothing about the match separates them, and the roster cannot: a view hoists its
+         * own viewer to the front of it (`you`, then everybody else), so a roster position
+         * read off one is not the position read off another — and a match that is over must
+         * not finish two ways depending on whose screen it is. The player id is the one
+         * thing here every screen holds the same, so it decides the last of the ties: an
+         * arbitrary order, but the same arbitrary order everywhere, which is the whole of
+         * what is being bought.
+         */
+        (a.playerId < b.playerId ? -1 : 1),
+    )
+    .map(({ playerId, name, score, departed }) => ({ playerId, name, score, departed }));
 }

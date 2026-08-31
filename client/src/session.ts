@@ -101,9 +101,9 @@ export interface SessionSnapshot {
    */
   readonly error: GameError | null;
   /**
-   * News about the room that is not a refusal of anything the player did — today, only
-   * the host closing it under them. Separate from `error` because there is no action to
-   * blame and nothing to retry: it is the last thing they hear about that room, and it
+   * News about the room that is not a refusal of anything the player did — today, only a
+   * seat that could not be claimed back. Separate from `error` because there is no action
+   * to blame and nothing to retry: it is the last thing they hear about that room, and it
    * arrives while they are sitting still.
    */
   readonly notice: string | null;
@@ -197,27 +197,15 @@ export interface Session {
    */
   startGame: () => void;
   /**
-   * Leave the room without dropping the connection, and go back to the main menu.
+   * Leave the room without dropping the connection, and go back to the main menu. The
+   * only way out of a room there is: nobody can end anybody else's game (docs/adr/0012),
+   * so this costs the rest of the table nothing and the caller's own seat is all it is
+   * about, whoever the caller is.
    *
-   * What it costs the rest of the table is the server's decision and not the caller's:
-   * a guest frees their own seat, the host closes the room. The client is not told
-   * which happened, and does not need to be — either way it is out.
+   * Answered by the ack alone: the server stops publishing to a connection it has turned
+   * out of a room, so nothing is coming behind it.
    */
   exitToMenu: () => void;
-  /**
-   * End the room for everyone and go back to the main menu. The host's alone, and the
-   * server is what says so — anyone else is answered `NOT_HOST` and left where they are.
-   *
-   * Distinct from `exitToMenu`, which is about a seat: this is about the room, works in
-   * every phase, and a mid-round table nobody is playing on any more is exactly the one it
-   * exists for. That the host's `exitToMenu` closes the room too is a consequence of the
-   * seat they hold, not the same act — there is no phase in which it is offered and this
-   * is not, and no phase where the host may leave a room standing.
-   *
-   * Answered by the ack alone, for `exitToMenu`'s reason: the server stops publishing to a
-   * connection it has turned out of a room, so nothing is coming behind it.
-   */
-  closeRoom: () => void;
   /** Choose a card for the next turn, or un-choose one already chosen. */
   toggleCard: (cardId: string) => void;
   /**
@@ -251,14 +239,16 @@ export interface Session {
    */
   slapDown: () => void;
   /**
-   * Deal the next round from a scored one. Host only — and, as with `startGame`, the
-   * server is what says so, answering anyone else with `NOT_HOST`.
+   * Deal the next round from a scored one. Open to any player still in the match — nobody
+   * is host once the cards have gone out (docs/adr/0012) — and the server is what says so,
+   * answering a seat the match has gone on without with `NOT_IN_MATCH`.
    */
   startNextRound: () => void;
   /**
    * Deal another match to the same table from a finished one — scores back to zero and the
-   * first round dealt on the spot, with no stop in the lobby. Host only, and the server
-   * says so.
+   * first round dealt on the spot, with no stop in the lobby. Open to anyone still in the
+   * room, whether or not the last match went on without them: a match may have been won by
+   * a bot, and a bot asks for nothing (docs/adr/0012).
    *
    * A seat given up since the match ended stays given up: nothing refills it, and a table
    * that has shrunk below two is refused with `NOT_ENOUGH_PLAYERS` rather than quietly
@@ -280,10 +270,9 @@ const EMPTY_NAME: GameError = {
 };
 
 /**
- * What a player is told when the seat they were in cannot be had back: the room has been
- * closed or has gone from the server, or the credential offered for it was refused. News
- * rather than a refusal, the same shape as a room closing under them — they did nothing to
- * cause it and there is nothing to retry.
+ * What a player is told when the seat they were in cannot be had back: the room has gone
+ * from the server, or the credential offered for it was refused. News rather than a
+ * refusal — they did nothing to cause it and there is nothing to retry.
  *
  * One sentence for both ways of losing a seat, because they are one thing to whoever is
  * reading it: that table is not there to go back to. Which of them it was is a distinction
@@ -350,11 +339,16 @@ export function createSession(
    * in every round of a match — the deck is rebuilt, not shuffled on — so a choice carried
    * across a deal would come back chosen over whatever card inherited its id.
    *
+   * A position this viewer is only *watching* is the same case (issue #143): they hold no
+   * hand for a choice to be about, and the shape they are sent has none to filter against.
+   *
    * Stated once and here, because a seat claimed back answers it the same way an arriving
    * broadcast does.
    */
   const carriedInto = (view: PlayerGameView): readonly string[] =>
-    view.phase === "playing" ? retainSelection(snapshot.selection, view.you.hand) : [];
+    view.phase === "playing" && !view.you.spectating
+      ? retainSelection(snapshot.selection, view.you.hand)
+      : [];
 
   /**
    * A position reaching the screen, which is the moment it reaches the client: there is no
@@ -399,10 +393,9 @@ export function createSession(
   };
 
   /**
-   * Not seated any more. Exactly four things reach here: the player giving the seat up, a
-   * host closing the room themselves, the room closing under them, and a claim the server
-   * refuses. A dropped connection is pointedly not one of them — that is the case the seat
-   * is kept *for*.
+   * Not seated any more. Exactly two things reach here: the player giving the seat up, and
+   * a claim the server refuses. A dropped connection is pointedly not one of them — that is
+   * the case the seat is kept *for*.
    */
   const forget = (): void => {
     seat = null;
@@ -412,8 +405,8 @@ export function createSession(
   /**
    * There is no table any more: back to the main menu, told why if there is anything worth
    * telling. The one way out of a room that the player did not ask for, and every way in
-   * to it ends here — a room closed under them, a seat that could not be claimed back, and
-   * a connection that came back holding nothing to claim with.
+   * to it ends here — a seat that could not be claimed back, and a connection that came
+   * back holding nothing to claim with.
    *
    * A turn in flight is one nobody will answer now, and a selection is a tap or two made in
    * front of a table that is no longer there. Neither goes to the next room.
@@ -492,23 +485,13 @@ export function createSession(
     });
   };
 
-  /**
-   * The room is gone and this connection is no longer in it — the host having left is
-   * today the only cause. Dropping the view is what returns the player to the main menu,
-   * and the reason goes with them so they are not left wondering where the table went.
-   *
-   * The reason arrives as a fragment — "the host left the room" — so it is made into a
-   * sentence here rather than at the screen, because this handler is what knows which
-   * kind of news it is. The CLI frames it the same way, and the CLI is the specification
-   * for behaviour.
+  /*
+   * There is deliberately no handler for a room ending under a player sitting in it,
+   * because nothing ends one that way any more (docs/adr/0012): a room ends when its last
+   * seat leaves, and that seat is the one leaving. What is left of that case is a seat
+   * that cannot be claimed back when the connection returns, which `claimSeat` answers
+   * with `UNAVAILABLE`.
    */
-  socket.on("roomClosed", (reason) => {
-    // The seat goes with the room — `leaveTable` forgets it. One of exactly two things
-    // that end a seat, the other being the player leaving of their own accord; keeping a
-    // credential for a room that has been closed would only earn a refusal on the next
-    // page load.
-    leaveTable(`The room closed — ${reason}.`);
-  });
 
   /**
    * Whether the drop took a table down with it that this session cannot ask for back —
@@ -649,10 +632,10 @@ export function createSession(
    * How a refusal lands, wherever it comes from.
    *
    * A rejection that arrives after the room has already gone is about a room that no
-   * longer exists. It happens when the host closes the room while somebody else's action
-   * is in flight: the server has dropped their session, so the ack comes back
-   * `PLAYER_NOT_FOUND`. They are already on the menu being told why, and blaming them for
-   * it on top would be exactly what a refusal must never cost.
+   * longer exists — this player's own exit crossing an action still in flight, the server
+   * having dropped their session, so the ack comes back `PLAYER_NOT_FOUND`. They are
+   * already on the menu, and blaming them for it on top would be exactly what a refusal
+   * must never cost.
    */
   const refuse = (error: GameError): void => {
     if (snapshot.view === null) publish({ busy: false });
@@ -775,15 +758,19 @@ export function createSession(
     // *is* the main menu.
     exitToMenu: () => act((ack) => socket.emit("exitToMenu", ack), true),
 
-    // The same shape as leaving, and for the same reason: the room this connection was in
-    // is gone, so the ack is the last thing it will hear about it. A refusal — anyone but
-    // the host — leaves the table exactly where it was, `act` having published nothing.
-    closeRoom: () => act((ack) => socket.emit("closeRoom", ack), true),
-
     // Choosing costs nothing and asks for nothing, so there is no error to clear and no
     // lock to take — only the one already held by a turn on its way out.
     toggleCard: (cardId) => {
       if (snapshot.busy) return;
+
+      // A viewer the match has gone on without holds no hand for a choice to be about
+      // (issue #143), so a tap names a card they do not have: the same silence `commitTurn`
+      // and `callYaniv` answer them with, one step earlier. `carriedInto` already empties
+      // the selection on every position such a viewer is sent; this is what keeps it empty
+      // between two of them, so a watching snapshot has nothing pending in it at any moment
+      // rather than only just after one arrived.
+      if (snapshot.view !== null && snapshot.view.you.spectating) return;
+
       publish({ selection: toggleSelection(snapshot.selection, cardId) });
     },
 
@@ -807,8 +794,12 @@ export function createSession(
 
       // The same rulebook the server will judge the call by, and the same silence when it
       // says no: an inert control that was tapped anyway has asked for nothing. Whether it
-      // is this player's turn is left to the server, exactly as it is for a discard.
-      if (!isLegalCall(snapshot.view.you.hand, snapshot.view.settings.yanivThreshold)) return;
+      // is this player's turn is left to the server, exactly as it is for a discard. A
+      // viewer who is only watching has no hand to call on, which `turnFrom` answers for
+      // the other half of the same screen (issue #143).
+      const you = snapshot.view.you;
+      if (you.spectating) return;
+      if (!isLegalCall(you.hand, snapshot.view.settings.yanivThreshold)) return;
 
       play((ack) => socket.emit("callYaniv", ack));
     },

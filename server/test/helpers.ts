@@ -4,6 +4,8 @@ import type {
   DrawSource,
   GameErrorCode,
   Phase,
+  PlayerGameView,
+  PlayingSelfView,
   RoomSettings,
 } from "@yaniv/shared";
 import { HAND_SIZE, MAX_SCORE, YANIV_THRESHOLD } from "@yaniv/shared";
@@ -11,6 +13,7 @@ import type { Clock } from "../src/clock.ts";
 import { createDeck } from "../src/deck.ts";
 import type { Result } from "../src/result.ts";
 import type { GameState, GameStateActive, Player, RoundState } from "../src/state.ts";
+import { inMatch } from "../src/state.ts";
 
 const DEFAULT_SETTINGS: RoomSettings = {
   handSize: HAND_SIZE,
@@ -62,7 +65,16 @@ export type MoveHistorySpec =
 
 export interface StateOptions {
   phase?: Phase;
-  players?: Array<{ id: string; name?: string; score?: number; isBot?: boolean }>;
+  players?: Array<{
+    id: string;
+    name?: string;
+    score?: number;
+    isBot?: boolean;
+    /** The round they went out in. Omitted means still in the match. */
+    outInRound?: number | null;
+    /** They gave their seat up. Implies `outInRound` — set both to pin a left seat down. */
+    departed?: boolean;
+  }>;
   /** playerId -> card ids. */
   hands?: Record<string, string[]>;
   drawPile?: string[];
@@ -89,16 +101,21 @@ export function makeState(options: StateOptions = {}): GameState {
     name: p.name ?? `Player ${i + 1}`,
     score: p.score ?? 0,
     isBot: p.isBot ?? false,
+    outInRound: p.outInRound ?? null,
+    departed: p.departed ?? false,
     // Derived from the id rather than random, so a leak test can name the exact string
     // it expects never to see. `RESUME_TOKEN_MARK` is what identifies one on the wire.
     resumeToken: `${RESUME_TOKEN_MARK}${p.id}`,
   }));
-  const turnOrder = players.map((p) => p.id);
+  // Only the seats still in the match are dealt to and take turns — the roster keeps
+  // whoever has gone out, in the place they were sitting. docs/rules.md §7.
+  const turnOrder = players.filter(inMatch).map((p) => p.id);
   const phase = options.phase ?? "playing";
 
   const base = {
     roomCode: "TEST",
-    hostId: turnOrder[0]!,
+    // The roster's first seat, not turn order's: a host who has gone out is still the host.
+    hostId: players[0]!.id,
     players,
     settings: { ...DEFAULT_SETTINGS, ...options.settings },
     roundNumber: options.roundNumber ?? 1,
@@ -190,6 +207,35 @@ export function ids(list: readonly Card[]): string[] {
 }
 
 /**
+ * The viewer's own view, narrowed to the variant that holds a hand.
+ *
+ * `SelfView` is tagged by whether its owner is still in the match (issue #143), and a
+ * spectator's has no `hand` and no `slapdownEligible` to read. Every suite that asks for
+ * either is about a player still playing, so the narrowing is a fixture concern rather
+ * than something each assertion should restate — and a scenario that drifted into
+ * spectating fails here, by name, instead of at a confusing assertion downstream.
+ */
+export function playingSelf(view: PlayerGameView): PlayingSelfView {
+  if (view.you.spectating) {
+    throw new Error(`expected ${view.you.id} to still be in the match, not spectating`);
+  }
+  return view.you;
+}
+
+/**
+ * Whether this viewer holds an open slapdown window — the total question, over either
+ * shape of self view.
+ *
+ * `playingSelf` is for a scenario that has pinned a player down as still playing; this is
+ * for the suites that scan every position a seat was sent, across matches a player may
+ * have been knocked out of along the way. A watcher holds no window, which is the same
+ * answer `isSlapdownTarget` gives the browser client.
+ */
+export function slapdownOpen(view: PlayerGameView): boolean {
+  return !view.you.spectating && view.you.slapdownEligible;
+}
+
+/**
  * A clock a test drives by hand, so bot think time is asserted without waiting out
  * seconds of it.
  *
@@ -200,12 +246,29 @@ export function ids(list: readonly Card[]): string[] {
 export interface TestClock extends Clock {
   /** How many timers are waiting. */
   pending: () => number;
+  /** The delay each waiting timer asked for, longest-waiting first. */
+  delays: () => number[];
   /** Run the timer that has been waiting longest, and answer the delay it asked for. */
   tick: () => number;
+  /**
+   * Run the longest-waiting timer that asked for exactly `ms`.
+   *
+   * A room can have several kinds of work pending at once — a bot mid-think, a scored
+   * round dealing itself on, the room's own grace period — and a test about one of them
+   * has to be able to fire that one. The interval is what names it: each behaviour has
+   * its own constant, so `tickAt(ROOM_SWEEP_MS)` says which timer it means and fails
+   * loudly rather than silently running somebody else's.
+   */
+  tickAt: (ms: number) => void;
 }
 
 export function testClock(): TestClock {
   const waiting: { ms: number; run: () => void }[] = [];
+
+  function runAt(at: number): void {
+    const [timer] = waiting.splice(at, 1);
+    timer!.run();
+  }
 
   return {
     after: (ms, run) => {
@@ -217,11 +280,19 @@ export function testClock(): TestClock {
       };
     },
     pending: () => waiting.length,
+    delays: () => waiting.map((timer) => timer.ms),
     tick: () => {
-      const timer = waiting.shift();
+      const timer = waiting[0];
       if (!timer) throw new Error("nothing is waiting on the clock");
-      timer.run();
+      runAt(0);
       return timer.ms;
+    },
+    tickAt: (ms) => {
+      const at = waiting.findIndex((timer) => timer.ms === ms);
+      if (at === -1) {
+        throw new Error(`no timer waiting ${ms}ms (waiting: ${waiting.map((t) => t.ms)})`);
+      }
+      runAt(at);
     },
   };
 }

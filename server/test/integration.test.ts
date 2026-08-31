@@ -4,7 +4,7 @@ import type { Card, DrawAction } from "@yaniv/shared";
 import { canCallYaniv, handValue, legalDiscards } from "@yaniv/shared";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
-import { serializeStateForPlayer } from "../src/serialize.ts";
+import { NO_CONNECTIONS, serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState, GameStateActive } from "../src/state.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { unwrap } from "./helpers.ts";
@@ -36,6 +36,22 @@ function assertInvariants(state: GameState): asserts state is GameStateActive {
     round.turnOrder.includes(round.currentTurnPlayerId),
     "current player is not seated",
   );
+
+  // Turn order is the players still in the match, and only those: a seat that has gone
+  // out is dealt nothing and acts never, while keeping its place in the roster.
+  assert.deepEqual(
+    round.turnOrder,
+    state.players.filter((p) => p.outInRound === null).map((p) => p.id),
+    "turn order and the players still in the match have drifted apart",
+  );
+  assert.ok(round.turnOrder.length >= 2, "a round was dealt to fewer than two players");
+  for (const player of state.players) {
+    if (player.outInRound === null) continue;
+    assert.ok(
+      !(player.id in round.hands),
+      `${player.id} is out of the match and was dealt a hand`,
+    );
+  }
 }
 
 /**
@@ -138,15 +154,24 @@ describe("full match simulation", () => {
       assert.ok(turns > 0, "match ended without a single turn");
       assert.ok(final.roundNumber >= 1);
 
-      assert.ok(final.winnerIds && final.winnerIds.length > 0);
-      const lowest = Math.min(...final.players.map((p) => p.score));
-      for (const id of final.winnerIds) {
-        assert.equal(final.players.find((p) => p.id === id)!.score, lowest);
+      // The end condition, and the whole of it: exactly one player left in the match, and
+      // that player is the winner. Not the lowest total — a survivor may well be carrying
+      // the highest score at the table, everyone below them having been knocked out.
+      const survivors = final.players.filter((p) => p.outInRound === null);
+      assert.equal(survivors.length, 1, "a match ended with more or fewer than one left");
+      assert.deepEqual(final.winnerIds, [survivors[0]!.id]);
+
+      for (const player of final.players) {
+        if (player.outInRound === null) continue;
+        assert.ok(
+          player.score > 100,
+          `${player.id} is out of the match without passing the score limit`,
+        );
+        assert.ok(
+          player.outInRound >= 1 && player.outInRound <= final.roundNumber,
+          `${player.id} went out in a round the match never played`,
+        );
       }
-      assert.ok(
-        final.players.some((p) => p.score > 100),
-        "match ended without anyone busting",
-      );
     });
   }
 
@@ -154,9 +179,10 @@ describe("full match simulation", () => {
     const a = playMatch(2024);
     const b = playMatch(2024);
     assert.deepEqual(
-      a.final.players.map((p) => p.score),
-      b.final.players.map((p) => p.score),
+      a.final.players.map((p) => [p.score, p.outInRound]),
+      b.final.players.map((p) => [p.score, p.outInRound]),
     );
+    assert.deepEqual(a.final.winnerIds, b.final.winnerIds);
     assert.equal(a.turns, b.turns);
   });
 
@@ -176,7 +202,7 @@ describe("full match simulation", () => {
       if (state.phase !== "playing") break;
 
       for (const viewer of state.players) {
-        const wire = JSON.stringify(serializeStateForPlayer(state, viewer.id));
+        const wire = JSON.stringify(serializeStateForPlayer(state, viewer.id, NO_CONNECTIONS));
         const visible = new Set([
           ...state.round.hands[viewer.id]!.map((c) => c.id),
           ...state.round.lastDiscard.map((c) => c.id),

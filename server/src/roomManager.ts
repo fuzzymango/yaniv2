@@ -11,6 +11,7 @@ import { BOT_NAMES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "./config.ts";
 import { err, ok, type Result } from "./result.ts";
 import { randomInt, systemRng, type Rng } from "./rng.ts";
 import type { ActionResult, GameState, GameStateLobby, Player } from "./state.ts";
+import { inMatch } from "./state.ts";
 
 const MAX_NAME_LENGTH = 20;
 const MAX_CODE_ATTEMPTS = 100;
@@ -91,6 +92,11 @@ export class RoomManager {
       name,
       score: 0,
       isBot,
+      // A fresh seat is in the match and has given nothing up. Written out rather than
+      // defaulted anywhere, on the same grounds as `isBot`: a seat whose standing has to
+      // be inferred is a seat somebody has to remember to fill in.
+      outInRound: null,
+      departed: false,
       resumeToken: this.newResumeToken(),
     };
   }
@@ -201,16 +207,25 @@ export class RoomManager {
    * than leaving a table filled on the back of a refused call.
    */
   seatBots(state: GameState): GameState {
-    const humanCount = state.players.filter((p) => !p.isBot).length;
+    // Counted over the seats that are actually going to play. Only ever called from a
+    // lobby, where those are all of them — but a roster is append-only from the first
+    // deal, so counting it raw would one day fill a table against seats that have gone.
+    const playing = state.players.filter(inMatch);
+    const humanCount = playing.filter((p) => !p.isBot).length;
     const targetSize = humanCount + effectiveBotCount(state.settings, humanCount);
-    if (state.players.length >= targetSize) return state;
+    if (playing.length >= targetSize) return state;
 
+    // Two counters that deliberately disagree: seats are appended to the whole roster,
+    // and counted against the table that is going to play.
     const players = [...state.players];
-    while (players.length < targetSize) {
-      // Safe to index directly: a table holds at most MAX_PLAYERS seats and its creator
-      // is human, so BOT_NAMES has a name for every seat a bot can occupy.
+    let seated = playing.length;
+    while (seated < targetSize) {
+      // Named off every bot the room has ever had, seats that have gone included, so two
+      // bots cannot end up sharing a name. Safe to index directly: a table holds at most
+      // MAX_PLAYERS seats and its creator is human, so BOT_NAMES has a name for each.
       const taken = players.filter((p) => p.isBot).length;
       players.push(this.newSeat(BOT_NAMES[taken]!, true));
+      seated++;
     }
     return { ...state, players };
   }

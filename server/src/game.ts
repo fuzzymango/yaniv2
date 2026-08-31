@@ -23,7 +23,7 @@ import type {
   RoundResult,
   RoundState,
 } from "./state.ts";
-import { getPlayer } from "./state.ts";
+import { getPlayer, inMatch, playersInMatch, updatePlayer } from "./state.ts";
 
 // ---------------------------------------------------------------------------
 // Starting rounds
@@ -38,7 +38,10 @@ function dealRound(
   startingPlayerId: string,
   rng: Rng,
 ): GameStateActive {
-  const turnOrder = state.players.map((p) => p.id);
+  // The players still in the match, and only those: a seat that has gone out is dealt no
+  // hand and holds no place in turn order, while keeping its place in the roster — which
+  // is what a table is drawn from. docs/rules.md §7.
+  const turnOrder = playersInMatch(state).map((p) => p.id);
   const dealt = deal(
     shuffle(createDeck(), rng),
     turnOrder.length,
@@ -79,7 +82,8 @@ function dealRound(
  * round's winner opens those.
  */
 function randomOpener(state: GameState, rng: Rng): string {
-  return state.players[randomInt(rng, state.players.length)]!.id;
+  const seated = playersInMatch(state);
+  return seated[randomInt(rng, seated.length)]!.id;
 }
 
 /**
@@ -101,8 +105,10 @@ export function startGame(
   // Meaningful again now `botCount` defaults to zero (docs/adr/0006): this used to run
   // against a table `seatBots` had already filled to six, so it could never fire. A
   // lone host who has asked for no bots is now correctly turned away, while one who has
-  // asked for some is counted with them and plays.
-  if (state.players.length < MIN_PLAYERS) {
+  // asked for some is counted with them and plays. Counted over the seats that would
+  // actually be dealt to — in a lobby that is all of them, but the question is about the
+  // match rather than the roster, and from the first deal the two differ.
+  if (playersInMatch(state).length < MIN_PLAYERS) {
     return err(
       "NOT_ENOUGH_PLAYERS",
       `Need at least ${MIN_PLAYERS} players to start`,
@@ -155,6 +161,11 @@ export function updateSettings(
  * number go back to zero and the first round is dealt on the spot, so there is no stop
  * in the lobby between one match and the next.
  *
+ * Every elimination is cleared with the scores (docs/rules.md §7): whoever is still in the
+ * room is in the new match, however the last one ended for them. A seat that has been
+ * *given up* is the exception and stays out — it is still in the roster, the roster being
+ * append-only from the first deal, but it is nobody's seat to play.
+ *
  * Empty seats are deliberately not backfilled with bots — a seat given up by an exit to
  * the menu stays given up — so a table that has shrunk below the minimum is turned away
  * here exactly as `startGame` would turn it away.
@@ -167,10 +178,21 @@ export function playAgain(
   if (state.phase !== "gameEnd") {
     return err("WRONG_PHASE", "No finished match to replay");
   }
-  if (requesterId !== state.hostId) {
-    return err("NOT_HOST", "Only the host can start another match");
+  /*
+   * Anyone still in the room, which is deliberately a wider door than the next round's
+   * (docs/adr/0012). At `gameEnd` exactly one player is still in the match and that
+   * player may be a bot, so asking to be in the match would freeze a bot-won room with
+   * nobody able to act; and a player knocked out of the last match is precisely who this
+   * is offered to. A seat that has been given up is nobody's to ask from.
+   */
+  const requester = getPlayer(state, requesterId);
+  if (!requester || requester.departed) {
+    return err("PLAYER_NOT_FOUND", "You are not in this room");
   }
-  if (state.players.length < MIN_PLAYERS) {
+  // Counted over the seats that are still somebody's, not `inMatch`: everyone who is
+  // still in the room plays the next match, and being knocked out of the last one is
+  // exactly what this is offered to.
+  if (state.players.filter((p) => !p.departed).length < MIN_PLAYERS) {
     // Said in terms of the table that is left rather than the lobby's "to start": whoever
     // reads this is looking at the standings of a match that has already been played, and
     // the seats it was played with are the thing that has since gone.
@@ -184,7 +206,14 @@ export function playAgain(
   // round number `dealRound` increments has to be the new match's, not the old one's.
   const fresh: GameState = {
     ...state,
-    players: state.players.map((p) => ({ ...p, score: 0 })),
+    players: state.players.map((p) =>
+      // A departed seat is out of the new match before it starts, which is round 0 — the
+      // round count having gone back to zero with the scores, the old match's number
+      // would name a round of a match this seat is no longer part of.
+      p.departed
+        ? { ...p, score: 0, outInRound: 0 }
+        : { ...p, score: 0, outInRound: null },
+    ),
     roundNumber: 0,
   };
   return ok(dealRound(fresh, randomOpener(fresh, rng), rng));
@@ -193,25 +222,130 @@ export function playAgain(
 /**
  * Take a player out of the room, freeing their seat for good — no bot moves into it.
  *
- * Only from the lobby or a finished match: leaving mid-round would abandon a hand and a
- * turn order that the round is still being played against, which is out of scope (see
- * CLAUDE.md's room lifecycle notes).
+ * Two shapes, on which side of the first deal the room is:
  *
- * The host is not special here. "The room must be destroyed" is not a `GameState` this
- * function could return, so that branch belongs to the layer that owns rooms — the same
- * way bot seating is a helper folded in around a transition rather than baked into one.
+ * - **In the lobby** the player is spliced out of the roster outright. A ghost seat in a
+ *   room that has not dealt is noise, and there is no match record for it to be part of.
+ * - **Once a match exists** the roster is append-only, and leaving *marks* the seat:
+ *   `departed`, and out of the match as of the current round if it was not out already.
+ *   That is what makes "out of the match, and gone" representable at all — a spliced-out
+ *   seat cannot be drawn darkened at the table it played, or listed in its standings.
+ *
+ * **From any phase** (issue #147): nobody is trapped at a table that has gone quiet, and a
+ * player the match has gone on without should not have to sit out somebody else's round to
+ * get up. Mid-round the leaver is taken out of the round on the spot (`withdrawFromRound`
+ * below) rather than the round being abandoned around them, and a departure that leaves
+ * one player in the match ends it there and then.
+ *
+ * The host leaves like anybody else — what is special is the room left behind. In the
+ * lobby the role migrates to the next remaining seat, so a room full of people is not
+ * stranded because whoever clicked create wandered off; this is the one transition that
+ * writes `hostId`, and it writes it only here (docs/adr/0012). Once a round has been
+ * dealt there is no role to migrate: nobody is host from `playing` onward.
+ *
+ * A lobby whose last seat leaves keeps the `hostId` it had, there being nobody to hand it
+ * to. "The room must be destroyed" is not a `GameState` this function could return, so
+ * that branch belongs to the layer that owns rooms — the same way bot seating is a helper
+ * folded in around a transition rather than baked into one.
  */
 export function removePlayer(state: GameState, playerId: string): ActionResult {
-  if (state.phase !== "lobby" && state.phase !== "gameEnd") {
-    return err("WRONG_PHASE", "You can only leave from the lobby or a finished match");
-  }
-  if (!getPlayer(state, playerId)) {
+  const player = getPlayer(state, playerId);
+  if (!player || player.departed) {
     return err("PLAYER_NOT_FOUND", "You are not in this game");
   }
-  return ok({ ...state, players: state.players.filter((p) => p.id !== playerId) });
+
+  if (state.phase === "lobby") {
+    const remaining = state.players.filter((p) => p.id !== playerId);
+    return ok({
+      ...state,
+      players: remaining,
+      // Roster order, which in a lobby is arrival order: the seat that has been waiting
+      // longest takes it over.
+      hostId: playerId === state.hostId ? (remaining[0]?.id ?? state.hostId) : state.hostId,
+    });
+  }
+
+  const players = updatePlayer(state.players, playerId, {
+    departed: true,
+    // Left where it is if they were already out: the round a seat stopped playing is
+    // the round it stopped playing, and being eliminated in round 3 is not undone by
+    // walking off after round 7.
+    outInRound: player.outInRound ?? state.roundNumber,
+  });
+
+  /*
+   * The match ends when one player is left in it (docs/rules.md §7), and a departure is
+   * now one of the two ways that happens — until issue #147 every exit from `playing` went
+   * through a Yaniv call. Dealing the next round to a single person is not a position the
+   * rules have, so the match ends where the leaver left it: mid-round, with no scored
+   * round behind it, which is a `gameEnd` the serializer already sends without a reveal.
+   *
+   * Not asked at `gameEnd`, where the match is over and its winner is a matter of record:
+   * the last player leaving a finished match does not unwin it for them.
+   *
+   * `<= 1` rather than `=== 1` on `callYaniv`'s reasoning: a departure from an active
+   * phase leaves at least one player in the match, two being the fewest a phase other than
+   * `gameEnd` can have, and a wedged room is the wrong price for being wrong about that.
+   */
+  const survivors = players.filter(inMatch);
+  const over = state.phase !== "gameEnd" && survivors.length <= 1;
+
+  return ok({
+    ...state,
+    phase: over ? "gameEnd" : state.phase,
+    players,
+    round: state.phase === "playing" ? withdrawFromRound(state.round, playerId) : state.round,
+    winnerIds: over ? survivors.map((p) => p.id) : state.winnerIds,
+  });
 }
 
-/** Host deals the next round. The previous round's winner takes the first turn. */
+/**
+ * Take a seat out of the round being played, leaving the round playable by whoever is
+ * left (issue #147).
+ *
+ * Four facts, and each of them is a way the round would otherwise be wrong about a player
+ * who is not there:
+ *
+ * - The **hand goes to the buried pile**, not out of the pack. Every card dealt is still
+ *   in the round, so a draw pile that empties reshuffles into as many cards as it should;
+ *   dropping them would quietly shrink the deck for everyone still playing.
+ * - They come out of **turn order**, which is what stops the turn ever reaching them.
+ * - If the turn was **theirs**, it moves along — read off the order they were still in, so
+ *   it lands on the seat that was next rather than on whoever inherited their index.
+ * - Their **slapdown window** closes. It is a fact about a hand that no longer exists, and
+ *   `slapDown` would find no card to put down (docs/rules.md §9).
+ *
+ * `lastMove`, `lastSlapdown` and the history are left exactly as they are: those moves
+ * happened, and a player leaving does not unplay them.
+ */
+function withdrawFromRound(round: RoundState, playerId: string): RoundState {
+  const { [playerId]: hand = [], ...hands } = round.hands;
+  return {
+    ...round,
+    hands,
+    buried: [...round.buried, ...hand],
+    turnOrder: round.turnOrder.filter((id) => id !== playerId),
+    currentTurnPlayerId:
+      round.currentTurnPlayerId === playerId
+        ? nextPlayerId(round)
+        : round.currentTurnPlayerId,
+    slapdown: round.slapdown?.playerId === playerId ? null : round.slapdown,
+  };
+}
+
+/**
+ * Deal the next round. The previous round's winner takes the first turn.
+ *
+ * Asked by anyone still in the match, rather than by one particular seat: nobody is host
+ * once a round has been dealt (docs/adr/0012), and a table should not be left waiting on
+ * whichever player happens to have made the room. A player the match has gone on without
+ * — eliminated, or gone — is refused: they cannot rush a match they are no longer in.
+ *
+ * Bot-ness is not asked about, and the wire is why: a requester is identified from the
+ * connection that sent this, and a bot has none, so a bot id can only ever arrive from
+ * the server itself — the harness dealing a bots-only demo match, and nothing a player
+ * could send.
+ */
 export function startNextRound(
   state: GameState,
   requesterId: string,
@@ -220,10 +354,23 @@ export function startNextRound(
   if (state.phase !== "roundEnd") {
     return err("WRONG_PHASE", "No finished round to advance from");
   }
-  if (requesterId !== state.hostId) {
-    return err("NOT_HOST", "Only the host can start the next round");
+  const requester = getPlayer(state, requesterId);
+  if (!requester) {
+    return err("PLAYER_NOT_FOUND", "You are not in this game");
   }
-  const starter = state.lastRoundResult?.winnerId ?? state.hostId;
+  if (!inMatch(requester)) {
+    return err("NOT_IN_MATCH", "Only a player still in the match can deal the next round");
+  }
+  /*
+   * The round's winner, where they are still in the match to take it. Scoring cannot have
+   * taken them out — their delta was 0 and a reduction only subtracts (docs/rules.md §7) —
+   * but *leaving* can, and does, now that a seat may be given up at a scored round
+   * (issue #147). The fallback is the first seat still playing rather than the host, who
+   * may be out by now: a starter absent from `turnOrder` would open a round holding no
+   * hand, and hand on to nobody.
+   */
+  const winner = state.lastRoundResult && getPlayer(state, state.lastRoundResult.winnerId);
+  const starter = winner && inMatch(winner) ? winner.id : playersInMatch(state)[0]!.id;
   return ok(dealRound(state, starter, rng));
 }
 
@@ -518,24 +665,43 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
     players: results,
   };
 
-  const newPlayers = state.players.map((p) => ({
-    ...p,
-    score: scores.get(p.id)!,
-  }));
+  /*
+   * Scores land, then elimination is read off them — in that order and no other, because
+   * the milestone reduction is already folded into `scoreAfter` above and §7 puts it
+   * before the comparison: a total landing exactly on a milestone is reduced first, and
+   * so can be rescued by it.
+   *
+   * A player already out keeps everything: their total is frozen, and the round they went
+   * out in is not rewritten by a later round they took no part in.
+   */
+  const newPlayers = state.players.map((p) => {
+    if (!inMatch(p)) return p;
+    const score = scores.get(p.id)!;
+    return {
+      ...p,
+      score,
+      outInRound: score > state.settings.maxScore ? state.roundNumber : null,
+    };
+  });
 
-  const busted = newPlayers.some((p) => p.score > state.settings.maxScore);
-  const lowest = Math.min(...newPlayers.map((p) => p.score));
+  const survivors = newPlayers.filter(inMatch);
+  /*
+   * The match ends when one player is left, and that player wins — not the lowest total.
+   * `<= 1` rather than `=== 1` guards a position the rules say is unreachable (§7: the
+   * round's winner scores 0 and reductions only subtract, so no round can empty the
+   * match) — the cost of being wrong about that is a wedged room, and one player short
+   * of a table is over either way.
+   */
+  const over = survivors.length <= 1;
 
   return ok({
     ...state,
-    phase: busted ? "gameEnd" : "roundEnd",
+    phase: over ? "gameEnd" : "roundEnd",
     // The call is the next player's turn, so it closes whatever window the previous one
     // was left holding — and a scored round has no out-of-turn move left in it anyway.
     round: { ...round, slapdown: null },
     players: newPlayers,
     lastRoundResult: roundResult,
-    winnerIds: busted
-      ? newPlayers.filter((p) => p.score === lowest).map((p) => p.id)
-      : null,
+    winnerIds: over ? survivors.map((p) => p.id) : null,
   });
 }

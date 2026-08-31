@@ -22,6 +22,7 @@ import { RoomManager } from "../../src/roomManager.ts";
 import { mulberry32 } from "../../src/rng.ts";
 import { createSocketServer } from "../../src/socketServer.ts";
 import { runSession } from "../../scripts/cli/session.ts";
+import { playingSelf, slapdownOpen } from "../helpers.ts";
 
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
@@ -38,14 +39,21 @@ interface Harness {
  * (docs/adr/0006), and the harness has no settings prompt to raise it with — so this
  * keeps the tables below exactly the size the scripts were written against.
  */
-async function startServer(seed: number): Promise<Harness> {
+/**
+ * `botCount` defaults to one, not a full table. These scripts play matches all the way
+ * out, and only a player still in the match may deal the next round (docs/adr/0012): with
+ * two bots or more the human can be knocked out while the bots play on, leaving a table
+ * the typist at it cannot advance. One bot cannot outlast them — the match is over the
+ * moment it is the only seat left. A test about the table's *size* passes its own.
+ */
+async function startServer(seed: number, botCount = 1): Promise<Harness> {
   const httpServer = createServer();
   const io = createSocketServer(
     httpServer,
     new RoomManager({
       rng: mulberry32(seed),
       newRoomRng: () => mulberry32(seed + 1),
-      defaultSettings: { botCount: MAX_PLAYERS - 1 },
+      defaultSettings: { botCount },
     }),
     // Bot think time off. What the harness draws is under test here, not when it draws
     // it: the pause is the server's and is asserted at its own seam, and left on it
@@ -95,7 +103,7 @@ async function playOn(latest: () => PlayerGameView | null): Promise<string> {
     );
   });
   const view = latest()!;
-  return view.phase === "playing" ? String(view.you.hand.length) : "";
+  return view.phase === "playing" ? String(playingSelf(view).hand.length) : "";
 }
 
 /**
@@ -177,7 +185,8 @@ describe("runSession", () => {
   });
 
   it("renders every bot move as its own frame, not one jump back to our turn", async () => {
-    const server = await startServer(7);
+    // A full table, which is what this is about: five bots move between our turns.
+    const server = await startServer(7, MAX_PLAYERS - 1);
     const frames: string[] = [];
     /** How many frames had been printed by the time each prompt appeared. */
     const promptedAfter: number[] = [];
@@ -230,7 +239,7 @@ describe("runSession", () => {
     try {
       const socket = await server.connect();
       socket.on("gameStateUpdate", (view) => {
-        if (openingHandValue === 0) openingHandValue = handValue(view.you.hand);
+        if (openingHandValue === 0) openingHandValue = handValue(playingSelf(view).hand);
       });
 
       await runSession(
@@ -280,7 +289,7 @@ describe("runSession", () => {
           ask: hostAsk(async () => {
             const current = view!;
             seenAtPrompt.push(
-              `${current.drawPileCount}|${current.you.hand.map((c) => c.id).join(",")}`,
+              `${current.drawPileCount}|${playingSelf(current).hand.map((c) => c.id).join(",")}`,
             );
             if (seenAtPrompt.length > 3) return null;
             return await playOn(() => view);
@@ -702,14 +711,15 @@ describe("runSession", () => {
       );
     });
 
-    // Timed out rather than left to `waitUntil`'s guard: the guest below sits at a
-    // prompt that stays unanswered until they are booted, so a session that never gets
-    // them back to the menu would hang the suite instead of failing it.
-    it("closes the lobby for everyone when the host is the one who leaves", { timeout: 10_000 }, async () => {
+    /**
+     * The lobby outliving its host (docs/adr/0012). Nothing is closed and nobody is put
+     * out: the seat goes, and the role goes to whoever has been waiting longest — which
+     * the guest reads off their own frame, the host marker having moved onto them.
+     */
+    it("hands the lobby to the next seat when its host leaves", async () => {
       const server = await startServer(7);
       const hostScreen: string[] = [];
       const guestScreen: string[] = [];
-      let guestPrompts = 0;
 
       try {
         const hostSocket = await server.connect();
@@ -736,22 +746,11 @@ describe("runSession", () => {
         const guestSession = runSession(
           guestSocket,
           {
-            /**
-             * A terminal, not a script: a prompt is answered when the person in front
-             * of it types something, which here is only once they have been told the
-             * lobby is gone. Being booted therefore has to reach them at the prompt
-             * rather than waiting on a keystroke that is not coming.
-             */
             ask: async () => {
-              guestPrompts += 1;
-              if (guestPrompts > 1) return null;
-              await waitUntil("Grace to be told the room closed", () =>
-                plain(guestScreen.join("\n")).includes("room closed"),
+              await waitUntil("Grace to be handed the lobby", () =>
+                /Grace \(you\) \(host\)/.test(plain(guestScreen.join("\n"))),
               );
-              // Whatever they type next goes to the menu they were dropped at — and
-              // opens a room on the same connection, which a socket still bound to the
-              // old one could not do.
-              return "create";
+              return "quit";
             },
             output: (text) => guestScreen.push(text),
           },
@@ -765,22 +764,19 @@ describe("runSession", () => {
 
       const guest = guestScreen.map(plain);
       assert.ok(
-        guest.some((frame) => /host left/i.test(frame)),
-        "the guest is told why the lobby went away",
+        guest.some((frame) => /Ada left/.test(frame)),
+        "the guest is told who left rather than that the room went",
       );
-      assert.doesNotMatch(guest.join("\n"), /ALREADY_IN_ROOM/);
-      // Two prompts, not three: the one they were already sitting in front of was
-      // carried over to the menu. A second prompt issued alongside it would take the
-      // line they type and leave the menu still waiting.
-      assert.equal(guestPrompts, 2, "the abandoned prompt is not left to swallow a line");
-
-      const codes = [...new Set(guest.join("\n").match(/room ([A-Z0-9]{4})\b/g) ?? [])];
-      assert.equal(codes.length, 2, `a second room opened on the same socket, saw ${codes}`);
+      assert.ok(
+        guest.some((frame) => /type start/.test(frame)),
+        "and is now the one being told to start the match",
+      );
+      assert.doesNotMatch(guest.join("\n"), /room closed/i, "nothing was closed");
     });
   });
 
   /**
-   * The finished-match screen: the host's replay, and either player's way out of it.
+   * The finished-match screen: another match, and either player's way out of it.
    *
    * Every test here plays a real match to its end first — there is no shortcut, since
    * `gameEnd` is reached by someone busting past the score limit and nothing else.
@@ -798,14 +794,29 @@ describe("runSession", () => {
     function playingTo(
       latest: () => PlayerGameView | null,
       atGameEnd: () => Promise<string | null>,
+      /** Whether this is the seat that made the room, and so the lobby's host. */
+      isHost: boolean,
     ): Ask {
+      /**
+       * Whoever deals the next round, which any player still in the match may do
+       * (docs/adr/0012). One of them has to be picked or both would ask and the loser
+       * would be refused with `WRONG_PHASE` and print it — so it is the first human left
+       * in turn order, which every screen reads the same way. "(bot)" is baked into a
+       * name by the server, so it is the same answer whoever is looking.
+       */
+      const deals = (view: PlayerGameView) => {
+        const seated = new Map([view.you, ...view.opponents].map((p) => [p.id, p.name]));
+        const humans = view.turnOrder.filter(
+          (id) => !(seated.get(id) ?? "").includes("(bot)"),
+        );
+        return humans[0] === view.you.id;
+      };
+
       /** Is this seat's move, rather than one it is waiting on somebody else for? */
       const ours = (view: PlayerGameView) => {
-        const host = view.hostId === view.you.id;
-        if (view.phase === "lobby") return host && view.opponents.length > 0;
+        if (view.phase === "lobby") return isHost && view.opponents.length > 0;
         if (view.phase === "playing") return view.currentTurnPlayerId === view.you.id;
-        // Only the host deals the next round; everyone else waits for them to.
-        if (view.phase === "roundEnd") return host;
+        if (view.phase === "roundEnd") return deals(view);
         return true;
       };
 
@@ -847,7 +858,7 @@ describe("runSession", () => {
       const hostSession = runSession(
         hostSocket,
         {
-          ask: playingTo(() => hostView, () => atGameEnd.host(host)),
+          ask: playingTo(() => hostView, () => atGameEnd.host(host), true),
           output: (text) => host.push(text),
         },
         { playerName: "Ada", entry: { kind: "create" } },
@@ -862,7 +873,7 @@ describe("runSession", () => {
       const guestSession = runSession(
         guestSocket,
         {
-          ask: playingTo(() => guestView, () => atGameEnd.guest(guest)),
+          ask: playingTo(() => guestView, () => atGameEnd.guest(guest), false),
           output: (text) => guest.push(text),
         },
         { playerName: "Grace", entry: { kind: "join", roomCode } },
@@ -871,7 +882,7 @@ describe("runSession", () => {
       await Promise.all([hostSession, guestSession]);
     }
 
-    it("deals another match on the same table when the host asks again", async () => {
+    it("deals another match on the same table when a player asks again", async () => {
       const server = await startServer(7);
       const printed: string[] = [];
       const GUARD = 2000;
@@ -921,7 +932,7 @@ describe("runSession", () => {
       const fresh = restarted!;
       assert.equal(fresh.phase, "playing", "the new match is dealt, with no stop at a lobby");
       assert.equal(fresh.roundNumber, 1, "and it is a new match, not another round");
-      assert.equal(fresh.you.hand.length, 5, "with a fresh hand");
+      assert.equal(playingSelf(fresh).hand.length, 5, "with a fresh hand");
       for (const player of [fresh.you, ...fresh.opponents]) {
         assert.equal(player.score, 0, `${player.name} starts the new match on nothing`);
       }
@@ -931,46 +942,12 @@ describe("runSession", () => {
       assert.doesNotMatch(screen, /✗/, "nothing scripted here should have been refused");
     });
 
-    it("turns a guest's replay down, and lets them leave the host to it", async () => {
-      const server = await startServer(7);
-      const screens = { host: [] as string[], guest: [] as string[] };
-
-      try {
-        let guestTurns = 0;
-        await twoHumanMatch(server, screens, {
-          // The host sits at the standings until Grace has gone, then quits.
-          host: async (screen) => {
-            await waitUntil("Grace's seat to be freed", () =>
-              plain(screen.join("\n")).includes("Grace left"),
-            );
-            return null;
-          },
-          guest: async () => {
-            guestTurns += 1;
-            // Replaying is the host's alone — the server says so, not the harness.
-            if (guestTurns === 1) return "again";
-            if (guestTurns === 2) return "menu";
-            return "quit";
-          },
-        });
-      } finally {
-        await server.close();
-      }
-
-      const guest = plain(screens.guest.join("\n"));
-      assert.match(guest, /NOT_HOST/, "a guest is told whose call a replay is");
-      assert.match(guest, /join <code>/, "and lands back at the main menu when they leave");
-
-      const frames = screens.host.map(plain).filter((f) => /Match over/.test(f));
-      assert.ok(frames.length > 1, "the host is still looking at the finished match");
-      assert.match(
-        frames.at(-1)!,
-        /Grace \(left\)/,
-        "with the departed seat still named in the standings",
-      );
-    });
-
-    it("closes a finished match for everyone when the host leaves it", async () => {
+    /**
+     * Leaving a finished match is a seat going, not a room ending (docs/adr/0012):
+     * whoever stays keeps the standings, with the seat that left named on them. That the
+     * leaver is the one who made the room is the point — it used to close it.
+     */
+    it("leaves a finished match standing when the seat that made the room goes", async () => {
       const server = await startServer(7);
       const screens = { host: [] as string[], guest: [] as string[] };
 
@@ -981,11 +958,9 @@ describe("runSession", () => {
             hostTurns += 1;
             return hostTurns === 1 ? "menu" : "quit";
           },
-          // Sitting at the standings with nothing to type: the close has to reach them
-          // there, and the prompt they were at carries over to the menu it drops them on.
           guest: async (screen) => {
-            await waitUntil("Grace to be told the room closed", () =>
-              plain(screen.join("\n")).includes("room closed"),
+            await waitUntil("Ada's seat to be given up", () =>
+              plain(screen.join("\n")).includes("Ada left"),
             );
             return "quit";
           },
@@ -995,8 +970,14 @@ describe("runSession", () => {
       }
 
       const guest = plain(screens.guest.join("\n"));
-      assert.match(guest, /host left/i, "the same reason the lobby gives, from this screen");
-      assert.match(guest, /join <code>/, "and the same main menu to land on");
+      assert.doesNotMatch(guest, /room closed/i, "nothing was closed under them");
+      const frames = screens.guest.map(plain).filter((f) => /Match over/.test(f));
+      assert.ok(frames.length > 1, "the guest is still looking at the finished match");
+      assert.match(
+        frames.at(-1)!,
+        /Ada \(left\)/,
+        "with the departed seat still named in the standings",
+      );
     });
   });
 
@@ -1012,7 +993,7 @@ describe("runSession", () => {
      * back off the deck. Jokers are skipped — a drawn joker never opens a window.
      */
     function fishingDiscard(view: PlayerGameView): string {
-      const hand = view.you.hand;
+      const hand = playingSelf(view).hand;
       const at = hand.findIndex(
         (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
       );
@@ -1088,7 +1069,7 @@ describe("runSession", () => {
               // One window is the whole of what this test is after; the fishing is only
               // how it gets there.
               if (slapped || adaPrompts > 400) return null;
-              if (view.you.slapdownEligible) {
+              if (slapdownOpen(view)) {
                 slapped = true;
                 return "slap";
               }
@@ -1122,7 +1103,7 @@ describe("runSession", () => {
                 return (
                   view.phase === "playing" &&
                   view.currentTurnPlayerId === view.you.id &&
-                  !adaView!.you.slapdownEligible
+                  !slapdownOpen(adaView!)
                 );
               });
               return done ? null : fishingDiscard(graceView!);
@@ -1148,12 +1129,12 @@ describe("runSession", () => {
 
       assert.ok(slapped, "no window ever opened to slap from");
 
-      const opened = adaHeard.findIndex((v) => v.you.slapdownEligible);
+      const opened = adaHeard.findIndex((v) => slapdownOpen(v));
       const before = adaHeard[opened]!;
       const after = adaHeard[opened + 1]!;
       assert.equal(
-        after.you.hand.length,
-        before.you.hand.length - 1,
+        playingSelf(after).hand.length,
+        playingSelf(before).hand.length - 1,
         "the slapped card left the hand",
       );
       assert.equal(
@@ -1166,7 +1147,7 @@ describe("runSession", () => {
         before.currentTurnPlayerId,
         "a slapdown is not a turn",
       );
-      assert.equal(after.you.slapdownEligible, false, "the window closed behind it");
+      assert.equal(slapdownOpen(after), false, "the window closed behind it");
 
       const screen = plain(adaScreen.join("\n"));
       assert.match(screen, /slapdown!/, "the frame is what told her the window was open");
