@@ -29,7 +29,7 @@ import {
 } from "@yaniv/shared";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
 import { decideTurn } from "../src/bot.ts";
-import { AUTO_DEAL_MS, BOT_THINK_MS } from "../src/config.ts";
+import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
@@ -2825,6 +2825,19 @@ describe("auto-dealing a table only bots are still playing", () => {
     }
   }
 
+  /**
+   * The same wait, for the cases where a count cannot tell the two pauses apart: a drop
+   * calls the deal off and starts the room's grace period (issue #150), so one timer
+   * stands where one timer stood, and only the interval says which.
+   */
+  async function settleDelays(t: Table, delays: number[], what: string): Promise<void> {
+    const deadline = Date.now() + 1000;
+    while (JSON.stringify(t.clock.delays()) !== JSON.stringify(delays)) {
+      if (Date.now() > deadline) assert.deepEqual(t.clock.delays(), delays, what);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
   it("deals the next round for a spectator once the pause has elapsed", async () => {
     const t = await sitDown(7, 3);
     try {
@@ -2885,7 +2898,14 @@ describe("auto-dealing a table only bots are still playing", () => {
       assert.equal(t.clock.pending(), 0, "the round is the human's to deal");
 
       t.client.disconnect();
-      await settle(t, 0, "and still theirs once their connection has gone");
+      // The room's own grace period is the only thing a drop starts (issue #150): the
+      // round is still waiting for the seat that went quiet, not being dealt out from
+      // under it.
+      await settleDelays(
+        t,
+        [ROOM_SWEEP_MS],
+        "and still theirs once their connection has gone",
+      );
     } finally {
       await t.close();
     }
@@ -2911,15 +2931,213 @@ describe("auto-dealing a table only bots are still playing", () => {
     }
   });
 
+  /**
+   * A table with nobody watching plays to nobody, so the deal is called off — and what
+   * takes its place on the clock is the room's own grace period, the drop being what
+   * starts one (issue #150). The two never run together: the deal wants a spectator there
+   * and the sweep wants nobody there.
+   */
   it("calls the pause off when the spectator it was for goes", async () => {
     const t = await sitDown(7, 3);
     try {
       await playUntil(t, watchingAScoredRound, "a round it was out of");
-      assert.equal(t.clock.pending(), 1, "the pause is running");
+      assert.deepEqual(t.clock.delays(), [AUTO_DEAL_MS], "the pause is running");
 
       t.client.disconnect();
 
-      await settle(t, 0, "a table with nobody watching plays to nobody");
+      await settleDelays(t, [ROOM_SWEEP_MS], "a table with nobody watching plays to nobody");
+    } finally {
+      await t.close();
+    }
+  });
+});
+
+/**
+ * Sweeping a room nobody is in any more (issue #150).
+ *
+ * A room ends when its last seat leaves, which says nothing about the exits players do
+ * not take: a tab closed, a phone backgrounded, a laptop shut. Those rooms used to stand
+ * for as long as the process did. Now they are given a minute and then dropped — a minute
+ * rather than nothing, because a reload is a disconnect and a seat is resumable precisely
+ * so a drop costs nothing (docs/adr/0013).
+ *
+ * Every server here is built with a clock this suite drives by hand, and one per test: the
+ * subject is what a room has waiting and what firing it does, so the tests have to be able
+ * to name a timer and to say "nothing is pending" as precisely as "one thing is". The room
+ * having gone is observed the way it is everywhere else here — a later join is refused,
+ * not a `RoomManager` asked.
+ */
+describe("sweeping a room nobody is in", () => {
+  interface Abandonable {
+    close: () => Promise<void>;
+    connect: () => Promise<ClientSocket>;
+    clock: TestClock;
+    client: ClientSocket;
+    watcher: Watcher;
+    roomCode: string;
+    me: string;
+    token: string;
+  }
+
+  /** One human in a fresh room, on a clock nothing moves but this test. */
+  async function sitDown(bots = 0): Promise<Abandonable> {
+    const clock = testClock();
+    const harness = await startServer(7, bots, { clock, thinkTimeMs: BOT_THINK_MS });
+    const client = await harness.connect();
+    const watcher = watch(client);
+    const { roomCode, playerId, resumeToken } = expectOk(
+      await ask<{ roomCode: string; playerId: string; resumeToken: string }>(
+        client,
+        "createRoom",
+        "Ada",
+      ),
+    );
+    return {
+      close: harness.close,
+      connect: harness.connect,
+      clock,
+      client,
+      watcher,
+      roomCode,
+      me: playerId,
+      token: resumeToken,
+    };
+  }
+
+  /**
+   * Wait for the grace period to be on the clock, or off it — a disconnect is processed
+   * asynchronously, so neither fact is true the instant the socket is told to go.
+   */
+  async function untilSweep(t: Abandonable, waiting: boolean): Promise<void> {
+    const deadline = Date.now() + 1000;
+    while (t.clock.delays().includes(ROOM_SWEEP_MS) !== waiting) {
+      if (Date.now() > deadline) {
+        assert.fail(
+          `the sweep was ${waiting ? "never" : "still"} pending (waiting: ${t.clock.delays()})`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  /** Deal a match out and hand the turn to a bot, so the room has one thinking. */
+  async function underway(t: Abandonable): Promise<PlayerGameView> {
+    expectOk(await ask(t.client, "startGame"));
+    const view = await t.watcher.until((v) => v.phase === "playing", "the deal");
+    if (view.currentTurnPlayerId !== t.me) return view;
+
+    const cheapest = playingSelf(view).hand[0]!.id;
+    expectOk(
+      await ask(t.client, "takeTurn", {
+        discardCardIds: [cheapest],
+        draw: { source: "deck" },
+      }),
+    );
+    return t.watcher.until(
+      (v) => v.phase === "playing" && v.currentTurnPlayerId !== t.me,
+      "the turn handed to a bot",
+    );
+  }
+
+  it("drops a room no human has been connected to for the grace period", async () => {
+    const t = await sitDown();
+    try {
+      t.client.disconnect();
+      await untilSweep(t, true);
+
+      t.clock.tickAt(ROOM_SWEEP_MS);
+
+      const probe = await t.connect();
+      assert.equal(
+        expectError(await ask(probe, "joinRoom", t.roomCode, "Alan")).code,
+        "ROOM_NOT_FOUND",
+        "the room went with the last connection to it",
+      );
+    } finally {
+      await t.close();
+    }
+  });
+
+  /** A reload is a disconnect, and the socket coming back is the whole answer to one. */
+  it("keeps a room whose connection comes back inside the grace period", async () => {
+    const t = await sitDown();
+    try {
+      t.client.disconnect();
+      await untilSweep(t, true);
+
+      const returning = await t.connect();
+      expectOk(
+        await ask(returning, "resumeSeat", {
+          roomCode: t.roomCode,
+          playerId: t.me,
+          resumeToken: t.token,
+        }),
+      );
+
+      await untilSweep(t, false);
+      assert.equal(t.clock.pending(), 0, "nothing is counting the room down");
+
+      const probe = await t.connect();
+      expectOk(await ask(probe, "joinRoom", t.roomCode, "Alan"));
+    } finally {
+      await t.close();
+    }
+  });
+
+  it("gives a lone human against bots their match back after a reload", async () => {
+    const t = await sitDown(2);
+    try {
+      const before = await underway(t);
+
+      t.client.disconnect();
+      await untilSweep(t, true);
+
+      const returning = await t.connect();
+      const { view } = expectOk(
+        await ask<{ view: PlayerGameView }>(returning, "resumeSeat", {
+          roomCode: t.roomCode,
+          playerId: t.me,
+          resumeToken: t.token,
+        }),
+      );
+
+      assert.equal(view.phase, "playing", "the same round, still being played");
+      assert.equal(view.roundNumber, before.roundNumber);
+      assert.deepEqual(
+        playingSelf(view).hand.map((c) => c.id),
+        playingSelf(before).hand.map((c) => c.id),
+        "and the same hand in front of them",
+      );
+      await untilSweep(t, false);
+    } finally {
+      await t.close();
+    }
+  });
+
+  /**
+   * A swept room stops doing things. Its bot was mid-think when the last human went, and
+   * that turn is called off with everything else the room had waiting — a callback left
+   * behind would fire at a code that may be issued again.
+   */
+  it("takes the room's timers with it", async () => {
+    const t = await sitDown(2);
+    try {
+      await underway(t);
+      assert.ok(
+        t.clock.delays().includes(BOT_THINK_MS),
+        "a bot was thinking about its turn",
+      );
+
+      t.client.disconnect();
+      await untilSweep(t, true);
+      t.clock.tickAt(ROOM_SWEEP_MS);
+
+      assert.equal(t.clock.pending(), 0, "nothing is left on the clock");
+      const probe = await t.connect();
+      assert.equal(
+        expectError(await ask(probe, "joinRoom", t.roomCode, "Alan")).code,
+        "ROOM_NOT_FOUND",
+      );
     } finally {
       await t.close();
     }

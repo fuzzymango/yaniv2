@@ -94,7 +94,8 @@ your seat through a dropped connection, and the page claims it back with a crede
 keeps in `localStorage` — a spinner while it asks, and then the same lobby, hand or
 scoreboard you left. If the connection goes, the screen says so rather than leaving you
 tapping at a dead table, and sits you back down when it returns. Only if the room itself has
-gone are you sent to the main menu, and told why.
+gone are you sent to the main menu, and told why — which happens a minute after the last
+person in it drops, the table being kept that long for exactly this reason (`docs/adr/0015`).
 
 While you are away, everybody else's table says so: each seat carries one word about the
 player behind it — **away** while their connection is gone, **watching** once the match has
@@ -175,8 +176,8 @@ menu, free to create or join another room. It works the same way from the lobby 
 finished match, and it means the same thing whoever types it — your seat is freed and the
 others carry on without you. Leaving a lobby you made hands it to the next seat, so the
 room is not stranded. Mid-match there is still no graceful exit; `q` or Ctrl-D just drops
-the connection, which leaves the room standing with your seat held open — the harness
-cannot resume it.
+the connection, which leaves the room standing with your seat held open for a minute — the
+harness cannot resume it, and after that the room is swept if nobody else is there.
 
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot
@@ -234,6 +235,7 @@ create or join, set the room up, deal, take turns, watch a run of bot turns a mo
 call Yaniv, and finish on the standings with another match one tap away. Reconnect is whole — a
 drop leaves the room and the seat alone, and the page presents the seat's token and picks up
 where it left off, whether the socket came back or the whole tab did. What is missing is what
-a table does about a player who is simply gone: nothing pauses, nothing times out, nobody is
-told anyone has dropped (`docs/adr/0004`), and a room whose players never come back lives
-until the server restarts — nothing sweeps it, now that no one player can end a room.
+a table does about a player who is simply gone: their seat is marked **away** for everyone
+else and nothing else happens — nothing pauses, nothing times out, nobody takes their turn.
+The room itself no longer outlives them, at least: one nobody is connected to is dropped a
+minute later (`docs/adr/0015`).

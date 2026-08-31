@@ -26,6 +26,7 @@ import {
 } from "./game.ts";
 import { err, ok, type Result } from "./result.ts";
 import type { RoomManager } from "./roomManager.ts";
+import { createRoomSweeper, unattended } from "./roomSweep.ts";
 import { createRoomTimers } from "./roomTimers.ts";
 import type { Rng } from "./rng.ts";
 import { serializeStateForPlayer } from "./serialize.ts";
@@ -89,6 +90,7 @@ export function createSocketServer(
   const timers = createRoomTimers(options.clock ?? systemClock);
   const botTurns = createBotTurnRunner(rooms, timers, options);
   const autoDeal = createAutoDealer(rooms, timers);
+  const roomSweep = createRoomSweeper(rooms, timers);
 
   /**
    * Send every connection in a room its own view of the current state.
@@ -130,6 +132,14 @@ export function createSocketServer(
       broadcastState(roomCode);
       runBotTurns(roomCode);
     });
+
+    // And the room's own grace period, on the same grounds and out of the same two facts
+    // (issue #150): publishing is when who is connected can have changed, and a sweep
+    // hung off each handler that might empty a room would be one a new handler forgets.
+    // Both considerations are idempotent, so the two live happily on one broadcast — a
+    // room with nobody in it goes on publishing its bots' moves, and neither the deal it
+    // will not get nor the sweep it will is restarted by any of them.
+    roomSweep.consider(roomCode, connected, () => sweepRoom(roomCode));
   }
 
   /**
@@ -213,8 +223,8 @@ export function createSocketServer(
    * call, so a new timer is covered by being in the registry rather than by anyone
    * remembering to cancel it here.
    *
-   * A room whose players are all *disconnected* is a different question, and not this
-   * one: they still hold their seats, and a reload is a disconnect.
+   * A room whose players are all *disconnected* is a different question, and it is
+   * `sweepRoom`'s: they still hold their seats, and a reload is a disconnect.
    */
   function destroyRoom(roomCode: string): void {
     timers.cancelRoom(roomCode);
@@ -222,11 +232,38 @@ export function createSocketServer(
   }
 
   /**
-   * Nobody left that a room is *for*: every human has gone, or the lobby has emptied.
+   * The far end of a room's grace period: nobody has been connected to it for
+   * `ROOM_SWEEP_MS`, so it goes (issue #150). Nobody is told — there is no connection left
+   * that this could be news to, which is what makes it the same shape as a room whose last
+   * seat left rather than a match being ended on anybody.
+   *
+   * The question is asked once more before the room is dropped, and against the live
+   * sockets rather than the set the pause was started with. A returning connection cancels
+   * this by publishing (`broadcastState`), and `resumeSeat` seats itself before it
+   * publishes — so a claim landing in the last tick of the minute would otherwise have its
+   * room swept out from under it. One `unattended` call, so the judgement cannot come out
+   * two ways at the two ends of the same pause.
+   */
+  function sweepRoom(roomCode: string): void {
+    const state = rooms.getState(roomCode);
+    if (!state) return;
+    if (!unattended(state, connectedPlayers(membersOf(roomCode)))) return;
+    destroyRoom(roomCode);
+  }
+
+  /**
+   * Every seat *given up*: the humans have all left, or the lobby has emptied. Asked after
+   * a departure, and answered by dropping the room on the spot.
    *
    * Bots are counted out rather than waited on. A bot never departs and never asks for
    * anything, so a table of them with the last human gone is a room playing to nobody —
    * and, with no player left who could leave, one nothing else would ever end.
+   *
+   * Deliberately **not** `roomSweep.ts`'s `unattended`, which the sweep and this share a
+   * shape with and nothing else: that one asks who is *connected*, and is answered a minute
+   * later because a drop is survivable. Leaving is not, so this is answered at once — and a
+   * room left holding one seat whose player has merely dropped is this one's `false` and
+   * that one's `true`, which is the whole difference between the two exits.
    */
   function abandoned(state: GameState): boolean {
     return state.players.every((p) => p.departed || p.isBot);
@@ -559,9 +596,10 @@ export function createSocketServer(
      * to whoever is left, which is the only way they learn a seat has gone quiet. A table
      * waiting on somebody who is not there explains itself rather than merely stopping.
      *
-     * The cost is a room nobody ever comes back to, and nobody closes, living until the
-     * server restarts — an accepted leak for this pass, of the same shape as rooms being
-     * in memory at all. See CLAUDE.md.
+     * It is also what starts the room's grace period, in passing rather than by name: the
+     * broadcast reconsiders the sweep, and a publication with no human behind any seat is
+     * exactly the position that asks for one (issue #150). A room nobody comes back to has
+     * a minute left, and one whose player reloads is republished to before it is up.
      */
     socket.on("disconnect", () => {
       const session = socket.data.session;

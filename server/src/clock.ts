@@ -16,10 +16,19 @@ export interface Clock {
   after: (ms: number, fn: () => void) => () => void;
 }
 
-/** Real time, and the default anywhere real time is what is wanted. */
+/**
+ * Real time, and the default anywhere real time is what is wanted.
+ *
+ * Unreferenced, so a pending timer never keeps a process alive on its own. Everything set
+ * on this clock is work a *room* has waiting — a bot's turn, a scored round dealing itself
+ * on, a room being swept — and none of it is a reason for a server to stay up: the
+ * listening socket is what does that, and it outlives every one of them. Without this a
+ * process asked to shut down would sit out the longest grace period first.
+ */
 export const systemClock: Clock = {
   after: (ms, fn) => {
     const timer = setTimeout(fn, ms);
+    timer.unref();
     return () => clearTimeout(timer);
   },
 };

@@ -246,12 +246,29 @@ export function slapdownOpen(view: PlayerGameView): boolean {
 export interface TestClock extends Clock {
   /** How many timers are waiting. */
   pending: () => number;
+  /** The delay each waiting timer asked for, longest-waiting first. */
+  delays: () => number[];
   /** Run the timer that has been waiting longest, and answer the delay it asked for. */
   tick: () => number;
+  /**
+   * Run the longest-waiting timer that asked for exactly `ms`.
+   *
+   * A room can have several kinds of work pending at once — a bot mid-think, a scored
+   * round dealing itself on, the room's own grace period — and a test about one of them
+   * has to be able to fire that one. The interval is what names it: each behaviour has
+   * its own constant, so `tickAt(ROOM_SWEEP_MS)` says which timer it means and fails
+   * loudly rather than silently running somebody else's.
+   */
+  tickAt: (ms: number) => void;
 }
 
 export function testClock(): TestClock {
   const waiting: { ms: number; run: () => void }[] = [];
+
+  function runAt(at: number): void {
+    const [timer] = waiting.splice(at, 1);
+    timer!.run();
+  }
 
   return {
     after: (ms, run) => {
@@ -263,11 +280,19 @@ export function testClock(): TestClock {
       };
     },
     pending: () => waiting.length,
+    delays: () => waiting.map((timer) => timer.ms),
     tick: () => {
-      const timer = waiting.shift();
+      const timer = waiting[0];
       if (!timer) throw new Error("nothing is waiting on the clock");
-      timer.run();
+      runAt(0);
       return timer.ms;
+    },
+    tickAt: (ms) => {
+      const at = waiting.findIndex((timer) => timer.ms === ms);
+      if (at === -1) {
+        throw new Error(`no timer waiting ${ms}ms (waiting: ${waiting.map((t) => t.ms)})`);
+      }
+      runAt(at);
     },
   };
 }

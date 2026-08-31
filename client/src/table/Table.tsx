@@ -591,7 +591,7 @@ export function Table({
         {/*
           The viewer's own hand, in the order the server sorted it and in no other: sorting
           again here would rearrange a hand under a player's finger between one move and the
-          next. See "Hand display order is presentation only" in CLAUDE.md.
+          next. Display order is `sortHand`'s and the serializer's alone — see `shared/cards.ts`.
 
           Face up and untappable once the round is scored — there is no turn left to build,
           and a card that lifted under a thumb would be offering one.

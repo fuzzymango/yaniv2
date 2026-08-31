@@ -42,11 +42,17 @@ the seat instead (**left**, see "Out of the match"). Either way the room lives o
 whoever remains: the lobby for the rest to join and start, or the finished match's
 scoreboard for whoever is still looking at it.
 
-**A room ends when its last seat leaves**, and that is the whole of it — there is no
-control that ends one for anybody else, and a disconnect leaves the room and the seat
-exactly as they were. The **close room** action that used to be the host's exception was
-removed with [ADR-0012](docs/adr/0012-the-host-retires-at-the-first-deal.md), along with
-the asymmetry that made a host's exit cost everyone else their match.
+**A room ends when its last seat leaves**, and there is no control that ends one for
+anybody else: the **close room** action that used to be the host's exception was removed
+with [ADR-0012](docs/adr/0012-the-host-retires-at-the-first-deal.md), along with the
+asymmetry that made a host's exit cost everyone else their match.
+
+A room also ends **unattended** — with no seat held by a human who is connected — for a
+minute, which is the other way out and the one nobody takes deliberately: a tab closed, a
+phone backgrounded. A disconnect still leaves the room and the seat exactly as they were,
+and the minute is why: a reload is a disconnect, and the connection coming back inside it
+cancels the sweep. Out of the match is not out of the room — a spectator is attending one.
+[ADR-0015](docs/adr/0015-the-room-dies-with-its-last-human.md).
 
 ## Host
 
