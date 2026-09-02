@@ -1168,6 +1168,135 @@ body {
 }
 
 /*
+ * The way into the match's ledger, in the viewer's own bar and to the left of their name
+ * (docs/adr/0017). Smaller than the topbar's icons and dimmer than the row it sits in: it
+ * is there to be found rather than noticed, and the numbers beside it are what the bar is
+ * for.
+ */
+.you__card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin-left: -0.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.4rem;
+  background: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+/*
+ * The same button while the card is up, lit above the darkening the panel puts over
+ * everything else — including the rest of its own bar. The `z-index` clears the backdrop's
+ * (`.modal`, 10); nothing between here and the root raises a stacking context around it,
+ * bar the slapdown jolt, which lasts a fifth of a second and moves the table by two pixels.
+ */
+.you__card--open {
+  position: relative;
+  z-index: 11;
+  color: var(--ink);
+}
+
+.you__card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.you__card .topbar__icon {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+/*
+ * Said to a screen reader and drawn nowhere: the corner cell above the round numbers, which
+ * names the row headers under it and has nothing to put on paper.
+ */
+.offscreen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/*
+ * The card itself: rounds down the page, seats across it. Scrolls in its own box rather
+ * than growing the panel, so a long match is reachable without the panel leaving the
+ * screen — and it is scrolled to the newest round as it opens (`Scorecard.tsx`).
+ */
+.scorecard {
+  max-height: min(60dvh, 26rem);
+  overflow: auto;
+}
+
+.scorecard__grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorecard__grid th,
+.scorecard__grid td {
+  padding: 0.25rem 0.4rem;
+  text-align: right;
+}
+
+/*
+ * The names stay put while the rounds scroll under them, which is the one thing a paper
+ * scorecard gets for free and a scrolling box does not.
+ */
+.scorecard__grid thead th {
+  position: sticky;
+  top: 0;
+  background: var(--felt-dark);
+  font-size: 0.8rem;
+  font-weight: 700;
+  /* Names are bounded server-side but not narrow; the numbers keep their columns. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The round number leading its row, dim: it is how a row is named, not part of the record. */
+.scorecard__grid tbody th {
+  color: var(--ink-dim);
+  font-weight: 600;
+  text-align: left;
+}
+
+.scorecard__grid tbody tr:nth-child(even) {
+  background: var(--surface);
+}
+
+/*
+ * What happened in a round, in the three colours and nothing else — no captions and no
+ * legend, the card being a sheet of paper rather than a report. Green called the Yaniv, red
+ * took it off them, blue is a total a milestone cut (docs/rules.md §7). Which of them a
+ * cell wears where two apply is `scorecard.ts`'s, not this stylesheet's.
+ */
+.scorecard__cell--yaniv {
+  color: #86efac;
+  font-weight: 700;
+}
+
+.scorecard__cell--assaf {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.scorecard__cell--milestone {
+  color: #93c5fd;
+  font-weight: 700;
+}
+
+/*
  * The deck above the discard, and the pair pushed down against the hand rather than
  * centred in the height above it.
  *

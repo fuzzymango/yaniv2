@@ -1211,6 +1211,179 @@ describe("callYaniv — milestone reduction", () => {
  * is the same rule read at its smallest — the round that knocks one of them out leaves
  * exactly one, so it ends the match, which is what two players have always done.
  */
+/**
+ * The match's ledger, and only what it records: who called, who Assafed, where the round
+ * left everybody and what a milestone took off on the way. What the *client* makes of those
+ * — which cell is green and which is blue — is `client/src/scorecard.ts`'s, and is tested
+ * there. docs/adr/0017.
+ */
+describe("callYaniv — the scorecard", () => {
+  it("appends exactly one row for the round that was scored", () => {
+    const state = makeState({
+      hands: { p1: ["hearts-A"], p2: ["spades-K"] },
+      roundNumber: 3,
+      scorecard: [
+        {
+          roundNumber: 2,
+          callerId: "p2",
+          assaferId: null,
+          players: [
+            { playerId: "p1", scoreAfter: 8, milestoneReduction: 0 },
+            { playerId: "p2", scoreAfter: 0, milestoneReduction: 0 },
+          ],
+        },
+      ],
+    });
+
+    const after = unwrap(callYaniv(state, "p1"));
+
+    assert.equal(after.scorecard.length, 2);
+    assert.deepEqual(
+      after.scorecard.map((row) => row.roundNumber),
+      [2, 3],
+      "oldest first, and the round that was just scored is the one appended",
+    );
+  });
+
+  it("names the caller, and null where the call stood", () => {
+    const state = makeState({ hands: { p1: ["hearts-A"], p2: ["spades-K"] } });
+    const row = unwrap(callYaniv(state, "p1")).scorecard[0]!;
+
+    assert.equal(row.callerId, "p1");
+    assert.equal(row.assaferId, null);
+  });
+
+  it("names the Assafer where there was one", () => {
+    const state = makeState({
+      hands: {
+        p1: ["hearts-3", "hearts-4"], // 7, the caller
+        p2: ["spades-2", "spades-3"], // 5, the Assaf
+      },
+    });
+    const row = unwrap(callYaniv(state, "p1")).scorecard[0]!;
+
+    assert.equal(row.callerId, "p1");
+    assert.equal(row.assaferId, "p2");
+  });
+
+  it("gives every player of the round a cell, carrying the total it left them on", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 12 },
+        { id: "p2", score: 30 },
+        { id: "p3", score: 0 },
+      ],
+      hands: { p1: ["hearts-A"], p2: ["spades-9"], p3: ["clubs-4"] },
+    });
+
+    const row = unwrap(callYaniv(state, "p1")).scorecard[0]!;
+
+    assert.deepEqual(row.players, [
+      { playerId: "p1", scoreAfter: 12, milestoneReduction: 0 },
+      { playerId: "p2", scoreAfter: 39, milestoneReduction: 0 },
+      { playerId: "p3", scoreAfter: 4, milestoneReduction: 0 },
+    ]);
+  });
+
+  it("records a milestone reduction on the cell it fired for, and zero on the others", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 0 },
+        { id: "p2", score: 42 },
+      ],
+      hands: { p1: ["hearts-A"], p2: ["clubs-8"] },
+    });
+
+    const row = unwrap(callYaniv(state, "p1")).scorecard[0]!;
+
+    assert.deepEqual(row.players, [
+      { playerId: "p1", scoreAfter: 0, milestoneReduction: 0 },
+      // 42 + 8 = 50, reduced to 0 by the milestone (docs/rules.md §7).
+      { playerId: "p2", scoreAfter: 0, milestoneReduction: 50 },
+    ]);
+  });
+
+  /**
+   * The green/blue collision, at the level the client's precedence rule is a rule *about*:
+   * an Assafed caller pays their hand plus the penalty, and that can land on a multiple of
+   * 50. The row names them as the caller and their cell carries a reduction, both at once.
+   */
+  it("carries both a reduction and the caller's own id for an Assafed caller on a milestone", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 15 },
+        { id: "p2", score: 0 },
+      ],
+      hands: {
+        p1: ["hearts-A", "hearts-4"], // 5, the caller: 15 + 5 + 30 = 50
+        p2: ["spades-2", "spades-3"], // 5, the Assaf
+      },
+    });
+
+    const row = unwrap(callYaniv(state, "p1")).scorecard[0]!;
+
+    assert.equal(row.callerId, "p1");
+    assert.equal(row.assaferId, "p2");
+    assert.deepEqual(row.players, [
+      { playerId: "p1", scoreAfter: 0, milestoneReduction: 50 },
+      { playerId: "p2", scoreAfter: 0, milestoneReduction: 0 },
+    ]);
+  });
+
+  /** A blank cell means one thing: that seat was out of the match by that round. */
+  it("gives a seat eliminated in an earlier round no cell in this one", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", score: 10 },
+        { id: "p2", score: 20 },
+        { id: "p3", score: 105, outInRound: 2 },
+      ],
+      hands: { p1: ["hearts-A"], p2: ["spades-9"] },
+      roundNumber: 3,
+    });
+
+    const row = unwrap(callYaniv(state, "p1")).scorecard[0]!;
+
+    assert.deepEqual(
+      row.players.map((cell) => cell.playerId),
+      ["p1", "p2"],
+    );
+  });
+
+  it("gives a player who left mid-round no cell for it, and leaves their earlier ones alone", () => {
+    const state = makeState({
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      hands: { p1: ["hearts-A"], p2: ["spades-9"], p3: ["clubs-4"] },
+      roundNumber: 2,
+      scorecard: [
+        {
+          roundNumber: 1,
+          callerId: "p3",
+          assaferId: null,
+          players: [
+            { playerId: "p1", scoreAfter: 6, milestoneReduction: 0 },
+            { playerId: "p2", scoreAfter: 9, milestoneReduction: 0 },
+            { playerId: "p3", scoreAfter: 0, milestoneReduction: 0 },
+          ],
+        },
+      ],
+    });
+
+    const left = unwrap(removePlayer(state, "p3"));
+    const after = unwrap(callYaniv(left, "p1"));
+
+    assert.deepEqual(
+      after.scorecard[0]!.players.map((cell) => cell.playerId),
+      ["p1", "p2", "p3"],
+      "the round they played is the record of a match they were in",
+    );
+    assert.deepEqual(
+      after.scorecard[1]!.players.map((cell) => cell.playerId),
+      ["p1", "p2"],
+    );
+  });
+});
+
 describe("callYaniv — elimination", () => {
   it("marks a player whose total passes maxScore as out, in the round they went out", () => {
     const state = makeState({
@@ -1841,6 +2014,15 @@ describe("startNextRound", () => {
     return unwrap(callYaniv(state, "p1")); // p2 Assafs, so p2 won the round
   };
 
+  /** Match-scoped, unlike everything in `RoundState`: a deal adds nothing and clears nothing. */
+  it("leaves the scorecard exactly as the scored round left it", () => {
+    const scored = finished();
+    const next = unwrap(startNextRound(scored, "p1", rng()));
+
+    assert.deepEqual(next.scorecard, scored.scorecard);
+    assert.equal(next.scorecard.length, 1);
+  });
+
   it("deals a fresh round and increments the round number", () => {
     const next = unwrap(startNextRound(finished(), "p1", rng()));
 
@@ -1983,6 +2165,18 @@ describe("playAgain", () => {
     assert.equal(again.round.lastDiscard.length, 1);
     assert.equal(again.round.buried.length, 0);
     assert.equal(allCardIds(again).length, 54);
+  });
+
+  /**
+   * The riskiest field of this transition: it builds the new match by spreading the old
+   * state, so a scorecard left out of the reset carries over silently and grows a second
+   * round 1 under the last match's rows — with no type error anywhere.
+   */
+  it("clears the scorecard, so the new match is a fresh sheet", () => {
+    const finished = finishedMatch();
+    assert.equal(finished.scorecard.length, 1, "the match being replayed scored a round");
+
+    assert.deepEqual(unwrap(playAgain(finished, "p1", rng())).scorecard, []);
   });
 
   it("resets every score and the round number", () => {

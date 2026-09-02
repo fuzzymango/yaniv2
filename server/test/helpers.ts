@@ -7,6 +7,7 @@ import type {
   PlayerGameView,
   PlayingSelfView,
   RoomSettings,
+  RoundScore,
 } from "@yaniv/shared";
 import { HAND_SIZE, MAX_SCORE, YANIV_THRESHOLD } from "@yaniv/shared";
 import type { Clock } from "../src/clock.ts";
@@ -90,6 +91,8 @@ export interface StateOptions {
   lastSlapdown?: { playerId: string; cardId: string };
   /** Moves already logged on the round, oldest first, named by their cards' ids. */
   moveHistory?: MoveHistorySpec[];
+  /** Rounds the match has already scored, oldest first — the ledger as it stands. */
+  scorecard?: RoundScore[];
   settings?: Partial<RoomSettings>;
 }
 
@@ -121,6 +124,7 @@ export function makeState(options: StateOptions = {}): GameState {
     roundNumber: options.roundNumber ?? 1,
     lastRoundResult: null,
     winnerIds: null,
+    scorecard: options.scorecard ?? [],
   };
 
   if (phase === "lobby") {

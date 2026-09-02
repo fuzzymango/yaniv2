@@ -3143,3 +3143,175 @@ describe("sweeping a room nobody is in", () => {
     }
   });
 });
+
+/**
+ * The match's ledger reaching a real client (docs/adr/0017). What a row *says* is the
+ * engine suite's, and what colour a cell wears is the browser client's; this is the wire's
+ * own share of it — that the field rides every phase, grows a row when a round is scored,
+ * and comes back whole to a connection that dropped and resumed.
+ *
+ * Nothing is added to the serializer suite for it: there is no redaction here to guard, so
+ * the same path end to end is the honest place to look.
+ */
+describe("the scorecard on the wire", () => {
+  let table: Harness;
+
+  before(async () => {
+    // A limit no round here reaches: what is under test is a ledger of several rounds, and
+    // a table that busts on the first one never has more than one row to lose.
+    table = await startServer(4242, 1, { thinkTimeMs: 0 }, LONG_MATCH);
+  });
+  after(async () => {
+    await table.close();
+  });
+
+  interface Seat {
+    client: ClientSocket;
+    watcher: Watcher;
+    roomCode: string;
+    playerId: string;
+    resumeToken: string;
+  }
+
+  async function seated(): Promise<Seat> {
+    const client = await table.connect();
+    const watcher = watch(client);
+    const created = expectOk(
+      await ask<{ roomCode: string; playerId: string; resumeToken: string }>(
+        client,
+        "createRoom",
+        "Ada",
+      ),
+    );
+    return { client, watcher, ...created };
+  }
+
+  /** The player has something to do again: their turn, or a round to react to. */
+  const settled = (seat: Seat) => (view: PlayerGameView) =>
+    view.phase !== "lobby" &&
+    (view.phase !== "playing" || view.currentTurnPlayerId === seat.playerId);
+
+  /**
+   * Play the table forward one action at a time, with the same judgement the server gives
+   * its bots, until the position answers `done`.
+   */
+  async function playUntil(
+    seat: Seat,
+    done: (view: PlayerGameView) => boolean,
+  ): Promise<PlayerGameView> {
+    seat.watcher.reset();
+    expectOk(await ask(seat.client, "startGame"));
+
+    for (let step = 0; step < 500; step++) {
+      const current = await seat.watcher.until(settled(seat), "the player to be needed");
+      if (done(current)) return current;
+
+      seat.watcher.reset();
+      if (current.phase === "roundEnd") {
+        expectOk(await ask(seat.client, "startNextRound"));
+        continue;
+      }
+      assert.notEqual(current.phase, "gameEnd", "the match ended first");
+
+      const decision = decideTurn(current);
+      if (decision.type === "yaniv") {
+        expectOk(await ask(seat.client, "callYaniv"));
+      } else {
+        expectOk(await ask(seat.client, "takeTurn", decision.action));
+      }
+    }
+    assert.fail("the table never reached the position under test");
+  }
+
+  it("arrives empty in the lobby, before any round has been scored", async () => {
+    const seat = await seated();
+    const lobby = await seat.watcher.until((v) => v.phase === "lobby", "the lobby");
+
+    assert.deepEqual(lobby.scorecard, []);
+  });
+
+  it("is still empty on the freshly dealt first round", async () => {
+    const seat = await seated();
+    const dealt = await playUntil(seat, (v) => v.phase === "playing");
+
+    assert.deepEqual(dealt.scorecard, [], "nothing has been scored yet");
+  });
+
+  it("has grown by a row once a round has been scored", async () => {
+    const seat = await seated();
+    const scored = await playUntil(seat, (v) => v.phase !== "playing");
+
+    assert.equal(scored.scorecard.length, 1);
+    const [row] = scored.scorecard;
+    assert.equal(row!.roundNumber, scored.roundNumber);
+    // The round on the reveal and the newest row are the same round, said two ways.
+    assert.equal(row!.callerId, scored.roundResult!.callerId);
+    assert.equal(row!.assaferId, scored.roundResult!.assaferId);
+  });
+
+  /**
+   * The fourth phase, and the one this suite's own long-limit server cannot reach: a match
+   * that is over still carries its ledger, even though the card is not offered over the
+   * standings — the field is not gated on a phase, and nothing downstream should have to
+   * know which phases it arrives in.
+   */
+  it("still carries the ledger once the match is over", async () => {
+    const short = await startServer(4242, 1, { thinkTimeMs: 0 }, SHORT_MATCH);
+    try {
+      const client = await short.connect();
+      const watcher = watch(client);
+      expectOk(await ask(client, "createRoom", "Ada"));
+      expectOk(await ask(client, "startGame"));
+
+      let current = await watcher.until(
+        (v) => v.phase !== "lobby" && (v.phase !== "playing" || v.currentTurnPlayerId === v.you.id),
+        "the player to be needed",
+      );
+      for (let step = 0; step < 500 && current.phase !== "gameEnd"; step++) {
+        watcher.reset();
+        if (current.phase === "roundEnd") {
+          expectOk(await ask(client, "startNextRound"));
+        } else {
+          const decision = decideTurn(current);
+          if (decision.type === "yaniv") {
+            expectOk(await ask(client, "callYaniv"));
+          } else {
+            expectOk(await ask(client, "takeTurn", decision.action));
+          }
+        }
+        current = await watcher.until(
+          (v) => v.phase !== "playing" || v.currentTurnPlayerId === v.you.id,
+          "the player to be needed",
+        );
+      }
+
+      assert.equal(current.phase, "gameEnd");
+      assert.equal(current.scorecard.length, current.roundNumber);
+    } finally {
+      await short.close();
+    }
+  });
+
+  it("hands the whole ledger back to a connection that dropped and resumed", async () => {
+    const seat = await seated();
+    // A round scored, then dealt on: the position a resuming client would otherwise be
+    // sent with nothing behind it, there being no `roundResult` at `playing` either.
+    const dealtOn = await playUntil(
+      seat,
+      (v) => v.phase === "playing" && v.scorecard.length > 0,
+    );
+    assert.equal(dealtOn.scorecard.length, 1);
+
+    seat.client.disconnect();
+    const returning = await table.connect();
+    const { view } = expectOk(
+      await ask<{ view: PlayerGameView }>(returning, "resumeSeat", {
+        roomCode: seat.roomCode,
+        playerId: seat.playerId,
+        resumeToken: seat.resumeToken,
+      }),
+    );
+
+    assert.deepEqual(view.scorecard, dealtOn.scorecard, "the match's history, not a blank sheet");
+  });
+});

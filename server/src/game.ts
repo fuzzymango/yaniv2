@@ -1,4 +1,4 @@
-import type { Card, TurnAction } from "@yaniv/shared";
+import type { Card, RoundScore, TurnAction } from "@yaniv/shared";
 import {
   ASSAF_PENALTY,
   MILESTONE_INTERVAL,
@@ -215,6 +215,11 @@ export function playAgain(
         : { ...p, score: 0, outInRound: null },
     ),
     roundNumber: 0,
+    // Cleared with the scores, and said out loud because this transition builds the new
+    // match by spreading the old one: a ledger left in would keep the last match's rows
+    // and then grow a second round 1 underneath them, with nothing to catch it but a
+    // reader. docs/adr/0017.
+    scorecard: [],
   };
   return ok(dealRound(fresh, randomOpener(fresh, rng), rng));
 }
@@ -666,6 +671,28 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
   };
 
   /*
+   * The same round as a line of the match's ledger (docs/adr/0017): the numbers, and none
+   * of the cards. Built off `results` rather than walked separately, so the row and the
+   * reveal cannot disagree about where a round left somebody — and holding a cell for
+   * exactly the seats that played it, `results` being the round's turn order, which is what
+   * makes a blank cell mean "out of the match by then" and nothing else.
+   *
+   * No name, no winner and no delta: column headers come off the roster, which is
+   * append-only from the first deal, green reads the caller and red the Assafer, and cells
+   * are running totals so a round's own points are never displayed.
+   */
+  const scoreRow: RoundScore = {
+    roundNumber: state.roundNumber,
+    callerId: playerId,
+    assaferId,
+    players: results.map((p) => ({
+      playerId: p.playerId,
+      scoreAfter: p.scoreAfter,
+      milestoneReduction: p.milestoneReduction,
+    })),
+  };
+
+  /*
    * Scores land, then elimination is read off them — in that order and no other, because
    * the milestone reduction is already folded into `scoreAfter` above and §7 puts it
    * before the comparison: a total landing exactly on a milestone is reduced first, and
@@ -702,6 +729,7 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
     round: { ...round, slapdown: null },
     players: newPlayers,
     lastRoundResult: roundResult,
+    scorecard: [...state.scorecard, scoreRow],
     winnerIds: over ? survivors.map((p) => p.id) : null,
   });
 }

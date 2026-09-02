@@ -274,6 +274,9 @@ export function serializeStateForPlayer(
       lastSlapdown: null,
       moveHistory: [],
       roundResult: null,
+      // Empty, and sent anyway: the scorecard rides every phase (docs/adr/0017), so a
+      // client reads one field in all four rather than a field that is sometimes absent.
+      scorecard: state.scorecard,
       winnerIds: null,
     };
   }
@@ -325,6 +328,11 @@ export function serializeStateForPlayer(
       revealing && state.lastRoundResult
         ? toRoundResultView(state.lastRoundResult)
         : null,
+    // Passed through whole, in every phase and to every viewer: the same type on the wire
+    // as in the model, there being nothing here one player may know and another may not
+    // (docs/adr/0017). At `roundEnd` its newest row is the round `roundResult` above is
+    // revealing — the same round answering two different questions.
+    scorecard: state.scorecard,
     winnerIds: state.phase === "gameEnd" ? state.winnerIds : null,
   };
 }

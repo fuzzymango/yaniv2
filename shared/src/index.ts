@@ -49,6 +49,8 @@ export type {
   OpponentView,
   PlayerRoundResultView,
   RoundResultView,
+  PlayerRoundScore,
+  RoundScore,
   PlayerGameView,
 } from "./views.ts";
 

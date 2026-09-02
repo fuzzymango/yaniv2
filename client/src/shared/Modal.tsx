@@ -1,11 +1,16 @@
 /**
  * A panel over whatever screen opened it, and the three ways back out of it.
  *
- * Two things are asked behind one of these — what the room's settings are, and whether the
- * host means to close it — and the only reason they share a component is the part that is
- * not visible: a dialog has to be announced as one, has to take the focus, and has to be
- * dismissable by the backdrop, by a control and by Escape. Two copies of that contract is
- * two places for it to drift, and the half that drifts is the half nobody can see.
+ * Three things are held up behind one of these — what the room's settings are, whether a
+ * player means to leave the table, and the match's scorecard — and the only reason they
+ * share a component is the part that is not visible: a dialog has to be announced as one,
+ * has to take the focus, and has to be dismissable by the backdrop, by a control and by
+ * Escape. Two copies of that contract is two places for it to drift, and the half that
+ * drifts is the half nobody can see.
+ *
+ * The scorecard's dismissing control lives *outside* the panel, in the bar it was opened
+ * from, and that needs nothing here: dismissal has always been a callback, so a control
+ * anywhere on the screen can be the one that calls it.
  *
  * Whether it is open belongs to whoever opened it. This draws a panel; it does not decide
  * that there is one, and there is deliberately no state here to get out of step with the
@@ -18,15 +23,25 @@
 import type { ReactNode } from "react";
 
 interface ModalProps {
-  /** Said at the top, and to a screen reader as the name of the dialog. */
+  /**
+   * The name of the dialog to a screen reader, always — a panel that announces itself as
+   * one has to be announced as something.
+   */
   title: string;
+  /**
+   * Whether that name is also drawn at the top of the panel. Default yes: a question asked
+   * behind one of these usually needs its heading. The scorecard is the exception — it is a
+   * sheet of paper whose names and numbers are the whole document, and a caption over it
+   * would be the panel talking about itself.
+   */
+  showTitle?: boolean;
   /** Everything the panel is for, controls included. */
   children: ReactNode;
   /** The backdrop and Escape both land here. A control inside `children` may too. */
   onDismiss: () => void;
 }
 
-export function Modal({ title, children, onDismiss }: ModalProps) {
+export function Modal({ title, showTitle = true, children, onDismiss }: ModalProps) {
   return (
     /*
       Escape is caught here rather than on the window, because the key event reaches this
@@ -50,7 +65,7 @@ export function Modal({ title, children, onDismiss }: ModalProps) {
         // it has not missed.
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 className="modal__title">{title}</h2>
+        {showTitle && <h2 className="modal__title">{title}</h2>}
         {children}
       </div>
     </div>

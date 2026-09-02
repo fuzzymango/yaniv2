@@ -214,6 +214,47 @@ export interface RoundResultView {
 }
 
 /**
+ * One seat's cell in one row of the scorecard: where the round left them, and whether a
+ * milestone took anything off on the way (docs/rules.md §7).
+ *
+ * A *score*, where the type above it is a *result*: a result is a round revealed with the
+ * hands that produced it, this is the same round as a number in a ledger. Deliberately
+ * carries no hand, no hand value, no name and no delta — the reveal answers all four, and
+ * a ledger of running totals never displays the round's own points. See docs/adr/0017.
+ *
+ * `milestoneReduction` is **stored rather than left to be derived**, though a client could
+ * nearly recover it from a total that went down: a round winner already sitting on a
+ * multiple of 50, and a player holding a lone Joker, both land on a multiple with nothing
+ * reduced, and a derived rule would paint them blue. One integer per cell, mostly zero, is
+ * what the record costs to say what happened rather than to be re-scored downstream.
+ */
+export interface PlayerRoundScore {
+  playerId: string;
+  scoreAfter: number;
+  /** 0 unless a milestone reduction fired for this player in this round. */
+  milestoneReduction: number;
+}
+
+/**
+ * One round as a line of the match's ledger — the scorecard's row. Ordered oldest first on
+ * `PlayerGameView.scorecard`, and holding a cell for exactly the seats that played the
+ * round: a seat eliminated earlier has none, which is what a blank cell means and the only
+ * thing it means.
+ *
+ * The same type in the domain model and on the wire, with no `View` twin and no mapping
+ * function: every neighbouring pair here exists because of redaction, and nothing on a
+ * scorecard is redacted — who called, who Assafed and where a round left everybody are
+ * public to every viewer in every phase, exactly as `MatchStanding` is. docs/adr/0017.
+ */
+export interface RoundScore {
+  roundNumber: number;
+  callerId: string;
+  /** Null when the Yaniv call succeeded unopposed. */
+  assaferId: string | null;
+  players: PlayerRoundScore[];
+}
+
+/**
  * What a single client receives. Built by `serializeStateForPlayer` — the server's
  * `GameState` must never be sent directly. See docs/rules.md and the architecture doc.
  */
@@ -289,6 +330,23 @@ export interface PlayerGameView {
 
   /** Populated only in `roundEnd` and `gameEnd`, where all hands are revealed. */
   roundResult: RoundResultView | null;
+  /**
+   * Every round this match has scored, oldest first — the ledger a player opens the
+   * scorecard on. Empty in the lobby and until the first round is scored.
+   *
+   * Sent **in every phase**, unlike `roundResult` above: the card is openable during play,
+   * and a client cannot accumulate one for itself — a seat resumed after a drop is sent the
+   * current position and nothing else, so a player who reloaded in round 5 would open four
+   * blank rows. Uncapped for the same reason the record is trimmed to numbers: a match's
+   * round count is bounded by nothing the settings constrain, and a ledger missing its
+   * early rows is worse than no ledger. docs/adr/0017.
+   *
+   * At `roundEnd` the round just scored is here *and* in `roundResult` above — the
+   * relationship `lastMove` and `moveHistory` already have, and for the same reason: they
+   * answer different questions, and deriving one from the other is a search whose answer
+   * moves the day either shape changes.
+   */
+  scorecard: RoundScore[];
   /**
    * Populated only in `gameEnd`, and always with exactly one id: the match ends when one
    * player is left in it, and that player wins (docs/rules.md §7). A list because it has

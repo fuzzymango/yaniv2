@@ -1,4 +1,4 @@
-import type { Card, DrawSource, RoomSettings } from "@yaniv/shared";
+import type { Card, DrawSource, RoomSettings, RoundScore } from "@yaniv/shared";
 import type { Result } from "./result.ts";
 
 /**
@@ -290,6 +290,22 @@ export interface GameStateBase {
   roundNumber: number;
   /** Null until a round has finished. */
   lastRoundResult: RoundResult | null;
+  /**
+   * The match's ledger: one row per round it has scored, oldest first. Appended to by the
+   * scoring transition that writes `lastRoundResult` above, and by nothing else — a deal
+   * leaves it alone, and `playAgain` clears it, the round numbering going back to zero with
+   * the scores.
+   *
+   * **`RoundScore` is `shared`'s own type, used here unchanged** — the domain model and the
+   * wire carry the same shape, there being nothing on a scorecard to redact (docs/adr/0017).
+   * The precedent is `DrawSource` and `RoomSettings`, imported above on the same grounds.
+   *
+   * Where `lastRoundResult` is one round revealed with the hands that produced it,
+   * overwritten by the next, this is every round as a number, kept. The two say the same
+   * round two ways at `roundEnd` deliberately: they answer different questions, and
+   * deriving either from the other is a search whose answer moves when a shape changes.
+   */
+  scorecard: RoundScore[];
   /**
    * Null until `gameEnd`, and **always exactly one id** once populated: a match ends when
    * one player is left in it, and that player wins (docs/rules.md §7). Still a list, since

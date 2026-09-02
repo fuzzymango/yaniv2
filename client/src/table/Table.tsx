@@ -57,6 +57,7 @@ import { PlayingCard, cardLabel } from "../shared/PlayingCard.tsx";
 import { CascadeReveal, OpponentSeat, Seat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "../settings/SettingsDialog.tsx";
 import { LeaveTable } from "./LeaveTable.tsx";
+import { Scorecard } from "./Scorecard.tsx";
 import type { CardFlight } from "../flight.ts";
 import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
@@ -653,6 +654,14 @@ export function Table({
             youWentOut ? "you--went-out" : ""
           }`}
         >
+          {/*
+            The way into the match's history, in the bar the player's own standing is in
+            and to the left of their name (docs/adr/0017). Not up in the corner with the
+            settings and the way out: those are about the *room*, and this is about the
+            match being played. It offers itself nothing once the match is over — see
+            `Scorecard.tsx`.
+          */}
+          <Scorecard view={view} />
           <span className="player__name">{view.you.name}</span>
           {result !== null && yourRound !== null ? (
             <ScoredDetail player={yourRound} result={result} wentOut={youWentOut} />

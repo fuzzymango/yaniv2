@@ -124,6 +124,7 @@ export function viewOf(
     lastMove: null,
     lastSlapdown: null,
     moveHistory: [],
+    scorecard: [],
     roundResult: null,
     winnerIds: null,
   };
