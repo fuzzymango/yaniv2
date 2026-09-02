@@ -98,6 +98,14 @@ are out: you go on watching the game you were playing, with the same hands hidde
 before, and nothing left to play — leaving, in the same corner as ever, is the one control
 still yours.
 
+The row your own name is in carries the **scorecard**, a tap to the left of it: the match so
+far as a sheet of paper, one row per round scored and one column per seat, each cell the total
+that round left a player on. Green marks whoever called the Yaniv, red whoever Assafed them,
+blue a total a milestone cut, and a blank means that seat was already out of the match. It is
+there while a round is being played and while one is being scored, whether you are playing or
+only watching; once the match is over the standings answer the same question and the control
+is not offered (`docs/adr/0017`).
+
 Reloading the tab, or backgrounding it and coming back, costs you nothing: the server holds
 your seat through a dropped connection, and the page claims it back with a credential it
 keeps in `localStorage` — a spinner while it asks, and then the same lobby, hand or

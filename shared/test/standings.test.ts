@@ -57,6 +57,7 @@ function finishedMatch(seated: Seat[]): PlayerGameView {
     lastMove: null,
     lastSlapdown: null,
     moveHistory: [],
+    scorecard: [],
     roundResult: null,
     winnerIds: [you.id],
   };

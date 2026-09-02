@@ -361,6 +361,32 @@ a viewer-relative sweep anchors on would be. That sweep anchors on the viewer's 
 seat rather than on the next player to act, which is also what keeps it meaningful for a
 spectator: they are still seated, and no longer in turn order at all.
 
+## Scorecard
+
+The match's running record of the rounds it has **scored** — `GameState.scorecard`, and
+`scorecard` on the view (issue #154). One row per round, oldest first, holding the round's
+number, who called Yaniv, who Assafed them if anybody did, and one cell per seat that played
+it: the total the round left them on, and what a milestone took off it on the way.
+
+**Not a kind of [move history](#move-history)**, though both are lists a client reads back.
+Move history is a *redacted* log of **actions** within one round, emptied by every deal; the
+scorecard is an *unredacted*, **match-scoped** record of **outcomes**, cleared only by
+[play again](#play-again). Nothing on it is anybody's secret — where a round left a player is
+public the moment it is scored — so it is one type in the domain model and on the wire, with
+no view twin and nothing for the serializer to redact.
+
+A row is deliberately **not** a round result: a *result* is a round revealed
+with the hands that produced it, overwritten by the next round; a *score* is that same round
+as a number in a ledger, kept. At `roundEnd` the payload carries both, which is the
+relationship the last move and the move history already have.
+
+Read on the browser client as the **scorecard** — the same word, because the panel does not
+represent the record, it *is* the record shown: a plain table opened from the viewer's own
+name bar, rows led by round number, columns headed by name in seating order, and three
+colours saying what happened (green called, red Assafed, blue was cut by a milestone). A
+**blank cell** means one thing only: that seat was out of the match by that round.
+[ADR-0017](docs/adr/0017-the-scorecard.md).
+
 ## Standings
 
 The final table of a finished match: every player who played it, ordered by **how long they

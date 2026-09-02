@@ -153,6 +153,9 @@ export class RoomManager {
       roundNumber: 0,
       round: null,
       lastRoundResult: null,
+      // A room starts on a blank sheet, and the first deal keeps it blank: the ledger is
+      // written by scoring a round and by nothing before it. docs/adr/0017.
+      scorecard: [],
       winnerIds: null,
     };
 
