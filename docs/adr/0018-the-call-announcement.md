@@ -111,6 +111,10 @@ leak or fire against a table that has moved on. A component-held state machine w
 because this client tests by *not* putting branches in components; a session-held timer was
 rejected because the session core is driven under test with no clock.
 
+The banner is `aria-hidden`. The line above the felt already announces the round as news, in a
+sentence naming both players, and a live region on the banner would say `YANIV` over the top
+of it — twice on an Assafed round. The banner is the visual half of one fact, not a second one.
+
 Faded-out banners stay mounted until the next publication clears them, and are therefore inert
 to pointer events — an invisible box that ate a tap meant for a card is the one way this could
 cost somebody a move.
@@ -132,11 +136,23 @@ banner's delay fall out of its index with no conditional anywhere near a compone
 `bannerAt` asks the same question from one seat's point of view, which is the branch the
 screen would otherwise be trusted with.
 
+The originating spec asked for the component to be **handed the ordered list and map over
+it**. It is handed one placed banner instead, and the substitution is deliberate: the two
+banners of an Assafed round live in two different boxes on the screen — one seat each, and
+possibly the viewer's own hand row — so there is no single parent for a map to run in. What
+the spec wanted from that shape is the guarantee, not the loop: that "one banner or two" is
+answered where it can be asserted. `bannerAt` answers it in the pure module, under test, and
+the component keeps its `index` and `count` and holds no conditional of its own.
+
 ## Rendering is CSS-positioned inside the box it belongs to
 
 The banner is anchored to the **person**, not centred on the felt: over an opponent's seat
 when it is them, over the viewer's own hand row when it is the viewer. Position is what says
 who, which is the whole difference between this and a larger copy of the line above the felt.
+
+Its size comes from the **viewport** and never from `--card-w`, which is the one thing the
+two parents must not supply: the seat band and the hand row set that variable to different
+values, and a banner scaled from it would be the same announcement drawn two sizes.
 
 It is **not** a measured overlay. DOM measurement stays contained to `CardsInFlight.tsx`,
 which needs it because a card genuinely travels between two distant boxes; a banner does not

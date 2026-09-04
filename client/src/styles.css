@@ -989,9 +989,11 @@ body {
  * (issue #156). No name and no number — position is what says who, which is the whole reason
  * this sits in a seat's box rather than in the middle of the felt.
  *
- * Sized off the card width of whatever box it is in, so it is legible at a cramped top-zone
- * seat on a phone and does not become a headline over the viewer's own hand. Clamped at both
- * ends, since the two boxes scale from different roots.
+ * **Sized off the viewport and not off `--card-w`**, which is the one thing the two parents
+ * must not be allowed to supply: the seat band and the viewer's own hand row set that
+ * variable to different values, so a banner scaled from it would be one size over a seat and
+ * another over the hand — the same announcement, drawn two ways. Clamped at both ends so it
+ * is legible at a cramped top-zone seat on a phone and is not a headline on a monitor.
  *
  * **Inert to pointer events, always.** A faded banner stays mounted until the next
  * publication clears it, and an invisible box over the felt that ate a tap meant for a card
@@ -1021,11 +1023,10 @@ body {
       both,
     announce-out var(--announce-exit) ease-in var(--announce-out-delay) forwards;
   color: var(--accent);
-  font-size: clamp(1.1rem, calc(var(--card-w) * 0.62), 2.75rem);
+  font-size: clamp(1.1rem, 7vw, 2.4rem);
   font-weight: 800;
   letter-spacing: 0.12em;
   line-height: 1;
-  text-transform: uppercase;
   /*
    * A dark plate under the word, because what it is read against is a fan of white cards
    * rather than the felt: colour alone against a face card is the one place this could be
@@ -1822,6 +1823,11 @@ body {
  */
 .hand-row {
   position: relative;
+  /*
+   * Above the felt, said rather than left to DOM order: the viewer's own banner overflows
+   * this row upward onto the felt, and "it happens to come after" is not a rule (issue #156).
+   */
+  z-index: 1;
 }
 
 .hand-row:empty {

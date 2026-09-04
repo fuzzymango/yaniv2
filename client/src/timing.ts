@@ -102,3 +102,19 @@ export const ANNOUNCE_ENTER_MS = ANNOUNCE_MS / 3;
  * closed rather than as cut off.
  */
 export const ANNOUNCE_EXIT_MS = ANNOUNCE_MS / 2;
+
+/**
+ * When one banner of an announcement arrives, and when every banner of it leaves.
+ *
+ * Here rather than in the component that reads them, on the same grounds as the constants
+ * above: a component in this client is asserted about nowhere, and these two lines are the
+ * whole of the staging — the beat between the call and the answer to it, and the fact that
+ * the exit is measured from the *last* arrival rather than from each banner's own, which is
+ * what makes the pair leave together.
+ *
+ * Total over any index and count; a lone banner is index 0 of one.
+ */
+export const announceEnterAt = (index: number): number => index * ANNOUNCE_LEAD_MS;
+
+export const announceLeaveAt = (count: number): number =>
+  (count - 1) * ANNOUNCE_LEAD_MS + ANNOUNCE_MS;

@@ -34,39 +34,40 @@ import type { PlacedBanner } from "../announcement.ts";
 import {
   ANNOUNCE_ENTER_MS,
   ANNOUNCE_EXIT_MS,
-  ANNOUNCE_LEAD_MS,
-  ANNOUNCE_MS,
+  announceEnterAt,
+  announceLeaveAt,
 } from "../timing.ts";
 
-/** The word each call is announced as. Upper case is the style; this is the vocabulary. */
+/**
+ * The word each call is announced as, and **upper case here rather than in the stylesheet**:
+ * the banner says exactly `YANIV` or `ASSAF` and nothing else, so what a text transform makes
+ * of it is not the place that decision should live.
+ */
 const SAID: Record<PlacedBanner["call"], string> = {
-  yaniv: "Yaniv",
-  assaf: "Assaf",
+  yaniv: "YANIV",
+  assaf: "ASSAF",
 };
 
 export function CallAnnouncement({ banner }: { banner: PlacedBanner }) {
   /*
-   * When this banner arrives, and when every banner leaves.
-   *
-   * The entrance is staggered by the beat, so the pair reads in the order the round
-   * actually had — a call, then the answer to it. The exit is not staggered at all: it is
-   * measured from the *last* entrance, so both fade together and a player sees the two
-   * seats the round turned on side by side before either goes. Which is why `count` is
-   * handed down with `index` — a banner cannot know when the pair leaves from its own place
-   * in it alone.
+   * When this banner arrives, and when every banner leaves — asked of `timing.ts`, which is
+   * where the arithmetic of the sequence lives and where a test can reach it. The entrance
+   * is staggered by the beat and the exit is not staggered at all, being measured from the
+   * *last* entrance, which is why `count` is handed down beside `index`.
    */
-  const enterAt = banner.index * ANNOUNCE_LEAD_MS;
-  const leaveAt = (banner.count - 1) * ANNOUNCE_LEAD_MS + ANNOUNCE_MS;
+  const enterAt = announceEnterAt(banner.index);
+  const leaveAt = announceLeaveAt(banner.count);
 
   return (
     <span
       className={`announce announce--${banner.call}`}
       /*
-       * Announced to a screen reader as news rather than as part of the seat's label: the
-       * table has just changed under somebody who cannot see it flash, and the line above
-       * the felt says the same thing in a sentence a moment later.
+       * Hidden from a screen reader, deliberately. The line above the felt already announces
+       * the round as news, in a sentence that names both players — which is the better
+       * telling of it — and a live region here would say `YANIV` over the top of it, twice on
+       * an Assafed round. The banner is the *visual* half of one fact, not a second fact.
        */
-      role="status"
+      aria-hidden="true"
       style={
         {
           "--announce-enter": `${ANNOUNCE_ENTER_MS}ms`,
