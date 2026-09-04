@@ -913,6 +913,9 @@ body {
  * `fanFootprint`, which is sized off the same angles the cards are drawn at.
  */
 .table-seat {
+  /* The box the call announcement is placed against — see `.announce` (issue #156). */
+  position: relative;
+
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -966,6 +969,151 @@ body {
  */
 .table-seat--out {
   opacity: 0.38;
+}
+
+/*
+ * The seat a call is being announced over, lifted clear of its neighbours (issue #156). The
+ * banner is wider than a cramped top-zone seat and deliberately overflows it, so without
+ * this it would be drawn under whichever seat comes after it in the DOM. Raised on the zone
+ * as well, because two sides of the felt are separate positioned boxes and z-index does not
+ * reach across them.
+ */
+.table-seat--announcing,
+.table-zone:has(.table-seat--announcing) {
+  z-index: 3;
+}
+
+/*
+ * The call, over the seat it belongs to: `YANIV` in the accent yellow the table already
+ * uses for a call that stood, `ASSAF` in the danger red it already uses for one that did not
+ * (issue #156). No name and no number — position is what says who, which is the whole reason
+ * this sits in a seat's box rather than in the middle of the felt.
+ *
+ * Sized off the card width of whatever box it is in, so it is legible at a cramped top-zone
+ * seat on a phone and does not become a headline over the viewer's own hand. Clamped at both
+ * ends, since the two boxes scale from different roots.
+ *
+ * **Inert to pointer events, always.** A faded banner stays mounted until the next
+ * publication clears it, and an invisible box over the felt that ate a tap meant for a card
+ * would be the one way this feature could cost somebody a move.
+ */
+.announce {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /*
+   * Above every card in the seat, and comfortably: a fan's cards and a cascade's each carry
+   * an inline z-index counting up from 0 (`Seat.tsx`), so a banner at 1 would sit under the
+   * second card of the hand it is announcing over.
+   */
+  z-index: 20;
+  /*
+   * Where the banner sits on its box, as one variable the keyframes reuse: centred by
+   * default, and hugging its own edge at a side seat (below), where a centred banner would
+   * be half off the screen — the side seats are deliberately hung over the edge of the table
+   * (`.table__seats`), and a word centred on one goes over with them.
+   */
+  --announce-anchor: translate(-50%, -50%);
+
+  transform: var(--announce-anchor);
+  animation:
+    announce-in var(--announce-enter) cubic-bezier(0.2, 1.6, 0.4, 1) var(--announce-in-delay)
+      both,
+    announce-out var(--announce-exit) ease-in var(--announce-out-delay) forwards;
+  color: var(--accent);
+  font-size: clamp(1.1rem, calc(var(--card-w) * 0.62), 2.75rem);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+  /*
+   * A dark plate under the word, because what it is read against is a fan of white cards
+   * rather than the felt: colour alone against a face card is the one place this could be
+   * loud and still illegible, and a cramped top-zone seat is exactly where it lands.
+   */
+  padding: 0.15em 0.4em;
+  border-radius: 0.3em;
+  background: rgb(0 0 0 / 62%);
+  text-shadow: 0 0.06em 0.2em rgb(0 0 0 / 80%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Red is the Assaf, on the table and on the scorecard alike. */
+.announce--assaf {
+  color: var(--danger);
+}
+
+/*
+ * A side seat's banner grows inward, off the seat's own edge rather than out of the screen.
+ * Still over the seat, which is all that matters: position is what says who.
+ */
+.table-seat--left > .announce {
+  left: 0;
+
+  --announce-anchor: translateY(-50%);
+}
+
+.table-seat--right > .announce {
+  right: 0;
+  left: auto;
+
+  --announce-anchor: translateY(-50%);
+}
+
+/*
+ * A banner arriving: a snap past its own size and back. The exit is a fade and nothing else,
+ * and is longer than the entrance on purpose (`timing.ts`) — a banner should arrive with a
+ * snap and leave without one.
+ *
+ * How long each part lasts and when it starts are custom properties handed down from
+ * `timing.ts` by `CallAnnouncement.tsx`; the stylesheet keeps what it is better at — how far
+ * it moves, and on what curve. `announce-out` fills forwards only, so the entrance still
+ * governs the element before the exit's delay has elapsed.
+ */
+@keyframes announce-in {
+  from {
+    opacity: 0;
+    transform: var(--announce-anchor) scale(0.55);
+  }
+
+  to {
+    opacity: 1;
+    transform: var(--announce-anchor) scale(1);
+  }
+}
+
+@keyframes announce-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes announce-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/*
+ * A request not to be moved is not a request to be told less (issue #156). The same
+ * elements, the same staging and the same delays — only the entrance's scale is dropped, so
+ * the pair cross-fades in instead of snapping.
+ *
+ * Deliberately unlike the card flight, which is skipped outright under this preference: a
+ * flight is redundant with a position that can be read at leisure, whereas the whole premise
+ * here is that the quieter treatment was not enough. Answering an accessibility preference
+ * by reverting to the treatment we just called too quiet would make the accessible path the
+ * worse-informed one.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .announce {
+    animation-name: announce-fade-in, announce-out;
+  }
 }
 
 /*
@@ -1277,12 +1425,18 @@ body {
 
 /*
  * What happened in a round, in the three colours and nothing else — no captions and no
- * legend, the card being a sheet of paper rather than a report. Green called the Yaniv, red
+ * legend, the card being a sheet of paper rather than a report. Yellow called the Yaniv, red
  * took it off them, blue is a total a milestone cut (docs/rules.md §7). Which of them a
  * cell wears where two apply is `scorecard.ts`'s, not this stylesheet's.
+ *
+ * The call is the accent yellow the table itself uses for a call that stood, and not a green
+ * of its own (issue #156): **yellow is the call and red is the Assaf, everywhere**, so the
+ * banner over a seat, the line above the felt and this cell are visibly one fact. The
+ * milestone blue is untouched — it answers a different question and has to stay tellable
+ * apart from the two the call uses.
  */
 .scorecard__cell--yaniv {
-  color: #86efac;
+  color: var(--accent);
   font-weight: 700;
 }
 
@@ -1657,6 +1811,23 @@ body {
  * One control in it, and centred with the sentence rather than pushed to an edge: there is
  * nothing else here to tell it apart from, and nothing else here that should read as a move.
  */
+/*
+ * The row the viewer's own hand is in, whichever of its two things is in it — and the box
+ * their own call is announced over (issue #156). A wrapper purely so the banner has
+ * something positioned to sit in the middle of: position is what says who called, and this
+ * row is where this player is.
+ *
+ * It collapses when it holds nothing, which is a watcher at `gameEnd`: the table is a flex
+ * column with a gap, so an empty box here would push the felt up by one.
+ */
+.hand-row {
+  position: relative;
+}
+
+.hand-row:empty {
+  display: none;
+}
+
 .spectating {
   display: flex;
   flex-direction: column;

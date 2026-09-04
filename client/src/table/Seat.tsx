@@ -87,6 +87,18 @@ interface SeatProps {
   status?: SeatStatus | null;
   /** What else the label says about them: their score, their count, what a round cost them. */
   detail: ReactNode;
+  /**
+   * The call announcement over this seat, when the round that has just arrived turned on
+   * this player (issue #156). A node rather than a decision: whether there is one, and
+   * which word it is, is `announcement.ts`'s and the screen composing this passes the
+   * answer straight through.
+   *
+   * It sits inside the seat's box because the box is what says who called — see
+   * `CallAnnouncement.tsx` — and it is allowed to overflow that box, being wider than a
+   * cramped top-zone seat. The stacking that keeps it above a neighbour's cards is the
+   * stylesheet's (`.table-seat--announcing`).
+   */
+  banner?: ReactNode;
   /** Their cards, however the screen using this draws them. */
   children: ReactNode;
 }
@@ -99,6 +111,7 @@ export function Seat({
   wentOut = false,
   status = null,
   detail,
+  banner = null,
   children,
 }: SeatProps) {
   // What a seat can be other than ordinary, and no two of them are ever on at once: a
@@ -106,9 +119,10 @@ export function Seat({
   // dimmed until the next one is dealt.
   const state = `${isTurn ? " table-seat--turn" : ""}${isOut ? " table-seat--out" : ""}${
     wentOut ? " table-seat--went-out" : ""
-  }`;
+  }${banner ? " table-seat--announcing" : ""}`;
   return (
     <div className={`table-seat table-seat--${zone}${state}`}>
+      {banner}
       {children}
       <p className="table-seat__label">
         <span className="table-seat__name">{name}</span>

@@ -729,6 +729,14 @@ export function callYaniv(state: GameState, playerId: string): ActionResult {
     round: { ...round, slapdown: null },
     players: newPlayers,
     lastRoundResult: roundResult,
+    /*
+     * One row per **scored round**, appended here and nowhere else, and that is load-bearing
+     * beyond the ledger itself: the browser client announces a call by watching this list
+     * grow (`client/src/announcement.ts`, docs/adr/0018). `lastRoundResult` above cannot
+     * serve, being left standing between rounds and across a republish — but a row written
+     * for anything other than a round actually being scored would announce a call nobody
+     * made, and would do it silently.
+     */
     scorecard: [...state.scorecard, scoreRow],
     winnerIds: over ? survivors.map((p) => p.id) : null,
   });

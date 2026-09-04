@@ -24,8 +24,9 @@ import { bySeat } from "./seating.ts";
 
 /**
  * What one cell is marked for, or nothing. Named for what happened rather than for the
- * colour it is drawn in: which is green is the stylesheet's business, and a tone called
- * `green` would have to be renamed the day the palette moves.
+ * colour it is drawn in: which is yellow is the stylesheet's business, and a tone called
+ * `yellow` would have to be renamed the day the palette moves — as one called `green` would
+ * have had to be when the call went yellow (issue #156).
  *
  * `yaniv` is the seat that called, `assaf` the seat that took the call off them, and
  * `milestone` a total the round cut by 50 (docs/rules.md §7).
@@ -64,13 +65,13 @@ export interface ScorecardGrid {
 /**
  * What one cell is marked for.
  *
- * **Blue beats green**, and that is the only precedence there is to state. The green/red
+ * **Blue beats the call**, and that is the only precedence there is to state. The call/red
  * pair answers "what happened in this round", and the row answers it either way — a red
  * cell means somebody was Assafed, and only the caller can be. Blue answers a different
  * question, "why did this number go down", and nothing else on the card answers it at all.
  *
  * Red and blue cannot collide by the rules rather than by this ordering: the Assafer's
- * delta is always 0, and a reduction requires one above 0. Green and red cannot either —
+ * delta is always 0, and a reduction requires one above 0. The call and red cannot either —
  * the caller and the Assafer are never the same seat.
  */
 export function cellTone(row: RoundScore, cell: PlayerRoundScore): CellTone {

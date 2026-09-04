@@ -47,7 +47,6 @@ import type {
   OpponentView,
   PlayerGameView,
   PlayerRoundResultView,
-  RoundResultView,
   SelfView,
 } from "@yaniv/shared";
 import { handValue } from "@yaniv/shared";
@@ -58,6 +57,9 @@ import { CascadeReveal, OpponentSeat, Seat, SeatZone } from "./Seat.tsx";
 import { SettingsDialog } from "../settings/SettingsDialog.tsx";
 import { LeaveTable } from "./LeaveTable.tsx";
 import { Scorecard } from "./Scorecard.tsx";
+import type { Announcement } from "../announcement.ts";
+import { bannerAt } from "../announcement.ts";
+import { CallAnnouncement } from "./CallAnnouncement.tsx";
 import type { CardFlight } from "../flight.ts";
 import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
@@ -80,6 +82,13 @@ interface TableProps {
    * this screen — the table itself draws the position, not how it got here.
    */
   flight: CardFlight | null;
+  /**
+   * The call this position arrived on, when it is one this viewer was there to hear
+   * (issue #156). Off the session snapshot, handed to the seats it belongs over and read
+   * nowhere else on this screen: like the flight, it is a picture of something that has
+   * already happened and decides nothing.
+   */
+  announcement: Announcement;
   onToggleCard: (cardId: string) => void;
   /** The tap that plays the turn — a draw target, because the draw *is* the commit. */
   onCommitTurn: (source: DrawSource) => void;
@@ -110,11 +119,9 @@ interface TableProps {
  */
 function ScoredDetail({
   player,
-  result,
   wentOut,
 }: {
   player: PlayerRoundResultView;
-  result: RoundResultView;
   /** Whether this round is the one that took them out of the match — the `OUT` tag. */
   wentOut: boolean;
 }) {
@@ -128,9 +135,14 @@ function ScoredDetail({
         a round that ended somebody's match and one that did not are the same screen in two
         states, and the hand and the score below are the round they actually played, recorded
         before they are dimmed out of the next one.
+
+        Two marks used to sit above these and no longer do (issue #156): the call and the
+        Assaf. The banner over the seat says both, far louder, at the moment they are worth
+        saying; the line above the felt names both players in a sentence once it has faded;
+        and the scorecard is the durable per-seat record of who called what. A third, quieter
+        copy in this row was repeating all of them. What is left are the two facts nothing
+        else on the table records at all.
       */}
-      {player.playerId === result.callerId && <span className="seat__mark">yaniv</span>}
-      {player.playerId === result.assaferId && <span className="seat__mark">assaf</span>}
       {player.milestoneReduction > 0 && <span className="seat__mark">milestone</span>}
       {wentOut && <span className="seat__mark seat__mark--out">out</span>}
       <span className="player__score">
@@ -146,6 +158,7 @@ export function Table({
   error,
   busy,
   flight,
+  announcement,
   onToggleCard,
   onCommitTurn,
   onCallYaniv,
@@ -290,6 +303,19 @@ export function Table({
    * anybody is in comes off the live roster in both phases, and the round's record only says
    * what to draw in it.
    */
+  /**
+   * The banner over one seat, or nothing. Every seat asks, and at most two get an answer —
+   * which of them, and in what order, is `announcement.ts`'s and is asserted there.
+   *
+   * A one-shot off the session snapshot, so it is on the screen for the length of its own
+   * animation and gone from the next publication: a deal landing over the top of it unmounts
+   * it mid-sequence, which is the accepted price of the tension beat (issue #156).
+   */
+  const announcedAt = (playerId: string) => {
+    const banner = bannerAt(announcement, playerId);
+    return banner === null ? null : <CallAnnouncement banner={banner} />;
+  };
+
   const seatFor = (zone: Zone, opponent: OpponentView) => {
     const row = scored(opponent.id);
     if (result === null || row === null) {
@@ -313,7 +339,10 @@ export function Table({
         // round being scored as of one being played, and a seat that says "away" while the
         // table waits on the deal is saying exactly what is worth knowing.
         status={seatStatus(opponent)}
-        detail={<ScoredDetail player={row} result={result} wentOut={wentOut(opponent)} />}
+        // The call over their seat, where there is one: position is what says who called
+        // (issue #156), so it goes in the seat's own box rather than anywhere central.
+        banner={announcedAt(opponent.id)}
+        detail={<ScoredDetail player={row} wentOut={wentOut(opponent)} />}
         key={opponent.id}
       >
         <CascadeReveal cards={row.hand} zone={zone} />
@@ -605,41 +634,51 @@ export function Table({
 
           Nothing at all at `gameEnd`: the panel over this table carries its own way out,
           and the bottom of the screen is given up there exactly as the topbar is.
+
+          Wrapped, since issue #156, so the viewer's own call can be announced over it the way
+          an opponent's is announced over their seat — position is what says who, and this row
+          is where this player is. The **hand actually being shown** is the anchor and not the
+          live hand: the caller may be the player the round has just knocked out, and their
+          hand is still on the screen here, read off the round's own record. Being dimmed out
+          of the next round does not retract the last one.
         */}
-        {handShown !== null ? (
-          <ul className="hand">
-            {handShown.map((card) => {
-              const chosen = selection.includes(card.id);
-              return (
-                // A card still on its way into the hand keeps its place in the row and waits
-                // there — the face only, so it can be tapped into a selection the whole time
-                // it is arriving, exactly as it could if nothing were in the air.
-                <li className={landingClass(card.id, "hand")} key={card.id}>
-                  {live ? (
-                    <button
-                      className={`pick ${chosen ? "pick--chosen" : ""}`}
-                      type="button"
-                      aria-label={cardLabel(card)}
-                      aria-pressed={chosen}
-                      disabled={busy}
-                      onClick={() => onToggleCard(card.id)}
-                    >
+        <div className="hand-row">
+          {announcedAt(view.you.id)}
+          {handShown !== null ? (
+            <ul className="hand">
+              {handShown.map((card) => {
+                const chosen = selection.includes(card.id);
+                return (
+                  // A card still on its way into the hand keeps its place in the row and waits
+                  // there — the face only, so it can be tapped into a selection the whole time
+                  // it is arriving, exactly as it could if nothing were in the air.
+                  <li className={landingClass(card.id, "hand")} key={card.id}>
+                    {live ? (
+                      <button
+                        className={`pick ${chosen ? "pick--chosen" : ""}`}
+                        type="button"
+                        aria-label={cardLabel(card)}
+                        aria-pressed={chosen}
+                        disabled={busy}
+                        onClick={() => onToggleCard(card.id)}
+                      >
+                        <PlayingCard card={card} />
+                      </button>
+                    ) : (
                       <PlayingCard card={card} />
-                    </button>
-                  ) : (
-                    <PlayingCard card={card} />
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        ) : over ? null : (
-          <div className="spectating">
-            <span className="spectating__said">
-              You are out of the match — watching the rest of it.
-            </span>
-          </div>
-        )}
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : over ? null : (
+            <div className="spectating">
+              <span className="spectating__said">
+                You are out of the match — watching the rest of it.
+              </span>
+            </div>
+          )}
+        </div>
 
         {/*
           The same row in both phases, in the same place. What it says changes with what is
@@ -664,7 +703,7 @@ export function Table({
           <Scorecard view={view} />
           <span className="player__name">{view.you.name}</span>
           {result !== null && yourRound !== null ? (
-            <ScoredDetail player={yourRound} result={result} wentOut={youWentOut} />
+            <ScoredDetail player={yourRound} wentOut={youWentOut} />
           ) : (
             <>
               {/*

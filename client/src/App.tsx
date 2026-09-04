@@ -25,7 +25,7 @@ import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
 
 export function App({ session }: { session: Session }) {
-  const { view, error, notice, busy, connected, resuming, selection, flight } =
+  const { view, error, notice, busy, connected, resuming, selection, flight, announcement } =
     useSession(session);
 
   /*
@@ -110,6 +110,7 @@ export function App({ session }: { session: Session }) {
         error={phase === "gameEnd" ? null : error}
         busy={busy}
         flight={flight}
+        announcement={announcement}
         onToggleCard={session.toggleCard}
         onCommitTurn={session.commitTurn}
         onCallYaniv={session.callYaniv}
