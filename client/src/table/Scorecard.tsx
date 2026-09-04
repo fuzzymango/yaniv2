@@ -119,7 +119,7 @@ export function Scorecard({ view }: { view: PlayerGameView }) {
         // No visible heading: the names and the numbers are the whole document, and a
         // caption over them would be the panel talking about itself. The name is still
         // said to a screen reader — see `Modal.tsx`.
-        <Modal title={TITLE} showTitle={false} onDismiss={() => setOpen(false)}>
+        <Modal title={TITLE} showTitle={false} wide onDismiss={() => setOpen(false)}>
           {/*
             Scrolled to the bottom as it opens, so a long match shows the round it is
             actually in and "where are we now" needs no scrolling. Earlier rounds are up

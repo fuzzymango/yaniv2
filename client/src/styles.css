@@ -631,6 +631,18 @@ body {
   box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
 }
 
+/*
+ * The scorecard's panel: **as wide as its grid needs and no wider**, up to what the screen
+ * has. The cap alone was not enough — `.modal__panel` above is `width: 100%`, so a panel
+ * given a wider cap simply took all of it, and a two-player card came out as wide as a
+ * six-player one with acres of felt between the columns. `fit-content` is what makes the
+ * width a fact about the room rather than about the dialog.
+ */
+.modal__panel--wide {
+  width: fit-content;
+  max-width: min(94dvw, 44rem);
+}
+
 .modal__title {
   margin: 0;
   font-size: 1.1rem;
@@ -1027,17 +1039,12 @@ body {
   font-weight: 800;
   letter-spacing: 0.12em;
   line-height: 1;
-  /*
-   * A dark plate under the word, because what it is read against is a fan of white cards
-   * rather than the felt: colour alone against a face card is the one place this could be
-   * loud and still illegible, and a cramped top-zone seat is exactly where it lands.
-   */
   padding: 0.15em 0.4em;
   border-radius: 0.3em;
-  background: rgb(0 0 0 / 62%);
-  text-shadow: 0 0.06em 0.2em rgb(0 0 0 / 80%);
   white-space: nowrap;
   pointer-events: none;
+  -webkit-text-stroke: 0.16em color-mix(in oklab, currentColor 70%, #000);
+  paint-order: stroke fill;
 }
 
 /* Red is the Assaf, on the table and on the scorecard alike. */
@@ -1380,7 +1387,8 @@ body {
  * screen — and it is scrolled to the newest round as it opens (`Scorecard.tsx`).
  */
 .scorecard {
-  max-height: min(60dvh, 26rem);
+  max-height: 70dvh;
+  max-width: 70dvw;
   overflow: auto;
 }
 
