@@ -186,3 +186,14 @@ rhyme.
 
 The row and cell types are named near the round result types deliberately: a *result* is a
 round revealed with hands, a *score* is a round as a number in a ledger.
+
+## Amended: the call is yellow, not green (issue #156)
+
+The `yaniv` tone's colour moved from green to the table's accent yellow when the call
+announcement unified the game's colour language — **yellow is the call, red is the Assaf,
+on the felt and on the card alike**. The semantics above are unchanged: the tone is named
+for what happened rather than for the colour, so this was a stylesheet value and nothing
+more, and "blue beats the call" still holds for an Assafed caller. The red-green colour
+deficiency limitation named above is narrowed rather than lifted — yellow and red are
+easier to tell apart than green and red, and colour is still the only encoding. See
+[ADR-0018](0018-the-call-announcement.md).

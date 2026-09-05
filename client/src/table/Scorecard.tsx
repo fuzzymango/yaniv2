@@ -4,8 +4,9 @@
  * A player mid-match can see where everybody stands right now — the totals are on the felt
  * and the round just scored is spelled out as an equation — but not how anybody got there.
  * This is that: rows are rounds, oldest at the top, columns are the room's seats, and each
- * cell is the total that round left a player on. Three colours carry what happened (green
- * called, red Assafed, blue was cut by a milestone), and nothing else is on the card: no
+ * cell is the total that round left a player on. Three colours carry what happened (yellow
+ * called, red Assafed, blue was cut by a milestone — the table's own colours for the two
+ * that matter, issue #156), and nothing else is on the card: no
  * caption, no legend, no totals row. It is a sheet of paper, not a report.
  *
  * The control sits **in the viewer's own name bar**, to the left of their name, rather than
@@ -118,7 +119,7 @@ export function Scorecard({ view }: { view: PlayerGameView }) {
         // No visible heading: the names and the numbers are the whole document, and a
         // caption over them would be the panel talking about itself. The name is still
         // said to a screen reader — see `Modal.tsx`.
-        <Modal title={TITLE} showTitle={false} onDismiss={() => setOpen(false)}>
+        <Modal title={TITLE} showTitle={false} wide onDismiss={() => setOpen(false)}>
           {/*
             Scrolled to the bottom as it opens, so a long match shows the round it is
             actually in and "where are we now" needs no scrolling. Earlier rounds are up

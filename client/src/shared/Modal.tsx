@@ -35,13 +35,22 @@ interface ModalProps {
    * would be the panel talking about itself.
    */
   showTitle?: boolean;
+  /**
+   * Whether the panel takes the wider of its two widths. Default no: a question asked
+   * behind one of these is usually a sentence and two buttons, and the narrow width is what
+   * keeps it reading as a dialog rather than a page. The scorecard is the exception, and for
+   * the opposite reason `showTitle` has one — it is a grid of every seat in the room, and a
+   * width sized for a sentence would force it to scroll horizontally for no reason a reader
+   * could see.
+   */
+  wide?: boolean;
   /** Everything the panel is for, controls included. */
   children: ReactNode;
   /** The backdrop and Escape both land here. A control inside `children` may too. */
   onDismiss: () => void;
 }
 
-export function Modal({ title, showTitle = true, children, onDismiss }: ModalProps) {
+export function Modal({ title, showTitle = true, wide = false, children, onDismiss }: ModalProps) {
   return (
     /*
       Escape is caught here rather than on the window, because the key event reaches this
@@ -57,7 +66,7 @@ export function Modal({ title, showTitle = true, children, onDismiss }: ModalPro
       }}
     >
       <div
-        className="modal__panel"
+        className={`modal__panel ${wide ? "modal__panel--wide" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}

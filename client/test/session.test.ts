@@ -42,6 +42,7 @@ import {
   type Socket as ClientSocket,
   type SocketOptions,
 } from "socket.io-client";
+import type { Announcement } from "../src/announcement.ts";
 import type { CardFlight } from "../src/flight.ts";
 import {
   createSession,
@@ -1534,6 +1535,216 @@ describe("the move to animate", () => {
       // other, so anything published after it — here, a tap choosing a card — has none.
       host.toggleCard(playingSelf(resting.view!).hand[0]!.id);
       assert.equal(host.getSnapshot().flight, null, "a tap is not a move to animate");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The call a scored round arrived on, published for whatever announces it over a seat
+ * (issue #156). Which seats and in what order is `announcement.ts`'s question and is
+ * answered there, against fixtures; these are about the field arriving where a screen would
+ * read it, off a real server — and above all about the paths that must *not* announce.
+ */
+describe("the call to announce", () => {
+  /** Every announcement the session published, with the position it arrived on. */
+  function callsHeardBy(session: Session): { announced: Announcement; phase: string }[] {
+    const heard: { announced: Announcement; phase: string }[] = [];
+    session.subscribe(() => {
+      const { announcement, view } = session.getSnapshot();
+      if (announcement !== null) heard.push({ announced: announcement, phase: view!.phase });
+    });
+    return heard;
+  }
+
+  it("announces the caller when a round is scored", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const host = await soloMatch(server);
+      await playUntilCallable(host);
+
+      host.callYaniv();
+      const scored = await waitForSnapshot(
+        host,
+        "the scored round",
+        (s) => s.view?.phase === "roundEnd" && !s.busy,
+      );
+
+      assert.deepEqual(scored.announcement, [
+        { playerId: scored.view!.you.id, call: "yaniv" },
+      ]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("announces it to everybody at the table", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const [onTurn, waiting] = await twoHumanMatch(server);
+      const heard = callsHeardBy(waiting);
+
+      // Stopped at the first sight of a scored round, by any of them: the driver deals the
+      // next round as soon as a seat is free to ask for one, and a second round scored here
+      // would be a second call announced.
+      await playOn([onTurn, waiting], "a scored round", (all) =>
+        all.some((s) => s.view?.phase === "roundEnd"),
+      );
+      const scored = await waitForSnapshot(
+        waiting,
+        "the round as this seat sees it",
+        (s) => s.view?.phase === "roundEnd" && !s.busy,
+      );
+
+      const row = scored.view!.scorecard.at(-1)!;
+      assert.equal(heard.length, 1, "one round was scored, so one call was announced");
+      assert.equal(heard[0]!.announced![0]!.call, "yaniv", "the call comes first");
+      assert.equal(heard[0]!.announced![0]!.playerId, row.callerId);
+      if (row.assaferId !== null) {
+        assert.equal(heard[0]!.announced![1]!.call, "assaf", "and the answer to it second");
+        assert.equal(heard[0]!.announced![1]!.playerId, row.assaferId);
+      } else {
+        assert.equal(heard[0]!.announced!.length, 1, "a call that stood is announced alone");
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("announces exactly the rounds a match scored, in the order they were scored", async () => {
+    const server = await startServer(7);
+    try {
+      const host = await soloMatch(server);
+      const heard = callsHeardBy(host);
+      const over = await playToMatchEnd([host]);
+
+      const rows = over.view!.scorecard;
+      assert.ok(rows.length > 1, "a match worth reading the ledger of");
+      assert.equal(heard.length, rows.length, "one announcement per scored round, and no more");
+
+      rows.forEach((row, i) => {
+        const announced = heard[i]!.announced!;
+        assert.equal(announced[0]!.playerId, row.callerId, "the caller, first");
+        assert.equal(announced[0]!.call, "yaniv");
+        if (row.assaferId === null) {
+          assert.equal(announced.length, 1);
+        } else {
+          assert.equal(announced[1]!.playerId, row.assaferId, "the Assafer, second");
+          assert.equal(announced[1]!.call, "assaf");
+        }
+      });
+
+      // The match-winning call arrives as a `gameEnd`, never as a `roundEnd` — a trigger
+      // that named the phase would leave the loudest call of the match unannounced.
+      assert.equal(heard.at(-1)!.phase, "gameEnd", "the final call is announced too");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not carry a call into the next thing published", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const host = await soloMatch(server);
+      await playUntilCallable(host);
+      host.callYaniv();
+      await waitForSnapshot(
+        host,
+        "the scored round",
+        (s) => s.announcement !== null && !s.busy,
+      );
+
+      host.startNextRound();
+      const dealt = await waitForSnapshot(host, "the next round", (s) => s.view?.phase === "playing");
+      assert.equal(dealt.announcement, null, "a deal is not a call to announce");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not announce again when somebody else's connection drops", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const [onTurn, waiting] = await twoHumanMatch(server);
+      const heard = callsHeardBy(waiting);
+      await playOn([onTurn, waiting], "a scored round", (all) =>
+        all.some((s) => s.view?.phase === "roundEnd"),
+      );
+      await waitForSnapshot(waiting, "the scored round", (s) => s.announcement !== null);
+      assert.equal(heard.length, 1, "the round was announced once");
+
+      // A drop republishes the room to whoever is left (docs/adr/0013) — the same scored
+      // round, arriving again. The scorecard has not grown, so nothing has happened.
+      server.drop(onTurn);
+      await waitForSnapshot(
+        waiting,
+        "the seat to go quiet",
+        (s) => s.view!.opponents.some((o) => !o.connected),
+      );
+      assert.equal(heard.length, 1, "and republishing it is not it happening again");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not announce a round to a seat that has just been claimed back", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const host = await soloMatch(server);
+      await playUntilCallable(host);
+      host.callYaniv();
+      await waitForSnapshot(host, "the scored round", (s) => s.announcement !== null);
+
+      server.drop(host, true);
+      await waitForSnapshot(host, "the drop", (s) => !s.connected);
+
+      const back = await waitForSnapshot(host, "the seat", (s) => s.connected && !s.resuming);
+      assert.equal(back.view!.phase, "roundEnd", "the round is still scored on the table");
+      assert.equal(back.announcement, null, "but nobody was there to hear it called");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("announces nothing for a match ended by a departure", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      // Two humans and no bots, so that one of them leaving leaves one player in the match
+      // and ends it — the position this is about, and the one no call was made to reach.
+      const [host, guest] = await hostAndGuest(server);
+      host.updateSettings({
+        handSize: HAND_SIZE,
+        yanivThreshold: YANIV_THRESHOLD,
+        maxScore: MAX_SCORE,
+        botCount: 0,
+      });
+      await waitForSnapshot(
+        host,
+        "the table to empty of bots",
+        (s) => s.view?.settings.botCount === 0 && !s.busy,
+      );
+      const heard = callsHeardBy(guest);
+      host.startGame();
+
+      await playOn([host, guest], "a scored round", (all) =>
+        all.some((s) => s.view?.phase === "roundEnd"),
+      );
+      await waitForSnapshot(guest, "the scored round", (s) => s.announcement !== null);
+      await waitForSnapshot(host, "the caller's own copy of it", (s) => !s.busy);
+      assert.equal(heard.length, 1);
+
+      // The last round's result is still standing behind this `gameEnd`, and nobody called
+      // anything to reach it (issue #147). A trigger read off that field would invent a call.
+      host.exitToMenu();
+      const ended = await waitForSnapshot(
+        guest,
+        "the match to end under them",
+        (s) => s.view?.phase === "gameEnd",
+      );
+      assert.ok(ended.view!.roundResult, "the previous round is still on the table");
+      assert.equal(ended.announcement, null, "and it is not announced a second time");
+      assert.equal(heard.length, 1, "nothing new was called");
     } finally {
       await server.close();
     }

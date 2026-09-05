@@ -384,3 +384,40 @@ newest move first, in mini cards. `MoveHistory.tsx`, and four decisions:
   full size in the seats — a drawer of icons over it would be competing with the reveal. The
   phase is what the check asks, not the presence of a result: `moveHistory` still arrives at
   `roundEnd`, and this screen simply stops drawing it.
+
+## And the call that ended the round is announced over the seat that made it
+
+A flight shows a move crossing the table, and a **Yaniv call crosses nothing** — it is the one
+broadcast that leaves both facts a flight is read from exactly where they were. So the loudest
+moment in a round arrived on the quietest treatment on the screen: a small grey chip in a
+seat's score row and one line of text above the felt, at the same size and weight as
+everything else on a screen that has just filled with revealed hands. The **call
+announcement** (issues #124, #156) is the Yaniv call's counterpart to a flight, and the
+decisions behind it are in [ADR-0018](adr/0018-the-call-announcement.md). Five of them are
+about this table in particular:
+
+- **It is anchored to the person, not to the felt.** `YANIV` over the caller's seat, `ASSAF`
+  over the assafer's, and over the viewer's own hand row when it is the viewer. Position is
+  what says who, which is the whole difference between this and a larger copy of the line
+  above the felt — and it is why the banner carries no name and no number, so it is glanced at
+  rather than read.
+- **The viewer's own anchor is the hand actually shown, not the live hand.** The caller can be
+  the player the round has just knocked out, and at that scored round their hand is still on
+  the screen, read off the round's own record — being dimmed out of the *next* round does not
+  retract the last one. Anchoring to the live hand would deny a banner to the one player most
+  deserving of one.
+- **It sits in a box the seat already sized, and nothing here measures the DOM.** A card
+  genuinely travels between two distant boxes, which is why `CardsInFlight.tsx` measures; a
+  banner does not travel. What the seat gives up for it is its bounds — the word is wider than
+  a cramped top-zone seat — and a stacking context, so it is never drawn under a neighbour's
+  cards.
+- **An Assafed round is staged, and both banners leave together.** The call, a beat, then the
+  answer to it, so the round reads in the order it happened rather than as two simultaneous
+  claims; then both held and both faded out at once, so the two seats the round turned on can
+  be seen side by side before either goes. The beat is the second timing chain's, and the
+  reason that chain is not the flight's is the part of ADR-0018 most worth reading.
+- **The seat's badge row gives up the two marks this now carries.** `yaniv` and `assaf` are
+  gone from it; `milestone` and `out` stay, being the two facts nothing else on the table
+  records, with `out` the loudest of them. What carries the round once the banner has faded is
+  the line above the felt, which names both players in a sentence, and the scorecard — which
+  now speaks the same two colours, yellow for the call and red for the Assaf.

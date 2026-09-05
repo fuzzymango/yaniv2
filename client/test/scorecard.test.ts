@@ -4,7 +4,7 @@
  *
  * Pure and total, like `score.ts` and `seating.ts` beside it — a ledger and a roster in, a
  * grid out. Both behaviours live here rather than in the component for this client's
- * standing reason: components are not tested at all, so "blue beats green" and "a seat that
+ * standing reason: components are not tested at all, so "blue beats the call" and "a seat that
  * was out of the match by then leaves a blank" have to be facts something can assert.
  */
 

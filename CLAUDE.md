@@ -25,12 +25,12 @@ deviations listed at the top of that file, each with its reasoning below.
 
 ## Code structure
 
-Four trees, tabulated one by one below: `shared/src` (types, the socket contract and the
-rulebook, dependency-free), `server/src` (the engine — deck, pure transitions, serialization,
-rooms, bots), `server/scripts` (two smoke-test harnesses, not shipped) and `client/src` (Vite +
-React: a framework-free session core, plus components foldered by screen). Every workspace has
-a `test/` of `node:test` suites beside its `src/`: one file per module, plus the server's
-`integration.test.ts` fuzzer, and the socket-driven suites on both sides.
+Four trees, tabulated one by one below: `shared/src` (types, the socket contract and the rulebook,
+dependency-free), `server/src` (the engine — deck, pure transitions, serialization, rooms, bots),
+`server/scripts` (two smoke-test harnesses, not shipped) and `client/src` (Vite + React: a
+framework-free session core, plus components foldered by screen). Every workspace has a `test/` of
+`node:test` suites beside its `src/`: one file per module, plus the server's `integration.test.ts`
+fuzzer, and the socket-driven suites on both sides.
 
 ### `shared/src/`
 
@@ -83,9 +83,9 @@ answers "do the rules and the bot behave?", `playSocket.ts` "does the wire work?
 
 - **`playSocket.ts`** — `npm run play`. A human against bots or other humans, over a **real
   socket** to a separately running server. Composition only, like `index.ts`: argv, stdio and a
-  socket handed to `cli/`, where `render.ts` and `commands.ts` are pure and total and
-  `session.ts` drives the loop with its io injected. It **imports nothing from `src/` except
-  types** — reaching for `RoomManager` makes it a second server, not a transport test.
+  socket handed to `cli/`, where `render.ts` and `commands.ts` are pure and total and `session.ts`
+  drives the loop with its io injected. It **imports nothing from `src/` except types** — reaching
+  for `RoomManager` makes it a second server, not a transport test.
 - **`play.ts`** — `npm run demo`. Bots only, in process, no transport, `--seed`/`--players`: a
   whole match is reproducible from the seed alone, which makes it the tool for judging bot play.
   Keep it that way; there is no socket equivalent, the server owning the rng.
@@ -114,26 +114,28 @@ invariant, and the file's own header must say which**. There is one: `table/Seat
 | `session.ts` | The session core: owns the socket and the seat's credential, exposes a `SessionSnapshot` and the intents. Framework-free, so `node:test` can drive it |
 | `turn.ts` | What a tap means: `toggleSelection`, `retainSelection`, `isLegalSelection`, `isLegalCall`, `takeableIds`, `isSlapdownTarget`, `turnFrom`. Pure and total — `scripts/cli/commands.ts`'s counterpart |
 | `flight.ts` | `flightFrom` — the position on the screen and the one arriving in, and either the move between them or nothing. Two facts watched, `lastMove` and `lastSlapdown`, and at most one changes per arrival; `CardFlight` is tagged by which (`TurnFlight`: mover, discarded cards, draw source, drawn card where the viewer may know it — `SlapdownFlight`: mover and the one card, never redacted). Pure and total, `turn.ts`'s counterpart on the way in |
+| `announcement.ts` | `announcementFrom` — the same two positions in, and either an ordered list of **call banners** or nothing out: `YANIV` over the caller, `ASSAF` over the assafer where the call did not stand. `flight.ts`'s counterpart, filling the hole it leaves — a Yaniv call is the one broadcast with no flight in it. The trigger is the **scorecard's length** and never the round result, which is left standing across every republish (docs/adr/0018). `Announcement` is a one- or two-element tuple or null, so an empty announcement is unrepresentable; `bannerAt` asks the same question from one seat's point of view. Pure and total |
 | `ghosts.ts` | `ghostsFor` — a move and the boxes on the screen in, the cards actually in the air out (`Ghost`: what it answers to, the face to draw or none, from where, to where and into which place), dropping whatever the screen cannot place at both ends. Branches on the flight's tag — a slapdown is one card out of a hand or a seat onto the pile and nothing back, in the same box vocabulary. `DECK_BOX` and `seatBox` are the boxes that are not cards' — the deck a drawn card starts from, and the seat somebody else's hand is one place at, both ends the client is never told a card id for |
 | `flip.ts` | `invert` and `transformOf` — where a card has landed and where it came from, as the transform that puts it back. The arithmetic of the flight, and all of it: measured boxes in, one CSS transform out. Pure and total |
 | `seating.ts` | `bySeat` — the absolute `view.seating` comparator, used by the lobby's roster listing — and `byRelativeSeat`, the same ordering rebased on the viewer's own seat (whoever sits one place along sorts first), used by the table so the zone sweep reads correctly from whoever is looking rather than only from whoever sits first. Both read the **roster** and never `turnOrder` (#144): turn order shrinks as players are eliminated, and a table sorted by it would slide everyone left one seat each time somebody went out. `seatZones` deals whichever ordered list it is given round the three sides of the felt (`ZONES`: `left`/`top`/`right`) in **contiguous runs**, `left` alone reversed, so the sweep reads in turn order at a doubled zone too (`right` never doubles, since 6 players is 5 opponents) — why, in `docs/client-table.md`. One placement for the table in both its phases: a scored round is seated by the same call off the same roster, so the two cannot disagree. Generic over the opponent, since seating is a fact about a list's order and nothing about what is in it |
 | `fan.ts` | The geometry of a hand held at a seat, in two shapes. Arced during play: `fanAngles`, `ZONE_ROTATION` (hinge to the screen edge, open edge to the felt), `fanFootprint` (the box the arc needs, so no card tip lands on the label) and `fanOverhang` (how far it is pushed off its edge). Cascaded once it is revealed: `cascadeOffset`, `cascadeFootprint`, `ZONE_CASCADE` (down the sides, across the top) and the `CARD_INDEX_STRIP`/`CASCADE_STEP` pair that keeps a covered card readable. And `seatFootprint` over both — the one box a seat reserves whichever shape is in it, so a round being scored never resizes a seat. Distances in card widths, so the CSS scales it |
 | `status.ts` | `seatStatus` — what one seat's status slot says about the player behind it, or nothing: `left` › `away` › `watching` by priority, and nothing for a bot or somebody playing, which is what makes an empty slot unambiguous (#146). `STATUS_LABEL` is the word for each, said once. Pure and total |
 | `score.ts` | What a scored round says: `scoreLabel` (the round as one checkable equation — where the player started, what it was net worth once any milestone reduction is folded in, and the total it left them on; every seat's label and the viewer's own footer, so one round cannot read two ways) and `roundOutcome` (the call and the verdict as one sentence, addressed to the viewer, named off the round's own record). Pure and total |
-| `scorecard.ts` | What the match's ledger is to look at: `cellTone` (green called, red Assafed, blue was cut by a milestone — and **blue beats green** on an Assafed caller, the one collision the rules allow) and `scorecardGrid` (the roster's seats as columns, the scored rounds as rows, and an **explicit absence** where a seat was out of the match by that round, so a blank is produced by tested logic rather than by a renderer finding nothing). Pure and total, and deliberately not part of `score.ts`: that is one round addressed to a viewer, this is every round addressed to nobody |
+| `scorecard.ts` | What the match's ledger is to look at: `cellTone` (yellow called, red Assafed, blue was cut by a milestone — and **blue beats the call** on an Assafed caller, the one collision the rules allow) and `scorecardGrid` (the roster's seats as columns, the scored rounds as rows, and an **explicit absence** where a seat was out of the match by that round, so a blank is produced by tested logic rather than by a renderer finding nothing). Pure and total, and deliberately not part of `score.ts`: that is one round addressed to a viewer, this is every round addressed to nobody |
 | `settings.ts` | What only a settings *form* knows: `wholeNumber` (a field part-way through being typed) and `sameSettings` (has the room caught up?). Pure and total, `turn.ts`'s counterpart — what a room may be set to is asked of `shared` |
 | `tokens.ts` | `seatStore` — the seat written down where a reload will find it, and the only file here that knows the word `localStorage`. Injected storage, so it is driven under `node:test` with no browser; storage that is off, full or holding junk is answered with "no seat" rather than an error |
 | `useSession.ts` | `useSyncExternalStore` over the above, and deliberately nothing else |
-| `timing.ts` | How long the moving parts of a move last, as one chain: `FLIGHT_MS` → `SLAP_MS` → `SHAKE_MS`, each a fraction of the one above it, so the table is retuned from one number and cannot end up half fast and half slow. Nothing above the chain: what a flight has to finish inside is the server's bot think time. Plain arithmetic, so a test with no DOM asserts the derivations |
+| `timing.ts` | How long the moving parts of the table last, as chains: `FLIGHT_MS` → `SLAP_MS` → `SHAKE_MS`, each a fraction of the one above it, so the table is retuned from one number and cannot end up half fast and half slow. **Two roots, deliberately** (docs/adr/0018): `ANNOUNCE_MS` → `ANNOUNCE_LEAD_MS`/`ANNOUNCE_ENTER_MS`/`ANNOUNCE_EXIT_MS` is the call announcement's own chain, not hung off the flight — a chain is the parts of one thing, and how long a call is held has nothing to do with how fast a card crosses. Each root is bounded by what actually constrains it: the flight by bot think time, the announcement by the auto-deal delay. `announceEnterAt`/`announceLeaveAt` are the staging over that chain — the beat between the two banners, and the exit measured from the last arrival so they leave together. Plain arithmetic, so a test with no DOM asserts the lot |
 | `App.tsx` | Which screen: no connection comes first, then a seat being claimed back, then no view is the main menu, then everything else is a function of `view.phase` — with `playing` and `roundEnd` the one branch, and `gameEnd` the one branch rendering two things: `Table` with `GameEnd` drawn over it |
 | `main-menu/MainMenu.tsx` | Name, create, join by code — the one screen with no view behind it |
 | `lobby/Lobby.tsx` | `phase: 'lobby'` — the code, who is seated (each row carrying the same status slot the felt's seats do, where only "away" can come up), the room's settings (editable by the host, read-only to everyone else), start (host only), and the way out. The one screen with a host on it: `view.hostId` is null from the first deal (docs/adr/0012), and a host who leaves hands the marker to the next seat |
 | `lobby/SettingsEditor.tsx` | The host's four controls, in the lobby and nowhere else. Offers exactly what `isValidSettings` accepts, and sends the whole object per change |
-| `table/Table.tsx` | `phase: 'playing'`, **`'roundEnd'` and `'gameEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. `SelfView` is narrowed once at the top: a viewer the match has gone on without gets a bar where their hand was, saying so and carrying no control at all (issue #143). Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, the call become the deal, the history drawer gone, and an `OUT` tag on any seat the round took out of the match. Once the *match* is over it is that same scored table with its controls given up — no topbar and no bottom slot — for `GameEnd` to float over |
-| `table/Scorecard.tsx` | The match's record, and the button in the viewer's own name bar that holds it up (`docs/adr/0017`) — left of the name rather than up in the topbar, that shelf being about the *room*. Rows are rounds, columns are seats, cells are running totals; no caption, no legend, no totals row. Open is local state read as **open and the match is not over**, so the final Yaniv closes it as a function of the position and not through an effect chasing the phase. Offered to watchers, and not at all once the match is over |
+| `table/Table.tsx` | `phase: 'playing'`, **`'roundEnd'` and `'gameEnd'`** — the hand, the deck, the discard, the opponents seated round the felt, a turn as two taps, the Yaniv call, and the discard as one flashing slapdown target while a window is open. `SelfView` is narrowed once at the top: a viewer the match has gone on without gets a bar where their hand was, saying so and carrying no control at all (issue #143). Once the round is scored, the same table with three slots saying something else: every hand face up in its own seat, the line above the felt saying how the round ended, the call become the deal, the history drawer gone, and an `OUT` tag on any seat the round took out of the match — with the round's **call announced** over the seats it turned on, the viewer's own anchored to the hand actually shown, which is the round's record and not the live hand (#156). The `yaniv`/`assaf` chips that used to sit in the score row are gone with it; `milestone` and `out` stay. Once the *match* is over it is that same scored table with its controls given up — no topbar and no bottom slot — for `GameEnd` to float over |
+| `table/Scorecard.tsx` | The match's record, and the button in the viewer's own name bar that holds it up (`docs/adr/0017`) — left of the name rather than up in the topbar, that shelf being about the *room*. Rows are rounds, columns are seats, cells are running totals; no caption, no legend, no totals row. Yellow is the call and red the Assaf, the table's own colours since #156. Open is local state read as **open and the match is not over**, so the final Yaniv closes it as a function of the position and not through an effect chasing the phase. Offered to watchers, and not at all once the match is over |
 | `table/LeaveTable.tsx` | The way out of a match still being played (#147), in the corner beside the settings and offered to everybody looking at the table — a watcher's bar carried the only copy until this. The one control in this client that **asks before it acts**: every other exit costs the player nothing, and this one costs them the match |
-| `table/Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held, carrying the seat's own `data-flight-box` — the one box in this client drawn to be measured rather than looked at) and `CascadeReveal` (the same hand face up and read, in the seat's own reserved box). Both take that box from `seatFootprint`, so swapping one for the other moves nothing around them. `Seat`'s label also carries the one **status slot** (`seatStatus`, #146), where a seat says whether its player has left, is away or is watching. `OpponentSeat` composes the first three for live play; `Table.tsx` composes the scored seat. Presentational throughout |
+| `table/Seat.tsx` | A player in their zone: `SeatZone` (a side of the felt), `Seat` (cards, and an upright label that never turns with them), and the two shapes a hand takes there — `CardFan` (the arc of backs, one per card held, carrying the seat's own `data-flight-box` — the one box in this client drawn to be measured rather than looked at) and `CascadeReveal` (the same hand face up and read, in the seat's own reserved box). Both take that box from `seatFootprint`, so swapping one for the other moves nothing around them. `Seat`'s label also carries the one **status slot** (`seatStatus`, #146), where a seat says whether its player has left, is away or is watching, and `Seat` takes the **call banner** as a node it places and does not decide (#156). `OpponentSeat` composes the first three for live play; `Table.tsx` composes the scored seat. Presentational throughout |
 | `table/CardsInFlight.tsx` | The move being watched: `useCardFlight` (measure every card on the screen, and the deck and the seats with them, after each render, and answer an arriving `CardFlight` with the ghosts `ghosts.ts` chooses and the places to leave empty for them), and the `CardsInFlight` overlay they fly across. Also *how* it flies, which is the one thing here that is not a measurement: a turn crosses in `FLIGHT_MS` and decelerates, a slapdown crosses in `SLAP_MS` on a sharper curve, pops on landing and jolts the table (`.table--jolt`, worn for `SHAKE_MS`). The one file here that touches a rendered element, and the only one outside `useSession.ts` with a hook in it |
+| `table/CallAnnouncement.tsx` | The call, said loudly and briefly over the seat it belongs to (#156): one word, one of the table's two colours, and two delays. Rendered in two parents — an opponent's seat and the viewer's own hand row — because position is what says who. **Not a measured overlay**: a banner does not travel, so it sits in a box the seat already sized, and DOM measurement stays contained to `CardsInFlight.tsx`. The sequence is keyframes with **no JavaScript timer**, so clearing the announcement unmounts it and there is nothing left to fire against a table that has moved on; durations come down from `timing.ts` as custom properties. Presentational, and inert to taps even once faded |
 | `table/MoveHistory.tsx` | `phase: 'playing'` only — the round's moves behind an arrow on the left edge of the felt, newest first, in mini cards. A pass-through of `view.moveHistory`: the redaction arrived applied, so a null drawn card is drawn face down rather than filled in. Open or closed is `useState`, so every fresh mount starts closed |
 | `table/Room.tsx` | The fallback for a `roundEnd` with no result behind it — a position the wire type allows and the server does not produce |
 | `game-end/GameEnd.tsx` | `phase: 'gameEnd'` — a panel over the table the match ended on, not a screen of its own (issue #130): the final standings in out order as a name/score grid, who won, play again — offered to everybody, since anyone still in the room may deal one (docs/adr/0012) — beside the same way out the lobby offers, and its own settings icon above it. No scrim — the hands revealed behind it are half of what there is to look at |
@@ -494,8 +496,12 @@ running totals in the cells, three colours saying what happened, and a blank whe
 already out. Offered while a round is played or scored, watchers included; not once the match
 is over, the standings answering it over the very bar the button would sit in.
 
-Every decision behind the geometry, the flight, the bar and the dim is in **`docs/client-table.md`**
-(#56, #58-#60, #78, #130, #143, #144); the code is `fan.ts`, `score.ts`, `seating.ts`, `table/`.
+**And the call that ended the round is announced over the seat that made it** (#124, #156,
+docs/adr/0018): `YANIV` in yellow, `ASSAF` in red a beat later, both faded out together. A one-shot
+like the flight, keyed on the scorecard growing so no republish replays it, on a second timing root
+deliberately not the flight's, in the two colours the scorecard now speaks. Every decision behind
+the geometry, the flight, the banner, the bar and the dim is in **`docs/client-table.md`** and the
+ADRs; the code is `fan.ts`, `score.ts`, `seating.ts`, `table/`.
 
 ### Settings are edited in one place and shown in another
 
@@ -526,35 +532,33 @@ modules beside it (`turn.ts`, `seating.ts`, `fan.ts`, `flight.ts`, `ghosts.ts`, 
 `useSession`.
 
 Snapshots are **replaced wholesale, never mutated**: `useSyncExternalStore` compares by
-identity. Seven fields, and each answers a different question:
+identity. Eight fields, and each answers a different question:
 
-- **`view`** — the position, or `null`. Null *is* the main menu: the one screen that is
-  not a function of `view.phase`, because before a room exists there is nothing for the
-  server to have sent — with `resuming` the one qualification, below. See `docs/adr/0004`.
-- **`error`** — a `GameError`, i.e. something the player asked for and was refused, or one
-  the server pushed as `errorMessage`. Cleared the moment they try again, because a refused
-  action costs them nothing.
-- **`notice`** — news about the room that is *not* a refusal: today only a seat that could
-  not be claimed back. Separate from `error` because there is no action to blame and nothing
-  to retry, and because it arrives while the player is sitting still.
-- **`connected`** — whether there is a socket to play over (this session's own, not the
-  wire's per-seat `connected`). See "A session that loses its socket" below.
-- **`resuming`** — a seat is being claimed back and the answer has not landed. It always
-  rides with `busy`, and says what `busy` cannot: that a null view is a table still being
-  asked for rather than the main menu. See "Claiming a seat back" below.
-- **`selection`** — the cards tapped for the next turn, by id, in tap order. It lives here
-  rather than in a component because it has to survive views arriving underneath it:
-  `retainSelection` on every broadcast of a position still being played drops whatever has left
-  the hand, which is also what empties it after a committed turn. A broadcast of any *other*
-  phase empties it outright rather than filtering — a card id is the same string in every round
-  of a match, so a choice carried across a deal would come back chosen over its inheritor — as
-  does a position this viewer is only **watching**, where `toggleCard` refuses a tap outright
-  too, so a watcher's selection is empty at every moment rather than just after one arrived
-  (#149).
-- **`flight`** — the move the position was reached by, when there is one worth watching
-  happen, and null otherwise. The **one-shot**: `publish` clears it unless the publication
-  being made is the one drawing that move, so a tap, a refusal or a reconnect never flies a
-  card again. Decided in `show`, by asking `flight.ts`. See "Card flight" in `CONTEXT.md`.
+- **`view`** — the position, or `null`. Null *is* the main menu: the one screen not a function of
+  `view.phase`, there being nothing sent before a room exists — `resuming` qualifies it, below.
+- **`error`** — a `GameError`: something the player asked for and was refused, or one the server
+  pushed as `errorMessage`. Cleared the moment they try again — a refusal costs them nothing.
+- **`notice`** — news about the room that is *not* a refusal: today only a seat that could not be
+  claimed back. No action to blame and nothing to retry, and it arrives while they sit still.
+- **`connected`** — whether there is a socket to play over (this session's own, not the wire's
+  per-seat `connected`). See "A session that loses its socket" below.
+- **`resuming`** — a seat is being claimed back and the answer has not landed. Always rides with
+  `busy`, and says what `busy` cannot: a null view is a table still being asked for rather than
+  the main menu. See "Claiming a seat back" below.
+- **`selection`** — the cards tapped for the next turn, by id, in tap order. Here rather than in a
+  component because it has to survive views arriving underneath it: `retainSelection` on every
+  broadcast of a position still being played drops whatever has left the hand, which is also what
+  empties it after a committed turn. A broadcast of any *other* phase empties it outright rather
+  than filtering — a card id is the same string every round, so a choice carried across a deal
+  would come back chosen over its inheritor — as does a position this viewer is only **watching**,
+  where `toggleCard` refuses a tap too, so a watcher's selection is empty at every moment (#149).
+- **`flight`** — the move the position was reached by, when there is one worth watching happen.
+  The **one-shot**: `publish` clears it unless the publication being made is the one drawing that
+  move, so a tap, a refusal or a reconnect never flies a card again. Decided in `show`, by asking
+  `flight.ts`. See "Card flight" in `CONTEXT.md`.
+- **`announcement`** — the call a scored round arrived on, ordered, and null otherwise. The same
+  one-shot in the same place, asking `announcement.ts` — which keys on the **scorecard growing**,
+  never on a round result standing. See "Call announcement" in `CONTEXT.md` and docs/adr/0018.
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room
 settles on the **ack**: entry has been broadcast before it is acked, and a departing
@@ -572,9 +576,8 @@ exception and releases at once: nothing was published, so no newer position is c
 ordering trap, plainly: the first snapshot carrying a view after entering a room is one the
 player still cannot act from — tests wait on `view !== null && !busy`, not the view alone.
 
-**A position is drawn the moment it arrives.** No queue between the socket and the snapshot:
-the server spaces bot turns out itself (above), so there is no burst left for the client to
-smooth (#135). Bot think time is what a flight finishes inside.
+**A position is drawn the moment it arrives.** No queue between the socket and the snapshot: the
+server spaces bot turns out itself, so there is no burst left to smooth (#135).
 
 **A tap the rules do not permit sends nothing and says nothing.** `turnFrom` answers with
 `null`, `commitTurn` returns, and no error is published — the screen should not have offered a
@@ -628,26 +631,24 @@ the acked view with nothing in flight: a table sat back down at, not a move anyb
 
 ### A session that loses its socket
 
-**`connected` is asked about before the view is.** A dropped socket makes every control on
-every screen a lie, whatever the last position drawn still shows, so `App` renders
-`Disconnected.tsx` above everything — the second screen that is not a function of
-`view.phase`. It starts `true`, before the socket has finished connecting: socket.io buffers
-what is emitted before then, and a page that announced a lost connection for the first
-moment of every load would be crying wolf.
+**`connected` is asked about before the view is.** A dropped socket makes every control on every
+screen a lie, whatever the last position drawn still shows, so `App` renders `Disconnected.tsx`
+above everything — the second screen that is not a function of `view.phase`. It starts `true`,
+before the socket has connected: socket.io buffers what is emitted before then, and a page
+announcing a lost connection for the first moment of every load would be crying wolf.
 
-**A drop leaves the player on the disconnected screen, and the connection coming back sits
-them straight back down.** `disconnect` drops the watermark and releases `busy` — nothing is
-in flight over a socket that is not there, a claim included — but leaves the view alone, that
-screen being over it anyway and very likely the position still there on return. The *reconnect*
-claims the seat rather than clearing anything: `connect` sends `resumeSeat` with the credential
-the session holds, and the position comes back in the ack. The main menu is the fallback, for a
-returning connection with no seat to claim. A drop at the menu costs nothing and says nothing.
+**A drop leaves the player on the disconnected screen, and the connection coming back sits them
+straight back down.** `disconnect` drops the watermark and releases `busy` — nothing is in flight
+over a socket that is not there, a claim included — but leaves the view alone, that screen being
+over it anyway and very likely the position still there on return. The *reconnect* claims the seat
+rather than clearing anything: `connect` sends `resumeSeat` with the credential the session holds,
+and the position comes back in the ack. The main menu is the fallback for a returning connection
+with no seat to claim; a drop at the menu costs nothing and says nothing.
 
 **A connection that never arrived is the same screen.** `connect_error` is treated the way
-`disconnect` is, the two being indistinguishable to whoever is looking at them. Only the first
-of a run of failed retries is news. **Nothing argues about the tab closing** either: the
-`beforeunload` warning that guarded a live round went with #66, a page carrying that listener
-being held out of the back/forward cache — which is how a backgrounded tab comes back at all.
+`disconnect` is, the two being indistinguishable to whoever is looking at them; only the first of a
+run of failed retries is news. **Nothing argues about the tab closing** either — the `beforeunload`
+warning went with #66, a page carrying that listener being held out of the back/forward cache.
 
 ### Tooling
 
@@ -655,30 +656,29 @@ TypeScript runs **directly on Node 24 via native type stripping** — no build s
 `tsx`/`ts-node`. Test runner is `node:test`; typechecking is `tsc --build` (composite project
 references, `shared` → `server`). This constrains the codebase to *erasable* TypeScript: no
 `enum`, no `namespace`, no parameter properties, `import type` for type-only imports, enforced
-by `erasableSyntaxOnly` in `tsconfig.base.json`.
-
-Every workspace's `test` script names an explicit glob rather than running bare `node --test`,
-which would also pick up `test/helpers.ts` and the `.d.ts` files `tsc --build` emits.
+by `erasableSyntaxOnly` in `tsconfig.base.json`. Every workspace's `test` script names an
+explicit glob rather than bare `node --test`, which would also pick up `test/helpers.ts` and
+the `.d.ts` files `tsc --build` emits.
 
 **`shared`'s tests are a separate tsconfig project** (`shared/tsconfig.test.json`), unlike the
-server's: `types` is per-project, so folding them in would grant `shared/src` the Node types
-its suites need. Split, `shared/src` importing a Node builtin is a typecheck error.
+server's: `types` is per-project, so folding them in would grant `shared/src` the Node types its
+suites need. Split, `shared/src` importing a Node builtin is a typecheck error.
 
 ## Explicitly out of scope (for now)
 
 Not oversights — deferred on purpose, in this order of likely next work:
 
 - **What a mid-round seat does while its player is gone.** The rest of #138 (#143, #144 and
-  #146-#150 are done): the status slot is display only, and within the room's grace period
-  nothing pauses, times out, bot-plays or frees a seat whose player never comes back.
-- **Starting a match with seats still open for latecomers.** `startGame` seats bots on the
-  spot, so anyone not joined by then plays the next match, not this one.
+  #146-#150 are done): the status slot is display only, and within the room's grace period nothing
+  pauses, times out, bot-plays or frees a seat whose player never comes back.
+- **Starting a match with seats open for latecomers.** `startGame` seats bots on the spot, so
+  anyone not joined by then plays the next match, not this one.
 - **The settings and the scorecard from the terminal harness.** The browser edits all four
   settings (docs/adr/0006) and draws the ledger (0017); the CLI does neither.
-- **Persistence.** Rooms are in-memory only, so a redeploy drops every match in progress —
-  two services (giving up same-origin, ADR-0003) is the fix if that cost matters.
-- **Bots slapping down for themselves.** A human can now win one against a bot, inside the
-  pause it takes before its turn, but no bot slaps down for itself — ADR-0005's other half.
+- **Persistence.** Rooms are in-memory only, so a redeploy drops every match in progress — two
+  services (giving up same-origin, ADR-0003) is the fix if that cost matters.
+- **Bots slapping down for themselves.** A human can win one inside the pause a bot takes before
+  its turn, but no bot slaps down for itself — ADR-0005's other half.
 - **Disambiguating a joker that extends a run.** Tap order decides where it sits — a wart (§4).
 
 ## Running things
@@ -691,8 +691,8 @@ npm run serve --workspace=@yaniv/server   # the socket server (PORT, default 300
 
 Every command and flag is tabulated in `README.md`. One thing to know before reading it: the
 browser client (`npm run dev`) and the CLI harness (`npm run play`) are each real clients of a
-**separately running server**, so both take a second terminal running `npm run serve`.
-Deployment is one Railway service serving both halves (`docs/adr/0003`).
+**separately running server**, so both take a second terminal running `npm run serve`. Deployment
+is one Railway service serving both halves (`docs/adr/0003`).
 
 ## Agent skills
 

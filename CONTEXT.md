@@ -209,6 +209,55 @@ connection that has already stuttered. All three parts are one
 thing to a player who has asked for less motion: the flight never starts, so the pop and the
 jolt never happen, and the card is simply on the pile where the position already put it.
 
+The Yaniv call named above as the broadcast with nothing to watch is now only half true: it
+still produces no flight, and it produces a **call announcement** instead.
+
+## Call announcement
+
+One **call** as something to *hear about*: `YANIV` over the caller's seat, and `ASSAF` over
+the assafer's when the call did not stand (issue #124, specified by #156). The card flight's
+sibling, and deliberately its **exact shape** — decided once as a position reaches the screen
+(`announcementFrom` in `client/src/announcement.ts`, published as
+`SessionSnapshot.announcement`), and gone from everything published after it. It exists
+because a Yaniv call is precisely the broadcast a flight has nothing to show for.
+
+**Position is what says who.** The banner is drawn inside the box of the seat it is about —
+an opponent's seat, or the viewer's own hand row — and carries no name and no number. That is
+the whole difference between it and a larger copy of the line above the felt.
+
+An Assafed round announces **both, staged**: the call, a beat, then the answer to it, both
+held and both faded out together, so the round reads in the order it happened and ends with
+the two seats it turned on side by side. It is an **announcement of an event, not a record of
+a fact**: it plays once, is not re-shown on a reload or a reconnect, and a deal landing over
+the top of it cuts it short.
+
+What makes those properties true is the **freshness key**: the number of rows on the
+**scorecard**, not the presence of a round result. The result is left standing between rounds
+and across every republish — a disconnect, a departure, a seat resumed — and a match ended by
+a departure carries the previous round's result behind it with nobody having called anything.
+The scorecard grows by one row per scored round and by nothing else. See
+[ADR-0018](docs/adr/0018-the-call-announcement.md).
+
+Its durations are a **second chain** in `client/src/timing.ts`, rooted at `ANNOUNCE_MS` and
+deliberately *not* derived from the flight's root: the flight chain is the parts of one move,
+and how long a call is held has nothing to do with how fast a card crosses a table. This one's
+honest bound is the server's **auto-deal** delay, as the flight's is **bot think time**.
+
+Under reduced motion it keeps the banner and the beat and drops only the movement — unlike
+the flight, which is skipped outright. A flight is redundant with a position that can be read
+at leisure; the entire premise here is that the quieter treatment was not enough.
+
+## Yellow is the call, red is the Assaf
+
+One colour language across the table and the scorecard: the **accent yellow** means a Yaniv
+call, the **danger red** means an Assaf, wherever either appears — the banner over a seat, the
+line above the felt, and the scorecard's cells (issue #156). The scorecard's call cell was
+green until then, which made the card and the table say different things about the same event.
+The milestone blue is untouched and answers a different question.
+
+The yellow's other meaning on the table — "yours, and not yet played" — never collides with
+this one: that appears only during play, and a call is only ever announced on a scored round.
+
 ## Bot think time and the beat
 
 **Bot think time** is the pause a bot takes before its turn — uniform across bots and every
@@ -383,7 +432,7 @@ relationship the last move and the move history already have.
 Read on the browser client as the **scorecard** — the same word, because the panel does not
 represent the record, it *is* the record shown: a plain table opened from the viewer's own
 name bar, rows led by round number, columns headed by name in seating order, and three
-colours saying what happened (green called, red Assafed, blue was cut by a milestone). A
+colours saying what happened (yellow called, red Assafed, blue was cut by a milestone). A
 **blank cell** means one thing only: that seat was out of the match by that round.
 [ADR-0017](docs/adr/0017-the-scorecard.md).
 

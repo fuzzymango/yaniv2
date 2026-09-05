@@ -26,6 +26,8 @@ import type {
   ServerToClientEvents,
 } from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
+import type { Announcement } from "./announcement.ts";
+import { announcementFrom } from "./announcement.ts";
 import type { CardFlight } from "./flight.ts";
 import { flightFrom } from "./flight.ts";
 import type { DrawSource } from "./turn.ts";
@@ -164,6 +166,23 @@ export interface SessionSnapshot {
    * to tell them apart by. `flight.ts` decides what is in it; nothing here re-decides.
    */
   readonly flight: CardFlight | null;
+  /**
+   * The call a scored round arrived on, when it is one this viewer was there to hear: the
+   * seat that called Yaniv and, where the call did not stand, the seat that took it off
+   * them — ordered, the call first. Null the rest of the time, which is most of it.
+   *
+   * The **same one-shot as `flight` above and for the same reasons** (issue #156): it is set
+   * by the publication that draws the position it belongs to and is gone from the next one,
+   * whatever that next one is about. That is what makes it an announcement of an event
+   * rather than a record of a fact — the round stays scored on the screen long after the
+   * banners have faded, and the line above the felt and the scorecard are what carry it.
+   *
+   * A second field rather than a second shape of `flight`: a flight is cards moving and this
+   * is a word over a seat, and the one broadcast that produces this — a Yaniv call — is
+   * precisely the one that produces no flight at all. `announcement.ts` decides what is in
+   * it; nothing here re-decides.
+   */
+  readonly announcement: Announcement;
 }
 
 export interface Session {
@@ -295,17 +314,19 @@ export function createSession(
     resuming: false,
     selection: [],
     flight: null,
+    announcement: null,
   };
   const listeners = new Set<() => void>();
 
   /**
-   * `flight` is cleared unless the publication being made is one that has a move to show,
-   * which is what makes it one-shot: nothing has to remember to put it back down, and no
-   * publication about something else — a tap, a refusal, a connection going — can leave the
-   * last move on the screen to be flown a second time.
+   * `flight` and `announcement` are cleared unless the publication being made is one that has
+   * a move or a call to show, which is what makes them one-shot: nothing has to remember to
+   * put either back down, and no publication about something else — a tap, a refusal, a
+   * connection going — can leave the last move on the screen to be flown a second time or the
+   * last call to be announced twice.
    */
   const publish = (next: Partial<SessionSnapshot>): void => {
-    snapshot = { ...snapshot, flight: null, ...next };
+    snapshot = { ...snapshot, flight: null, announcement: null, ...next };
     for (const listener of listeners) listener();
   };
 
@@ -370,6 +391,7 @@ export function createSession(
     publish({
       view,
       flight: flightFrom(snapshot.view, view),
+      announcement: announcementFrom(snapshot.view, view),
       selection: carriedInto(view),
       busy: played ? false : snapshot.busy,
     });
