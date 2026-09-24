@@ -6,7 +6,8 @@
  * It was chosen over forty lines on `node:crypto` for one reason: the place where a silent
  * mistake is an account takeover is the place to take the vendor's maintained cert
  * rotation and claim checks — signature against Google's published keys, `iss`, `aud`,
- * `exp` (docs/adr/0020). Composed in `index.ts` beside the store.
+ * `exp` (docs/adr/0020). Composed in `index.ts` beside the store once the transport is
+ * there to hand it to (#182, step 5) — until then nothing constructs one.
  *
  * No test executes this file; no test can reach Google. `test/auth/verifier.ts` is what
  * every suite verifies with, and a real sign-in is what proves this one.

@@ -23,7 +23,7 @@ import type { AccountId, ProfileStore } from "../profiles.ts";
  * How long a session lasts: **thirty days, fixed from issue**. No sliding renewal — that
  * would be a write on every connect for no gain — so day 31 is one tap on the button again.
  */
-export const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Bytes behind a session token — the resume token's size, and for its reason: a

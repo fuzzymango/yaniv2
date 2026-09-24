@@ -56,8 +56,8 @@ export async function signIn(auth: Auth, idToken: string): Promise<Result<SignIn
   const identity = await auth.verifier.verify(idToken);
   if (!identity) return invalidCredential();
 
-  const known = await auth.store.findByCredential("google", identity.sub);
-  if (known) return ok(await signedIn(auth, await requireAccount(auth, known.accountId)));
+  const known = await signInIfKnown(auth, identity.sub);
+  if (known) return ok(known);
 
   return ok({
     status: "nameNeeded",
@@ -88,8 +88,8 @@ export async function createAccount(
   const identity = await auth.verifier.verify(idToken);
   if (!identity) return invalidCredential();
 
-  const known = await auth.store.findByCredential("google", identity.sub);
-  if (known) return ok(await signedIn(auth, await requireAccount(auth, known.accountId)));
+  const known = await signInIfKnown(auth, identity.sub);
+  if (known) return ok(known);
 
   const name = normalizeDisplayName(displayName);
   if (name === null) return invalidName();
@@ -136,6 +136,16 @@ export async function renameAccount(
 
   await auth.store.renameAccount(accountId, name);
   return ok({ account: { id: accountId, displayName: name } });
+}
+
+/**
+ * Sign into the account this Google `sub` already reaches, or `null` where it reaches none.
+ * The step `signIn` and `createAccount` share, so a returning credential cannot be answered
+ * two ways depending on which of them it arrived by.
+ */
+async function signInIfKnown(auth: Auth, sub: string): Promise<SignedIn | null> {
+  const known = await auth.store.findByCredential("google", sub);
+  return known ? signedIn(auth, await requireAccount(auth, known.accountId)) : null;
 }
 
 /** A fresh session for an account, and the ack that hands it over. */

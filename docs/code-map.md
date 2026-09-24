@@ -54,7 +54,7 @@ Proved by `test/auth/`, which opens no socket and reaches no Google.
 |---|---|
 | `verifier.ts` | `TokenVerifier` and `VerifiedIdentity` (`sub`, and Google's `name` as a suggestion only). `null` for a token that did not verify, a throw when Google could not be asked. **The fake is a test helper**, `test/auth/verifier.ts`, nothing shipped having a use for it |
 | `google.ts` | `googleVerifier(clientId)` — **the only file that imports `google-auth-library`**. Fetches Google's keys outside its catch, so an outage throws rather than reading as a bad token |
-| `session.ts` | `openSession` (mint behind an **injectable** `SessionTokenGenerator`, store the hash, 30 days fixed from issue — `SESSION_LIFETIME_MS`), `randomSessionToken` (32 CSPRNG bytes) and `hashSessionToken` — SHA-256, **the one place the hash is computed**. The store never sees a raw token |
+| `session.ts` | `openSession` (mint behind an **injectable** `SessionTokenGenerator`, store the hash, 30 days fixed from issue), `randomSessionToken` (32 CSPRNG bytes) and `hashSessionToken` — SHA-256, **the one place the hash is computed**. The store never sees a raw token |
 | `flows.ts` | `signIn`, `createAccount`, `resumeSession`, `renameAccount` — functions over `Auth` (verifier, store, clock, generator), each a `Result` and none throwing for a refusal. Names go through `normalizeDisplayName`; Google's name suggests nothing where it fails the rule; a `createAccount` for a credential that already has an account signs into it |
 
 ## `server/src/sql/`

@@ -1,4 +1,7 @@
-/** Rule constants. Every value here is specified in docs/rules.md. */
+/**
+ * Rule constants. Every value here is specified in docs/rules.md — bar the last, a
+ * wire-contract fact with no better home, which says so where it stands.
+ */
 
 export const HAND_SIZE = 5;
 
