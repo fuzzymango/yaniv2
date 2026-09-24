@@ -24,6 +24,7 @@ import {
   takeTurn,
   updateSettings,
 } from "./game.ts";
+import type { ProfileStore } from "./profiles.ts";
 import { err, ok, type Result } from "./result.ts";
 import type { RoomManager } from "./roomManager.ts";
 import { createRoomSweeper, unattended } from "./roomSweep.ts";
@@ -80,10 +81,23 @@ export interface SocketServerOptions extends BotTurnRunnerOptions {
   clock?: Clock;
 }
 
-/** Attach the game's event handlers to a new Socket.io server on `httpServer`. */
+/**
+ * Attach the game's event handlers to a new Socket.io server on `httpServer`.
+ *
+ * `profiles` is **required, not defaulted**, for ADR-0013's reason: a call site needing a
+ * capability should not be able to forget it, and a server that had quietly composed
+ * itself a store nobody chose would be a server whose accounts go wherever the default
+ * went. Which store it is, is stated in the command that boots — `npm run serve` against
+ * a database, `npm run serve:memory` against memory (docs/adr/0019) — and this layer is
+ * indifferent to the answer.
+ *
+ * Nothing here reads it yet: the auth handlers that do arrive with the sign-in events, and
+ * the argument lands first so every composition in the repo already names its store.
+ */
 export function createSocketServer(
   httpServer: HttpServer,
   rooms: RoomManager,
+  profiles: ProfileStore,
   options: SocketServerOptions = {},
 ): YanivServer {
   const io: YanivServer = new Server(httpServer);

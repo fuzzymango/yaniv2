@@ -3,7 +3,11 @@
  * extra beside one (docs/adr/0019). It is parameterised over a `() => ProfileStore`
  * factory and registers the in-memory store, the only implementation anything in this
  * repo runs: the day CI has a database, the Postgres store is a second entry in the
- * table below and everything under it holds both to the same answers.
+ * table below and everything under it holds both to the same answers. One thing that arm
+ * needs and this one does not, learned by running it: **a fresh store is not a fresh
+ * database**, so it has to clear the tables it shares with every other test — the
+ * credentials and token hashes below are reused from test to test, and a primary key
+ * remembers them.
  *
  * Two things this suite cannot honestly prove, named here rather than written as skipped
  * tests, because a skipped test reads as something somebody forgot:

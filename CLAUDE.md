@@ -1,9 +1,11 @@
 # yaniv2
 
 Multiplayer [Yaniv](https://en.wikipedia.org/wiki/Yaniv_(card_game)), built top-down:
-engine first, fully unit tested, then transport. TypeScript, npm workspaces. `socket.io`
-is the only runtime dependency, and only the server has it — `shared/` is types, the event
-contract and the rulebook, so it stays dependency-free for the client's sake.
+engine first, fully unit tested, then transport. TypeScript, npm workspaces. The server has
+two runtime dependencies and nothing else does — `socket.io`, and `postgres` for the profile
+store (`docs/adr/0019`, which records that a dependency-free profile store was not reachable).
+`shared/` is types, the event contract and the rulebook, so it stays dependency-free for the
+client's sake.
 
 # behavior rules
 This section bullet points specific behavior patterns that you should follow when working in this repository. Do not modify this section.
@@ -30,8 +32,8 @@ four source trees), `adr/` (one decision each, numbered), `client-table.md` (the
 ## Code structure
 
 Four trees: `shared/src` (types, the socket contract and the rulebook, dependency-free),
-`server/src` (the engine — deck, pure transitions, serialization, rooms, bots — and the
-profile store's seam),
+`server/src` (the engine — deck, pure transitions, serialization, rooms, bots — the
+profile store's seam, and `sql/` behind it),
 `server/scripts` (two smoke-test harnesses, not shipped) and `client/src` (Vite + React: a
 framework-free session core, plus components foldered by screen). Every workspace has a `test/`
 of `node:test` suites beside its `src/`: one file per module, plus the server's
@@ -55,6 +57,15 @@ holds across the trees, and is not discoverable by reading one file:
   and why `test/profiles.test.ts` is parameterised over a `() => ProfileStore` factory rather
   than written against it: that suite is the interface's specification, and the second
   registration is the Postgres arm.
+- **`server/src/sql/` is the only folder that knows SQL, and one file in it is the only file
+  that imports `postgres`** — `connect.ts`, so the whole cost of the driver is visible by
+  opening it, and the client's type travels to the other two as `SqlClient`. `migrations.ts`
+  is an ordered list of statements and the applier that runs whichever a `schema_version` row
+  says have not run: **append a statement, never edit a shipped one**, safe at startup only
+  because this service cannot run two replicas. `profiles.ts` beside it implements the seam
+  over a client it is *handed*. **No test in the repo executes a line of the folder**
+  (`docs/adr/0019`) — a wrong column name is found by booting, and CI with a `postgres`
+  service is the named fix.
 - **`bot.ts` is shipped, not a dev tool**, and decides only from a `PlayerGameView` — the same
   payload a real client gets — so it cannot see hidden hands or the draw pile.
 - **`server/scripts/` imports nothing from `src/` except types.** Reaching for `RoomManager`
@@ -320,13 +331,29 @@ that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS`. It does clea
 
 ### Socket layer: wiring is separate from listening
 
-`createSocketServer(httpServer, rooms, options?)` attaches handlers and returns the `io`
-instance; it never calls `listen`, and `index.ts` does that and nothing else. The split exists
+`createSocketServer(httpServer, rooms, profiles, options?)` attaches handlers and returns the
+`io` instance; it never calls `listen`, and `index.ts` does that and nothing else. The
+`ProfileStore` is a **required** argument rather than a defaulted one, on ADR-0013's grounds: a
+call site needing a capability must not be able to forget it, and a server that composed itself
+a store nobody chose would put the accounts wherever the default went. The split exists
 so tests can stand up a real server on an ephemeral port (`listen(0)`) without duplicating
 handler logic — `socketServer.test.ts` drives real `socket.io-client` connections rather than a
 stub, this layer's whole job *being* its wire behaviour, and observes server-side facts through
 the socket rather than by asking `RoomManager`. `options` carries the clock every room timer is
 set on and the bot think time, both defaulted, so production construction is unchanged.
+
+### There are two ways to boot, and the command says which
+
+`index.ts` is the one place that binds a port and the one place that decides where accounts go
+(`docs/adr/0019`). **`npm run serve`** reads `DATABASE_URL`, applies pending migrations and
+**refuses to start** without a working database; **`npm run serve:memory`** runs the in-memory
+store on nothing but a port, and is what local work uses. **There is no fallback between them** —
+a deploy that lost the variable would otherwise run on memory and quietly forget every account,
+in a decision made *for* durability — and it is a flag rather than a second environment variable,
+because which store to use is something a person chooses when they type the command. Nothing
+catches on the way in: a missing variable, an unreachable database or a migration that will not
+apply crashes the process before a port is bound, which is what `result.ts` already says a thrown
+error is for.
 
 ### Broadcasting: one send per socket, one broadcast per move
 
@@ -489,8 +516,9 @@ Not oversights — deferred on purpose, in this order of likely next work:
   anyone not joined by then plays the next match, not this one.
 - **The settings and the scorecard from the terminal harness.** The browser edits all four
   settings (docs/adr/0006) and draws the ledger (0017); the CLI does neither.
-- **Persistence.** Rooms are in-memory only, so a redeploy drops every match in progress — two
-  services (giving up same-origin, ADR-0003) is the fix if that cost matters.
+- **Persistence for *rooms*.** Accounts are in Postgres (`docs/adr/0019`); rooms are still a
+  `Map` in the process, so a redeploy drops every match in progress — an accepted cost, a match
+  being a thing you were in the middle of, and the constraint that makes startup migrations safe.
 - **Bots slapping down for themselves.** A human can win one inside the pause a bot takes before
   its turn, but no bot slaps down for itself — ADR-0005's other half.
 - **Disambiguating a joker that extends a run.** Tap order decides where it sits — a wart (§4).
@@ -498,15 +526,17 @@ Not oversights — deferred on purpose, in this order of likely next work:
 ## Running things
 
 ```sh
-npm test                                  # all workspaces, node:test
-npm run typecheck                         # tsc --build across the monorepo
-npm run serve --workspace=@yaniv/server   # the socket server (PORT, default 3000)
+npm test                                         # all workspaces, node:test
+npm run typecheck                                # tsc --build across the monorepo
+npm run serve:memory --workspace=@yaniv/server   # the socket server, profiles in memory
+npm run serve --workspace=@yaniv/server          # the same, against DATABASE_URL (PORT, 3000)
 ```
 
 Every command and flag is tabulated in `README.md`. One thing to know before reading it: the
 browser client (`npm run dev`) and the CLI harness (`npm run play`) are each real clients of a
-**separately running server**, so both take a second terminal running `npm run serve`. Deployment
-is one Railway service serving both halves (`docs/adr/0003`).
+**separately running server**, so both take a second terminal running `npm run serve:memory`.
+Deployment is one Railway service serving both halves, plus the Postgres service behind it
+(`docs/adr/0003`, `docs/adr/0019`).
 
 ## Agent skills
 

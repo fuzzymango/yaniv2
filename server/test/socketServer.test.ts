@@ -31,6 +31,7 @@ import { io as connectClient, type Socket as ClientSocket } from "socket.io-clie
 import { decideTurn } from "../src/bot.ts";
 import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
+import { createMemoryProfileStore } from "../src/profiles.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import type { SocketServerOptions } from "../src/socketServer.ts";
@@ -112,7 +113,9 @@ async function startServer(
           newRoomRng: () => mulberry32(seed + 1),
           defaultSettings,
         });
-  const io = createSocketServer(httpServer, rooms, timing);
+  // The store the sign-in events will use, once there are any: this suite is about the
+  // wire, and the in-memory store is what the repo's tests run against (docs/adr/0019).
+  const io = createSocketServer(httpServer, rooms, createMemoryProfileStore(), timing);
 
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
   const { port } = httpServer.address() as AddressInfo;

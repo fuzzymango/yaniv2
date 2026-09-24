@@ -18,6 +18,7 @@ import { describe, it } from "node:test";
 import type { PlayerGameView } from "@yaniv/shared";
 import { MAX_PLAYERS, YANIV_THRESHOLD, handValue } from "@yaniv/shared";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
+import { createMemoryProfileStore } from "../../src/profiles.ts";
 import { RoomManager } from "../../src/roomManager.ts";
 import { mulberry32 } from "../../src/rng.ts";
 import { createSocketServer } from "../../src/socketServer.ts";
@@ -55,6 +56,9 @@ async function startServer(seed: number, botCount = 1): Promise<Harness> {
       newRoomRng: () => mulberry32(seed + 1),
       defaultSettings: { botCount },
     }),
+    // The store the server is composed with. Nothing these scripts do reaches it, and the
+    // in-memory one is what every test in this repo runs against (docs/adr/0019).
+    createMemoryProfileStore(),
     // Bot think time off. What the harness draws is under test here, not when it draws
     // it: the pause is the server's and is asserted at its own seam, and left on it
     // would buy these scripts nothing but real seconds of waiting.

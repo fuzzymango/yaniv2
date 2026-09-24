@@ -39,9 +39,22 @@ Why the rulebook, `standings` and the display-name rule sit here rather than in 
 | `botTurns.ts` | `playBotTurn` — takes the turn in front of a room when it belongs to a bot — and `createBotTurnRunner`, which waits out **bot think time** before each one and so walks a chain a move at a time. One pending run per room, as the registry's `botTurn` purpose |
 | `autoDeal.ts` | `autoDealSeat` — whether a scored round deals itself on, and as which seat — and `createAutoDealer`, the pause it waits out first. The registry's `autoDeal` purpose. Only where a spectator is watching a table only bots are still playing (#148) |
 | `roomSweep.ts` | `unattended` — is there no seat held by a connected human? — and `createRoomSweeper`, the grace period a room gets before it is dropped for it (`roomSweep`, #150). Its sibling above's shape exactly, and its opposite: one wants somebody watching, the other nobody |
-| `socketServer.ts` | `createSocketServer` — wires the event contract onto an `io` instance. Never calls `listen` |
+| `socketServer.ts` | `createSocketServer` — wires the event contract onto an `io` instance. Never calls `listen`. Takes the `ProfileStore` as a **required** argument, so a composition that forgot one does not typecheck (`docs/adr/0019`) |
 | `staticServer.ts` | `serveStatic` — serves the built client (`client/dist`) same-origin alongside Socket.io, per ADR-0003. Hand-rolled, no framework |
-| `index.ts` | The entrypoint. Binds a port and composes the above. `npm run serve` |
+| `index.ts` | The entrypoint. Binds a port, and chooses the store the accounts go in: **two ways to boot and the command says which** — `npm run serve` against `DATABASE_URL`, migrations applied first and a crash before the port if there is no working database, or `npm run serve:memory` on nothing but a port. No fallback between them, by decision (`docs/adr/0019`) |
+
+## `server/src/sql/`
+
+The line between "knows SQL" and "does not" — everything above it talks to `ProfileStore`.
+**No test in this repo executes a line of these three files**: `npm test` stays self-contained
+with no database, so a wrong column name or a malformed template is found by booting the server,
+and CI with a `postgres` service is the named fix (`docs/adr/0019`).
+
+| File | Contents |
+|---|---|
+| `connect.ts` | `connectDatabase` — reads `DATABASE_URL` and builds the client — and `SqlClient`, the type the other two travel on. **The only file in the repository that imports `postgres`**, so the whole cost of the driver is one file to open, and swapping drivers is a rewrite of this folder rather than a search of the tree. Throws when the variable is absent, naming `serve:memory` in the message: there is no fallback to memory, that being the worst failure available to a decision made for durability |
+| `migrations.ts` | `MIGRATIONS`, the schema as an ordered list of statements — `account`, `credential`, `session`, the latter two cascading — and `applyMigrations`, which runs whichever a single `schema_version` row says have not run and answers how many that was. **Append a statement; never edit a shipped one.** Startup application is safe only because this service cannot run two replicas, and each statement lands with the version bump that records it in one transaction. A function the folder exports rather than a method on the seam, so the in-memory store never learns the word migration |
+| `profiles.ts` | `createSqlProfileStore` — `ProfileStore` over Postgres, **taking a client as an argument** rather than making one. `createAccount`'s two rows in a real transaction, which is the one thing the in-memory store cannot prove; rows mapped to the seam's types by hand rather than by the driver's `transform`, for reasons in its header |
 
 ## `server/scripts/`
 

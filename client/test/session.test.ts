@@ -34,6 +34,7 @@ import {
   type ResumeRequest,
   type RoomSettings,
 } from "@yaniv/shared";
+import { createMemoryProfileStore } from "@yaniv/server/src/profiles.ts";
 import { RoomManager } from "@yaniv/server/src/roomManager.ts";
 import { mulberry32 } from "@yaniv/server/src/rng.ts";
 import { createSocketServer } from "@yaniv/server/src/socketServer.ts";
@@ -141,6 +142,9 @@ async function startServer(
       // it yet, so this keeps the tables the size these tests were written against.
       defaultSettings: { botCount },
     }),
+    // The store the server is composed with (docs/adr/0019). Nothing this suite drives
+    // reaches it yet, and the in-memory one is what needs nothing installed.
+    createMemoryProfileStore(),
     // Bot think time off. This suite is about a client, and a bot pausing before every
     // turn would cost it real seconds per fished window without telling it anything new —
     // the pause is the server's, and is asserted at the server's own seam.

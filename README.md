@@ -1,13 +1,14 @@
 # yaniv2
 
-Multiplayer [Yaniv](docs/rules.md) — TypeScript, npm workspaces, no runtime dependencies.
+Multiplayer [Yaniv](docs/rules.md) — TypeScript, npm workspaces. Two runtime dependencies, both
+the server's: `socket.io`, and `postgres` for player accounts (`docs/adr/0019`).
 
 ## Layout
 
 | Workspace | Contents |
 |-----------|----------|
 | `shared/` | Card types, the per-player client view, error codes, and the Socket.io event contract. Imported by the server and the client, so the wire contract can't drift. |
-| `server/` | The game engine: deck, rules, pure state transitions, per-player serialization, and the room registry. |
+| `server/` | The game engine: deck, rules, pure state transitions, per-player serialization, and the room registry — plus the profile store accounts are remembered in, and `sql/` behind it. |
 | `client/` | The React browser client: the session core, screen components, and Socket.io connection. |
 
 `docs/rules.md` is the source of truth for gameplay and `docs/code-map.md` names every file in
@@ -24,6 +25,16 @@ npm run typecheck # tsc --build across the monorepo
 npm run build      # builds the client; the server serves it (see Deploying below)
 ```
 
+| Command (in `server/`) | What it boots | Needs |
+|---|---|---|
+| `npm run serve:memory` | the socket server, player accounts held in memory and forgotten when it stops | `PORT` (default 3000) |
+| `npm run serve` | the same server, accounts in Postgres: pending migrations are applied first, and a missing or unreachable database is a crash before the port is bound | `PORT`, `DATABASE_URL` |
+
+**There is no fallback between them** (`docs/adr/0019`): `serve` never quietly runs on memory,
+because a deploy that lost `DATABASE_URL` would then forget every account. Day-to-day local work
+runs `serve:memory`, which needs nothing installed — and neither does `npm test`, which touches no
+database at all.
+
 TypeScript runs directly on Node 24 via native type stripping — there is no build step and
 no test-runner dependency. This constrains the codebase to *erasable* TypeScript: no
 `enum`, no `namespace`, no parameter properties, and type-only imports written as
@@ -35,7 +46,7 @@ no test-runner dependency. This constrains the codebase to *erasable* TypeScript
 separately running backend. Start the server first:
 
 ```sh
-npm run serve --workspace=@yaniv/server   # terminal 1 — PORT, default 3000
+npm run serve:memory --workspace=@yaniv/server   # terminal 1 — PORT, default 3000
 ```
 
 Then start the frontend in a second terminal:
@@ -135,7 +146,7 @@ last seat leaves (`docs/adr/0012`).
 Start the server first:
 
 ```sh
-npm run serve --workspace=@yaniv/server   # terminal 1 — PORT, default 3000
+npm run serve:memory --workspace=@yaniv/server   # terminal 1 — PORT, default 3000
 ```
 
 Then, one or more players join in their own terminals (up to 6 total). Bare `--name`
@@ -248,10 +259,20 @@ and the server's `index.ts` serves `client/dist` as static files (SPA fallback t
 start command to `npm run serve --workspace=@yaniv/server`; Nixpacks runs `npm run build`
 automatically as part of the build phase.
 
+Beside it, a **Railway Postgres service** holds the player accounts (`docs/adr/0019`), with
+`DATABASE_URL` set on the `yaniv2` service and point-in-time-recovery backups enabled — the store
+*is* the identity, so losing the rows loses every account with no path back. A second service is
+not a second origin: the browser still talks to one host and the database is reached internally,
+so ADR-0003's cost is not incurred. The schema is the statement list in
+`server/src/sql/migrations.ts`, applied by the server as it starts — which is safe only while this
+service runs one replica — so a deploy carrying a new statement applies it and the deploy after it
+applies nothing.
+
 ## Not yet built
 
-Persistence (rooms are in-memory, so a restart or redeploy drops games in progress), and any
-policy for a seat whose player never comes back. A match plays end to end in the browser now:
+Persistence for rooms (they are in-memory, so a restart or redeploy drops games in progress;
+accounts are not, and live in Postgres), and any policy for a seat whose player never comes
+back. A match plays end to end in the browser now:
 create or join, set the room up, deal, take turns, watch a run of bot turns a move at a time,
 call Yaniv, and finish on the standings with another match one tap away. Reconnect is whole — a
 drop leaves the room and the seat alone, and the page presents the seat's token and picks up
