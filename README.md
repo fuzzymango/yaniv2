@@ -1,14 +1,15 @@
 # yaniv2
 
-Multiplayer [Yaniv](docs/rules.md) — TypeScript, npm workspaces. Two runtime dependencies, both
-the server's: `socket.io`, and `postgres` for player accounts (`docs/adr/0019`).
+Multiplayer [Yaniv](docs/rules.md) — TypeScript, npm workspaces. Three runtime dependencies, all
+the server's: `socket.io`, `postgres` for player accounts (`docs/adr/0019`), and
+`google-auth-library` to verify a Google sign-in (`docs/adr/0020`).
 
 ## Layout
 
 | Workspace | Contents |
 |-----------|----------|
 | `shared/` | Card types, the per-player client view, error codes, and the Socket.io event contract. Imported by the server and the client, so the wire contract can't drift. |
-| `server/` | The game engine: deck, rules, pure state transitions, per-player serialization, and the room registry — plus the profile store accounts are remembered in, and `sql/` behind it. |
+| `server/` | The game engine: deck, rules, pure state transitions, per-player serialization, and the room registry — plus the profile store accounts are remembered in, `sql/` behind it, and `auth/` (Google sign-in and sessions). |
 | `client/` | The React browser client: the session core, screen components, and Socket.io connection. |
 
 `docs/rules.md` is the source of truth for gameplay and `docs/code-map.md` names every file in
@@ -267,6 +268,12 @@ so ADR-0003's cost is not incurred. The schema is the statement list in
 `server/src/sql/migrations.ts`, applied by the server as it starts — which is safe only while this
 service runs one replica — so a deploy carrying a new statement applies it and the deploy after it
 applies nothing.
+
+Sign-in is Google's (`docs/adr/0020`), through an OAuth **Web** client whose ID is committed as
+`GOOGLE_CLIENT_ID` in `shared/src/config.ts` — public by design, and read by both the button and
+the server's audience check. No environment variable. Its Authorized JavaScript origins list the
+production host and `http://localhost:5173` / `http://localhost:3000`, so a new hostname is an
+edit in the Google Cloud console; accounts are keyed on Google's `sub` and survive it.
 
 ## Not yet built
 

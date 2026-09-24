@@ -8,12 +8,18 @@
  */
 
 /**
- * The one thing scheduling needs from the outside world. `setTimeout` implements it as
- * it stands; a test implements it by hand.
+ * The two things time is asked for: to run something later, and to say what instant it is.
+ * `setTimeout` and `Date.now` implement it as they stand; a test implements it by hand.
+ *
+ * `now` arrived with the session (docs/adr/0020), the first thing here that writes an
+ * instant down rather than waiting one out: a session expires thirty days from when it was
+ * issued, and a test proving that has to be able to say when "issued" was.
  */
 export interface Clock {
   /** Run `fn` in `ms` milliseconds; the returned function cancels it if it has not run. */
   after: (ms: number, fn: () => void) => () => void;
+  /** The current instant, in epoch milliseconds — `Date.now`'s contract. */
+  now: () => number;
 }
 
 /**
@@ -31,4 +37,5 @@ export const systemClock: Clock = {
     timer.unref();
     return () => clearTimeout(timer);
   },
+  now: () => Date.now(),
 };

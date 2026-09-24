@@ -10,6 +10,7 @@ export {
 
 export {
   ASSAF_PENALTY,
+  GOOGLE_CLIENT_ID,
   HAND_SIZE,
   MAX_PLAYERS,
   MAX_SCORE,
@@ -34,6 +35,8 @@ export {
 export { MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from "./displayName.ts";
 
 export type { GameErrorCode, GameError } from "./errors.ts";
+
+export type { AccountView, SignedIn, NameNeeded, SignInResult } from "./account.ts";
 
 export type {
   Phase,

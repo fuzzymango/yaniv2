@@ -42,6 +42,18 @@ export function markedResumeTokens(): () => string {
   return () => `${RESUME_TOKEN_MARK}${++issued}`;
 }
 
+/** What every session token issued under test starts with — the resume token's sibling. */
+export const SESSION_TOKEN_MARK = "session-token-for-";
+
+/**
+ * A session-token generator under test: `markedResumeTokens`' reasoning, one credential
+ * over. A token nobody can name is a token nobody can prove stayed off the wire.
+ */
+export function markedSessionTokens(): () => string {
+  let issued = 0;
+  return () => `${SESSION_TOKEN_MARK}${++issued}`;
+}
+
 /** Look up a real card by id, so tests never hand-build inconsistent cards. */
 export function card(id: string): Card {
   const found = BY_ID.get(id);
@@ -283,6 +295,11 @@ export function testClock(): TestClock {
         if (at !== -1) waiting.splice(at, 1);
       };
     },
+    // Wall time, not a hand-driven instant: a timer here fires when the test says so and
+    // no sooner, but what an instant *means* is judged by the profile store against the
+    // wall (`createMemoryProfileStore`), so a clock of its own would issue sessions that
+    // were expired the moment they were written.
+    now: () => Date.now(),
     pending: () => waiting.length,
     delays: () => waiting.map((timer) => timer.ms),
     tick: () => {

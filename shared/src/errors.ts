@@ -31,6 +31,14 @@ export type GameErrorCode =
    */
   | "NOT_IN_MATCH"
   | "NOT_ENOUGH_PLAYERS"
+  // account
+  /**
+   * A Google ID token that did not verify — forged, expired, or issued for some other app.
+   * No enumeration concern: a `sub` is not guessable. docs/adr/0020.
+   */
+  | "INVALID_CREDENTIAL"
+  /** A session token with no live session behind it: expired, signed out, or never ours. */
+  | "INVALID_SESSION"
   // room settings
   /**
    * A settings object with a field outside its range or enum, or not a settings object at

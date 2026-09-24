@@ -10,15 +10,16 @@ them; this is the table underneath that. Adding a module means adding its row he
 |---|---|
 | `cards.ts` | `Card`/`Suit`/`Rank`, rank ordering, `rankToValue` (the scoring table, `docs/rules.md` §1), and `sortHand`/`compareCards` — **display order only**, applied at `serializeStateForPlayer` and never to engine state, which keeps whatever order the engine produced: ascending by value, ties broken by rank then suit then card id, the last because two jokers otherwise compare fully equal and would visibly swap places between renders |
 | `views.ts` | `PlayerGameView` and friends — what a client actually receives, the round's `moveHistory` and each seat's `MatchStanding` (out, departed, **connected**) included. `seating` (the roster's order, every seat) and `turnOrder` (only the players still in the match) are two lists since #144, because elimination made them two questions. `SelfView` is a tagged union (`spectating`): the playing variant holds the hand and `slapdownEligible`, the spectating one has neither field at all. `OpponentView` carries `spectating` too, since which seats are bots is deliberately not on the wire. `RoundScore`/`PlayerRoundScore` are here too and are **not** views — the same type the domain model uses, there being nothing on a scorecard to redact (`docs/adr/0017`) |
-| `errors.ts` | `GameErrorCode` union |
+| `errors.ts` | `GameErrorCode` union — the rulebook's refusals and the transport's, and since the profiles work an `// account` group (`INVALID_CREDENTIAL`, `INVALID_SESSION`); a refused account name reuses `INVALID_NAME` (`docs/adr/0021`) |
 | `events.ts` | `ClientToServerEvents` / `ServerToClientEvents` — the socket contract |
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and the client |
-| `config.ts` | Every rule constant (`HAND_SIZE`, `YANIV_THRESHOLD`, `ASSAF_PENALTY`, `MAX_SCORE`, `MILESTONE_INTERVAL`, `MILESTONE_REDUCTION`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS`, `MIN_PLAYERS`, `MAX_PLAYERS`), each pointing at a `docs/rules.md` section. `HAND_SIZE`/`YANIV_THRESHOLD`/`MAX_SCORE` now survive only as `RoomSettings`' default seed values (`docs/adr/0006`); `MILESTONE_INTERVAL`/`MILESTONE_REDUCTION` are not settings-backed at all — always on, `docs/adr/0009` |
+| `config.ts` | Every rule constant (`HAND_SIZE`, `YANIV_THRESHOLD`, `ASSAF_PENALTY`, `MAX_SCORE`, `MILESTONE_INTERVAL`, `MILESTONE_REDUCTION`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS`, `MIN_PLAYERS`, `MAX_PLAYERS`), each pointing at a `docs/rules.md` section — and one value that is no rule, `GOOGLE_CLIENT_ID`, committed rather than an environment variable so the button and the server's `aud` check cannot disagree (`docs/adr/0020`). `HAND_SIZE`/`YANIV_THRESHOLD`/`MAX_SCORE` now survive only as `RoomSettings`' default seed values (`docs/adr/0006`); `MILESTONE_INTERVAL`/`MILESTONE_REDUCTION` are not settings-backed at all — always on, `docs/adr/0009` |
 | `settings.ts` | `RoomSettings` (`handSize`, `yanivThreshold`, `maxScore`, `botCount`) — a room's own per-match configuration; `botSeatLimit`/`effectiveBotCount`, the seats left for bots and what `botCount` therefore means right now; `isValidSettings` and the option sets/limits it validates against (`HAND_SIZES`, `YANIV_THRESHOLDS`, `MAX_SCORE_LIMITS`, `BOT_COUNT_LIMITS`), which a lobby control renders from. `docs/adr/0006` |
 | `displayName.ts` | `normalizeDisplayName` and `MAX_DISPLAY_NAME_LENGTH` — the display-name rule (trimmed, 1–20 characters) for every name a player can be known by: a guest's name typed at a room's front door, and an account's own name (`docs/adr/0019`). Applied by `roomManager.ts` and by the browser before it sends, so a refusal costs no round trip. Why a module of its own rather than a line in `config.ts`, and why no refusal wording lives in it: its own header |
+| `account.ts` | **Types only** (`docs/adr/0021`): `AccountView` (`{ id, displayName }`, deliberately no stat) and `SignInResult`, the `signIn` ack — `SignedIn` (session token and account) or `NameNeeded` (Google's name as a prefill, or empty). Nothing that verifies, mints or stores lives here |
 | `standings.ts` | `standings` — a finished match's final table, ordered by how long each player lasted (the survivor, then out order descending, then score, then the roster), read off the append-only roster alone, so whoever has left since is still on it. Read by both clients |
 
-Why the rulebook, `standings` and the display-name rule sit here rather than in `server/src`:
+Why the rulebook, `standings`, the display-name rule and the account types sit here rather than in `server/src`:
 `CLAUDE.md`, "Code structure", and `docs/adr/0002`.
 
 ## `server/src/`
@@ -27,7 +28,7 @@ Why the rulebook, `standings` and the display-name rule sit here rather than in 
 |---|---|
 | `state.ts` | `GameState`, `RoundState`, `Player` (`outInRound`/`departed` included), `MoveHistoryEntry` and the match-scoped `scorecard` (`shared`'s `RoundScore`, used unchanged) — the domain model — plus `inMatch`/`playersInMatch`, the filter every count over a roster goes through, and `spectating`, the one derivation of watching-rather-than-playing — over a seat *and* whether anybody is connected to it, connection being the one thing here the model never stores (docs/adr/0013) |
 | `config.ts` | The operational constants only — `BOT_NAMES` and `ROOM_CODE_*`. The rule constants live in `shared` |
-| `rng.ts`, `clock.ts` | The two ambient capabilities, injected rather than reached for: `Rng` + `mulberry32` (a seeded PRNG), and `Clock` + `systemClock` (the one thing scheduling needs from outside, unreferenced so a room's pending work never keeps a process alive, and what `roomTimers.ts` is built on) |
+| `rng.ts`, `clock.ts` | The two ambient capabilities, injected rather than reached for: `Rng` + `mulberry32` (a seeded PRNG), and `Clock` + `systemClock` (`after` to schedule and `now` to say what instant it is — the latter since sessions, the first thing that writes an instant down — unreferenced so a room's pending work never keeps a process alive, and what `roomTimers.ts` is built on) |
 | `result.ts` | `Result<T>` — `{ok: true, value}` / `{ok: false, error}` |
 | `profiles.ts` | `ProfileStore` — the seam a player is remembered through between rooms — its types (`Account`, `AccountId`, `CredentialKind`, `NewCredential`, `StoredCredential`) and `createMemoryProfileStore`, the implementation that needs nothing installed. Ten methods, **task-shaped not table-shaped** so `createAccount`'s two rows land together behind the seam, all async by decision, absence `null` and failure thrown. Its neighbours above are why it is flat here: a capability the server is handed. The in-memory store is **shipped code, not a test helper**, and `test/profiles.test.ts` is a contract suite parameterised over a store factory — the interface's specification, the Postgres arm one registration away. `docs/adr/0019` |
 | `deck.ts` | `createDeck`, `shuffle`, `deal` — pure functions, no class |
@@ -42,6 +43,19 @@ Why the rulebook, `standings` and the display-name rule sit here rather than in 
 | `socketServer.ts` | `createSocketServer` — wires the event contract onto an `io` instance. Never calls `listen`. Takes the `ProfileStore` as a **required** argument, so a composition that forgot one does not typecheck (`docs/adr/0019`) |
 | `staticServer.ts` | `serveStatic` — serves the built client (`client/dist`) same-origin alongside Socket.io, per ADR-0003. Hand-rolled, no framework |
 | `index.ts` | The entrypoint. Binds a port, and chooses the store the accounts go in: **two ways to boot and the command says which** — `npm run serve` against `DATABASE_URL`, migrations applied first and a crash before the port if there is no working database, or `npm run serve:memory` on nothing but a port. No fallback between them, by decision (`docs/adr/0019`) |
+
+## `server/src/auth/`
+
+From a Google sign-in to an account and a session, with no transport under it (`docs/adr/0020`,
+`docs/adr/0021`). Interface here, driver beside it, as `profiles.ts` and `sql/profiles.ts` are.
+Proved by `test/auth/`, which opens no socket and reaches no Google.
+
+| File | Contents |
+|---|---|
+| `verifier.ts` | `TokenVerifier` and `VerifiedIdentity` (`sub`, and Google's `name` as a suggestion only). `null` for a token that did not verify, a throw when Google could not be asked. **The fake is a test helper**, `test/auth/verifier.ts`, nothing shipped having a use for it |
+| `google.ts` | `googleVerifier(clientId)` — **the only file that imports `google-auth-library`**. Fetches Google's keys outside its catch, so an outage throws rather than reading as a bad token |
+| `session.ts` | `openSession` (mint behind an **injectable** `SessionTokenGenerator`, store the hash, 30 days fixed from issue — `SESSION_LIFETIME_MS`), `randomSessionToken` (32 CSPRNG bytes) and `hashSessionToken` — SHA-256, **the one place the hash is computed**. The store never sees a raw token |
+| `flows.ts` | `signIn`, `createAccount`, `resumeSession`, `renameAccount` — functions over `Auth` (verifier, store, clock, generator), each a `Result` and none throwing for a refusal. Names go through `normalizeDisplayName`; Google's name suggests nothing where it fails the rule; a `createAccount` for a credential that already has an account signs into it |
 
 ## `server/src/sql/`
 

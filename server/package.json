@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@yaniv/shared": "*",
+    "google-auth-library": "^11.1.0",
     "postgres": "^3.4.9",
     "socket.io": "^4.8.3"
   },

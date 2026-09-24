@@ -28,3 +28,13 @@ export const MILESTONE_REDUCTION = 50;
 
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 6;
+
+/**
+ * The one exception to this file's first line: a wire-contract fact, not a rule. The OAuth
+ * client both halves must agree on — the browser's Google button asks for tokens issued
+ * to it, and the server refuses any whose `aud` is anything else — so one value, read by
+ * both, and they cannot disagree. Public by design and committed rather than an
+ * environment variable (docs/adr/0020); issued in #183.
+ */
+export const GOOGLE_CLIENT_ID =
+  "444012542750-lrv168q5sk0qpt03vgbsk7vqjg8orh5o.apps.googleusercontent.com";

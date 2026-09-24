@@ -2,8 +2,9 @@
 
 Multiplayer [Yaniv](https://en.wikipedia.org/wiki/Yaniv_(card_game)), built top-down:
 engine first, fully unit tested, then transport. TypeScript, npm workspaces. The server has
-two runtime dependencies and nothing else does — `socket.io`, and `postgres` for the profile
-store (`docs/adr/0019`, which records that a dependency-free profile store was not reachable).
+three runtime dependencies and nothing else does — `socket.io`, `postgres` for the profile
+store (`docs/adr/0019`) and `google-auth-library` to verify a sign-in (`docs/adr/0020`), each of
+the last two imported by exactly one file.
 `shared/` is types, the event contract and the rulebook, so it stays dependency-free for the
 client's sake.
 
@@ -33,7 +34,7 @@ four source trees), `adr/` (one decision each, numbered), `client-table.md` (the
 
 Four trees: `shared/src` (types, the socket contract and the rulebook, dependency-free),
 `server/src` (the engine — deck, pure transitions, serialization, rooms, bots — the
-profile store's seam, and `sql/` behind it),
+profile store's seam, `sql/` behind it, and `auth/` — the sign-in and the session),
 `server/scripts` (two smoke-test harnesses, not shipped) and `client/src` (Vite + React: a
 framework-free session core, plus components foldered by screen). Every workspace has a `test/`
 of `node:test` suites beside its `src/`: one file per module, plus the server's
@@ -47,7 +48,9 @@ holds across the trees, and is not discoverable by reading one file:
   between them. The rulebook lives there for the same reason — a client must offer exactly the
   moves the server will accept (`docs/adr/0002`) — as does `standings`, a finished match not
   being allowed to end two ways depending on who is looking, and `displayName.ts`, the one
-  trimmed-1–20 rule every name a player can be known by goes through. Every function there is
+  trimmed-1–20 rule every name a player can be known by goes through. `account.ts` is the
+  account on the wire and **types only** (`AccountView`, deliberately no stat, and the `signIn`
+  ack) — verifying, minting and storing are the server's (`docs/adr/0021`). Every function there is
   pure over values the wire already carries, so this costs `shared` none of its
   dependency-freedom.
 - **`profiles.ts` is a seam, and its in-memory store is shipped code** (`docs/adr/0019`): the
@@ -66,6 +69,14 @@ holds across the trees, and is not discoverable by reading one file:
   over a client it is *handed*. **No test in the repo executes a line of the folder**
   (`docs/adr/0019`) — a wrong column name is found by booting, and CI with a `postgres`
   service is the named fix.
+- **`server/src/auth/` turns a Google sign-in into an account and a session** (`docs/adr/0020`,
+  `0021`), with no transport under it: `flows.ts` is four functions over a verifier, the store, a
+  clock and a session-token generator, each a `Result`, so the socket handlers hold no auth
+  logic. Identity is Google's `sub`, never the email, and the credential row holds **no
+  secret**. `google.ts` is the only file importing `google-auth-library`, behind the
+  `TokenVerifier` in `verifier.ts`, whose **fake is a test helper** (`test/auth/verifier.ts`) —
+  nothing shipped calls one. `session.ts` mints behind an injectable generator and is **the one
+  place a token is hashed**: the store holds SHA-256s only, thirty days fixed from issue.
 - **`bot.ts` is shipped, not a dev tool**, and decides only from a `PlayerGameView` — the same
   payload a real client gets — so it cannot see hidden hands or the draw pile.
 - **`server/scripts/` imports nothing from `src/` except types.** Reaching for `RoomManager`
