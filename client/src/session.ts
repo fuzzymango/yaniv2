@@ -25,6 +25,7 @@ import type {
   RoomSettings,
   ServerToClientEvents,
 } from "@yaniv/shared";
+import { MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
 import type { Announcement } from "./announcement.ts";
 import { announcementFrom } from "./announcement.ts";
@@ -279,13 +280,17 @@ export interface Session {
 
 /**
  * Refused here rather than by the server, so the answer is instant and the player is
- * never sent away from the menu and back. The server enforces the same rule — this is
- * the client declining to offer a move it already knows will be refused, not the client
- * deciding a rule of its own.
+ * never sent away from the menu and back. The rule is `shared`'s and the server applies
+ * the same one (ADR-0002) — this is the client declining to offer a move it already
+ * knows will be refused, not the client deciding a rule of its own.
+ *
+ * The sentence is this screen's own, and asks for a name rather than reporting on the
+ * one that was typed: both ways of failing the rule are answered here, and the commoner
+ * of them by far is a field nobody has typed into yet.
  */
-const EMPTY_NAME: GameError = {
+const UNUSABLE_NAME: GameError = {
   code: "INVALID_NAME",
-  message: "Enter a name before creating or joining a room",
+  message: `Enter a name of 1-${MAX_DISPLAY_NAME_LENGTH} characters to create or join a room`,
 };
 
 /**
@@ -623,16 +628,18 @@ export function createSession(
 
   /**
    * The name to enter a room under, or null when there is no asking: the controls are
-   * already locked on an earlier attempt, or the player has typed nothing.
+   * already locked on an earlier attempt, or what was typed is not a usable name.
    *
-   * Locking here rather than at each intent is what makes the guard cover both ways in.
+   * Locking here rather than at each intent is what makes the guard cover both ways in,
+   * and the shared rule answers here for the same reason — one check covering both
+   * doors, and the same one the server will apply to whatever this sends.
    */
   const beginEntry = (playerName: string): string | null => {
     if (snapshot.busy) return null;
 
-    const name = playerName.trim();
-    if (name.length === 0) {
-      publish({ error: EMPTY_NAME });
+    const name = normalizeDisplayName(playerName);
+    if (name === null) {
+      publish({ error: UNUSABLE_NAME });
       return null;
     }
 

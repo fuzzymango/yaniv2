@@ -15,10 +15,11 @@ them; this is the table underneath that. Adding a module means adding its row he
 | `rules.ts` | `isValidSet`, `canonicalizeSet`, `legalDiscards`, `canCallYaniv`, `pickupCandidates`, `opensSlapdown`, `handValue` — the rulebook, used by the engine, the bot and the client |
 | `config.ts` | Every rule constant (`HAND_SIZE`, `YANIV_THRESHOLD`, `ASSAF_PENALTY`, `MAX_SCORE`, `MILESTONE_INTERVAL`, `MILESTONE_REDUCTION`, `MIN_RUN_LENGTH`, `MIN_RUN_REAL_CARDS`, `MIN_PLAYERS`, `MAX_PLAYERS`), each pointing at a `docs/rules.md` section. `HAND_SIZE`/`YANIV_THRESHOLD`/`MAX_SCORE` now survive only as `RoomSettings`' default seed values (`docs/adr/0006`); `MILESTONE_INTERVAL`/`MILESTONE_REDUCTION` are not settings-backed at all — always on, `docs/adr/0009` |
 | `settings.ts` | `RoomSettings` (`handSize`, `yanivThreshold`, `maxScore`, `botCount`) — a room's own per-match configuration; `botSeatLimit`/`effectiveBotCount`, the seats left for bots and what `botCount` therefore means right now; `isValidSettings` and the option sets/limits it validates against (`HAND_SIZES`, `YANIV_THRESHOLDS`, `MAX_SCORE_LIMITS`, `BOT_COUNT_LIMITS`), which a lobby control renders from. `docs/adr/0006` |
+| `displayName.ts` | `normalizeDisplayName` and `MAX_DISPLAY_NAME_LENGTH` — the display-name rule (trimmed, 1–20 characters) for every name a player can be known by: a guest's name typed at a room's front door, and an account's own name (`docs/adr/0019`). Applied by `roomManager.ts` and by the browser before it sends, so a refusal costs no round trip. Why a module of its own rather than a line in `config.ts`, and why no refusal wording lives in it: its own header |
 | `standings.ts` | `standings` — a finished match's final table, ordered by how long each player lasted (the survivor, then out order descending, then score, then the roster), read off the append-only roster alone, so whoever has left since is still on it. Read by both clients |
 
-Why the rulebook and `standings` sit here rather than in `server/src`: `CLAUDE.md`, "Code
-structure", and `docs/adr/0002`.
+Why the rulebook, `standings` and the display-name rule sit here rather than in `server/src`:
+`CLAUDE.md`, "Code structure", and `docs/adr/0002`.
 
 ## `server/src/`
 

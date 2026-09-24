@@ -21,6 +21,7 @@ import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import {
   HAND_SIZE,
+  MAX_DISPLAY_NAME_LENGTH,
   MAX_PLAYERS,
   MAX_SCORE,
   YANIV_THRESHOLD,
@@ -572,18 +573,26 @@ describe("the session core", () => {
     }
   });
 
-  it("refuses an empty name without asking the server", async () => {
+  it("refuses an unusable name without asking the server", async () => {
     const server = await startServer(7);
     try {
       const session = await server.openSession();
-      session.createRoom("   ");
 
-      const refused = await waitForSnapshot(session, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "INVALID_NAME");
-      assert.equal(refused.view, null);
+      // Both ways a name can fail the shared rule, refused by the same check (ADR-0002):
+      // a name the server would turn away costs no round trip to be turned away here.
+      for (const unusable of ["   ", "x".repeat(MAX_DISPLAY_NAME_LENGTH + 1)]) {
+        session.createRoom(unusable);
 
-      // The proof that nothing was emitted, phrased in the only terms a client has: a
-      // connection the server had seated would be turned away with ALREADY_IN_ROOM.
+        // Asserted without awaiting anything, which is the proof that nothing was sent:
+        // an answer that had come from the server could not be on the snapshot yet.
+        const refused = session.getSnapshot();
+        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${unusable.length}`);
+        assert.equal(refused.busy, false, "nothing is in flight to wait for");
+        assert.equal(refused.view, null);
+      }
+
+      // And the controls really are free — which also says the server was never asked
+      // for a room: a connection it had seated would answer this with ALREADY_IN_ROOM.
       session.createRoom("Ada");
       const created = await waitForSnapshot(session, "the room", (s) => s.view !== null);
       assert.equal(created.view!.you.name, "Ada");

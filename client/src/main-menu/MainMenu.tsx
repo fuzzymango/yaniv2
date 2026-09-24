@@ -5,8 +5,8 @@
  * the code are the player's typing and nothing more — they belong to this field until
  * an intent is called with them, so they live here rather than in the session.
  *
- * Neither button decides anything: an empty name is refused by the session core and a
- * bad code by the server, and both come back the same way, as an error to show. This
+ * Neither button decides anything: an unusable name is refused by the session core and
+ * a bad code by the server, and both come back the same way, as an error to show. This
  * file only says what happened.
  *
  * It is also where a player lands when a room goes away underneath them, which is what

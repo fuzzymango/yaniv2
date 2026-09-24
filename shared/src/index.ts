@@ -31,6 +31,8 @@ export {
   pickupCandidates,
 } from "./rules.ts";
 
+export { MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from "./displayName.ts";
+
 export type { GameErrorCode, GameError } from "./errors.ts";
 
 export type {

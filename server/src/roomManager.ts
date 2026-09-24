@@ -1,10 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   HAND_SIZE,
+  MAX_DISPLAY_NAME_LENGTH,
   MAX_PLAYERS,
   MAX_SCORE,
   YANIV_THRESHOLD,
   effectiveBotCount,
+  normalizeDisplayName,
   type RoomSettings,
 } from "@yaniv/shared";
 import { BOT_NAMES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "./config.ts";
@@ -13,7 +15,6 @@ import { randomInt, systemRng, type Rng } from "./rng.ts";
 import type { ActionResult, GameState, GameStateLobby, Player } from "./state.ts";
 import { inMatch } from "./state.ts";
 
-const MAX_NAME_LENGTH = 20;
 const MAX_CODE_ATTEMPTS = 100;
 
 /**
@@ -50,12 +51,6 @@ export interface RoomManagerOptions {
    * uses this instead of driving the wire for every room it creates.
    */
   defaultSettings?: Partial<RoomSettings>;
-}
-
-function normalizeName(name: string): string | null {
-  const trimmed = name.trim();
-  if (trimmed.length === 0 || trimmed.length > MAX_NAME_LENGTH) return null;
-  return trimmed;
 }
 
 /**
@@ -128,9 +123,9 @@ export class RoomManager {
     resumeToken: string;
     state: GameState;
   }> {
-    const name = normalizeName(hostName);
+    const name = normalizeDisplayName(hostName);
     if (name === null) {
-      return err("INVALID_NAME", `Name must be 1-${MAX_NAME_LENGTH} characters`);
+      return err("INVALID_NAME", `Name must be 1-${MAX_DISPLAY_NAME_LENGTH} characters`);
     }
 
     const roomCode = this.generateRoomCode();
@@ -175,9 +170,9 @@ export class RoomManager {
     const room = this.rooms.get(roomCode);
     if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
 
-    const name = normalizeName(playerName);
+    const name = normalizeDisplayName(playerName);
     if (name === null) {
-      return err("INVALID_NAME", `Name must be 1-${MAX_NAME_LENGTH} characters`);
+      return err("INVALID_NAME", `Name must be 1-${MAX_DISPLAY_NAME_LENGTH} characters`);
     }
     if (room.state.phase !== "lobby") {
       return err("WRONG_PHASE", "That game has already started");

@@ -43,8 +43,10 @@ holds across the trees, and is not discoverable by reading one file:
 - **`shared/` is imported by the server and both clients**, so the wire contract cannot drift
   between them. The rulebook lives there for the same reason — a client must offer exactly the
   moves the server will accept (`docs/adr/0002`) — as does `standings`, a finished match not
-  being allowed to end two ways depending on who is looking. Every function there is pure over
-  values the wire already carries, so this costs `shared` none of its dependency-freedom.
+  being allowed to end two ways depending on who is looking, and `displayName.ts`, the one
+  trimmed-1–20 rule every name a player can be known by goes through. Every function there is
+  pure over values the wire already carries, so this costs `shared` none of its
+  dependency-freedom.
 - **`bot.ts` is shipped, not a dev tool**, and decides only from a `PlayerGameView` — the same
   payload a real client gets — so it cannot see hidden hands or the draw pile.
 - **`server/scripts/` imports nothing from `src/` except types.** Reaching for `RoomManager`
