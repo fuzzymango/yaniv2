@@ -30,7 +30,8 @@ four source trees), `adr/` (one decision each, numbered), `client-table.md` (the
 ## Code structure
 
 Four trees: `shared/src` (types, the socket contract and the rulebook, dependency-free),
-`server/src` (the engine — deck, pure transitions, serialization, rooms, bots),
+`server/src` (the engine — deck, pure transitions, serialization, rooms, bots — and the
+profile store's seam),
 `server/scripts` (two smoke-test harnesses, not shipped) and `client/src` (Vite + React: a
 framework-free session core, plus components foldered by screen). Every workspace has a `test/`
 of `node:test` suites beside its `src/`: one file per module, plus the server's
@@ -47,6 +48,13 @@ holds across the trees, and is not discoverable by reading one file:
   trimmed-1–20 rule every name a player can be known by goes through. Every function there is
   pure over values the wire already carries, so this costs `shared` none of its
   dependency-freedom.
+- **`profiles.ts` is a seam, and its in-memory store is shipped code** (`docs/adr/0019`): the
+  one shape anything above it sees a remembered player through, so no file but the SQL
+  implementation behind it learns what a database is. The memory store is not a test double —
+  it is what a server told to run without a database runs on — which is why it sits in `src/`
+  and why `test/profiles.test.ts` is parameterised over a `() => ProfileStore` factory rather
+  than written against it: that suite is the interface's specification, and the second
+  registration is the Postgres arm.
 - **`bot.ts` is shipped, not a dev tool**, and decides only from a `PlayerGameView` — the same
   payload a real client gets — so it cannot see hidden hands or the draw pile.
 - **`server/scripts/` imports nothing from `src/` except types.** Reaching for `RoomManager`
