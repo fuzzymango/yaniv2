@@ -10,8 +10,10 @@ Multiplayer [Yaniv](docs/rules.md) — TypeScript, npm workspaces, no runtime de
 | `server/` | The game engine: deck, rules, pure state transitions, per-player serialization, and the room registry. |
 | `client/` | The React browser client: the session core, screen components, and Socket.io connection. |
 
-`docs/rules.md` is the source of truth for gameplay. `docs/backend-archetechture.md` is the
-original design sketch — where the two disagree, the code and `rules.md` are current.
+`docs/rules.md` is the source of truth for gameplay and `docs/code-map.md` names every file in
+the four source trees; the rest of `docs/` is indexed from `CLAUDE.md`.
+`docs/backend-archetechture.md` is the original design sketch — where the two disagree, the code
+and `rules.md` are current.
 
 ## Running
 
