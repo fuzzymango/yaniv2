@@ -18,7 +18,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, type TestContext } from "node:test";
 import {
   createMemoryProfileStore,
   type NewCredential,
@@ -45,19 +45,30 @@ function googleCredential(sub: string): NewCredential {
 
 for (const [name, createStore] of implementations) {
   describe(`ProfileStore (${name})`, () => {
+    /**
+     * A store for one test, closed however that test ends. Nothing leaks here when a
+     * failed assertion would have skipped the close — the in-memory store holds nothing
+     * open — but the arm this suite is built to host holds a connection pool, and an
+     * open pool is exactly what keeps a `node:test` process from exiting.
+     */
+    function storeFor(t: TestContext): ProfileStore {
+      const store = createStore();
+      t.after(() => store.close());
+      return store;
+    }
+
     describe("createAccount", () => {
-      it("returns an account with the name it was given and no calls yet", async () => {
-        const store = createStore();
+      it("returns an account with the name it was given and no calls yet", async (t) => {
+        const store = storeFor(t);
         const account = await store.createAccount("Ada", googleCredential("google-1"));
 
         assert.equal(account.displayName, "Ada");
         assert.equal(account.yanivCalls, 0);
         assert.ok(account.id.length > 0);
-        await store.close();
       });
 
-      it("reaches the account it created, by id and by credential", async () => {
-        const store = createStore();
+      it("reaches the account it created, by id and by credential", async (t) => {
+        const store = storeFor(t);
         const account = await store.createAccount("Ada", googleCredential("google-1"));
 
         assert.deepEqual(await store.loadAccount(account.id), account);
@@ -67,39 +78,38 @@ for (const [name, createStore] of implementations) {
           identifier: "google-1",
           secret: null,
         });
-        await store.close();
       });
 
-      it("gives two accounts two ids, whatever they are called", async () => {
-        const store = createStore();
+      it("gives two accounts two ids, whatever they are called", async (t) => {
+        const store = storeFor(t);
         const one = await store.createAccount("Ada", googleCredential("google-1"));
         const two = await store.createAccount("Ada", googleCredential("google-2"));
 
         assert.notEqual(one.id, two.id);
-        await store.close();
       });
 
-      it("refuses a credential that already belongs to an account", async () => {
-        const store = createStore();
+      it("refuses a credential that already belongs to an account", async (t) => {
+        const store = storeFor(t);
         await store.createAccount("Ada", googleCredential("google-1"));
 
         await assert.rejects(() => store.createAccount("Grace", googleCredential("google-1")));
-        await store.close();
       });
 
-      it("leaves the taken credential pointing at the account that holds it", async () => {
-        const store = createStore();
+      it("leaves the taken credential pointing at the account that holds it", async (t) => {
+        const store = storeFor(t);
         const ada = await store.createAccount("Ada", googleCredential("google-1"));
         await assert.rejects(() => store.createAccount("Grace", googleCredential("google-1")));
 
         const stored = await store.findByCredential("google", "google-1");
         assert.equal(stored?.accountId, ada.id);
         assert.equal((await store.loadAccount(ada.id))?.displayName, "Ada");
-        await store.close();
       });
 
-      it("keeps a credential's secret where one is stored", async () => {
-        const store = createStore();
+      // Google's credential stores no secret (docs/adr/0020) and is the only kind the
+      // type admits, so this stands in for the kind that will need one: the column is on
+      // the seam, and what is put in it must come back out.
+      it("keeps a credential's secret where one is stored", async (t) => {
+        const store = storeFor(t);
         const account = await store.createAccount("Ada", {
           kind: "google",
           identifier: "google-1",
@@ -113,30 +123,27 @@ for (const [name, createStore] of implementations) {
           identifier: "google-1",
           secret: "hashed",
         });
-        await store.close();
       });
     });
 
     describe("findByCredential", () => {
-      it("answers null for an identifier nobody has signed in with", async () => {
-        const store = createStore();
+      it("answers null for an identifier nobody has signed in with", async (t) => {
+        const store = storeFor(t);
         await store.createAccount("Ada", googleCredential("google-1"));
 
         assert.equal(await store.findByCredential("google", "google-2"), null);
-        await store.close();
       });
     });
 
     describe("loadAccount", () => {
-      it("answers null for an id no account has", async () => {
-        const store = createStore();
+      it("answers null for an id no account has", async (t) => {
+        const store = storeFor(t);
 
         assert.equal(await store.loadAccount("nobody"), null);
-        await store.close();
       });
 
-      it("answers with a copy, so a caller cannot write through it", async () => {
-        const store = createStore();
+      it("answers with a copy, so a caller cannot write through it", async (t) => {
+        const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
 
         const loaded = await store.loadAccount(id);
@@ -145,43 +152,39 @@ for (const [name, createStore] of implementations) {
         loaded.yanivCalls = 99;
 
         assert.deepEqual(await store.loadAccount(id), { id, displayName: "Ada", yanivCalls: 0 });
-        await store.close();
       });
     });
 
     describe("renameAccount", () => {
-      it("changes the name and nothing else", async () => {
-        const store = createStore();
+      it("changes the name and nothing else", async (t) => {
+        const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
         await store.recordYanivCall(id);
 
         await store.renameAccount(id, "Grace");
 
         assert.deepEqual(await store.loadAccount(id), { id, displayName: "Grace", yanivCalls: 1 });
-        await store.close();
       });
 
-      it("leaves the credential reaching the same account", async () => {
-        const store = createStore();
+      it("leaves the credential reaching the same account", async (t) => {
+        const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
 
         await store.renameAccount(id, "Grace");
 
         assert.equal((await store.findByCredential("google", "google-1"))?.accountId, id);
-        await store.close();
       });
 
-      it("throws against an account that is not there", async () => {
-        const store = createStore();
+      it("throws against an account that is not there", async (t) => {
+        const store = storeFor(t);
 
         await assert.rejects(() => store.renameAccount("nobody", "Grace"));
-        await store.close();
       });
     });
 
     describe("recordYanivCall", () => {
-      it("counts one call per write", async () => {
-        const store = createStore();
+      it("counts one call per write", async (t) => {
+        const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
 
         await store.recordYanivCall(id);
@@ -189,11 +192,10 @@ for (const [name, createStore] of implementations) {
         await store.recordYanivCall(id);
 
         assert.equal((await store.loadAccount(id))?.yanivCalls, 3);
-        await store.close();
       });
 
-      it("counts against the account that called and no other", async () => {
-        const store = createStore();
+      it("counts against the account that called and no other", async (t) => {
+        const store = storeFor(t);
         const ada = await store.createAccount("Ada", googleCredential("google-1"));
         const grace = await store.createAccount("Grace", googleCredential("google-2"));
 
@@ -201,37 +203,33 @@ for (const [name, createStore] of implementations) {
 
         assert.equal((await store.loadAccount(ada.id))?.yanivCalls, 1);
         assert.equal((await store.loadAccount(grace.id))?.yanivCalls, 0);
-        await store.close();
       });
 
-      it("throws against an account that is not there", async () => {
-        const store = createStore();
+      it("throws against an account that is not there", async (t) => {
+        const store = storeFor(t);
 
         await assert.rejects(() => store.recordYanivCall("nobody"));
-        await store.close();
       });
     });
 
     describe("sessions", () => {
-      it("finds the account behind a live session", async () => {
-        const store = createStore();
+      it("finds the account behind a live session", async (t) => {
+        const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
 
         await store.createSession(id, "hash-1", Date.now() + MINUTE);
 
         assert.equal(await store.findSession("hash-1"), id);
-        await store.close();
       });
 
-      it("answers null for a hash no session was ever created with", async () => {
-        const store = createStore();
+      it("answers null for a hash no session was ever created with", async (t) => {
+        const store = storeFor(t);
 
         assert.equal(await store.findSession("hash-1"), null);
-        await store.close();
       });
 
-      it("tells two of one account's sessions apart", async () => {
-        const store = createStore();
+      it("tells two of one account's sessions apart", async (t) => {
+        const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
         await store.createSession(id, "hash-1", Date.now() + MINUTE);
         await store.createSession(id, "hash-2", Date.now() + MINUTE);
@@ -240,29 +238,26 @@ for (const [name, createStore] of implementations) {
 
         assert.equal(await store.findSession("hash-1"), null);
         assert.equal(await store.findSession("hash-2"), id);
-        await store.close();
       });
 
-      it("answers null for a session that has expired, swept or not", async () => {
-        const store = createStore();
+      it("answers null for a session that has expired, swept or not", async (t) => {
+        const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
 
         await store.createSession(id, "hash-1", Date.now() - MINUTE);
 
         assert.equal(await store.findSession("hash-1"), null);
-        await store.close();
       });
 
-      it("refuses a session for an account that is not there", async () => {
-        const store = createStore();
+      it("refuses a session for an account that is not there", async (t) => {
+        const store = storeFor(t);
 
         await assert.rejects(() => store.createSession("nobody", "hash-1", Date.now() + MINUTE));
         assert.equal(await store.findSession("hash-1"), null);
-        await store.close();
       });
 
-      it("refuses a token hash a session already has", async () => {
-        const store = createStore();
+      it("refuses a token hash a session already has", async (t) => {
+        const store = storeFor(t);
         const ada = await store.createAccount("Ada", googleCredential("google-1"));
         const grace = await store.createAccount("Grace", googleCredential("google-2"));
         await store.createSession(ada.id, "hash-1", Date.now() + MINUTE);
@@ -270,18 +265,16 @@ for (const [name, createStore] of implementations) {
         await assert.rejects(() => store.createSession(grace.id, "hash-1", Date.now() + MINUTE));
 
         assert.equal(await store.findSession("hash-1"), ada.id);
-        await store.close();
       });
 
-      it("takes deleting a session nobody holds in its stride", async () => {
-        const store = createStore();
+      it("takes deleting a session nobody holds in its stride", async (t) => {
+        const store = storeFor(t);
 
         await store.deleteSession("hash-1");
-        await store.close();
       });
 
-      it("sweeps what had expired by the instant it is given, and nothing else", async () => {
-        const store = createStore();
+      it("sweeps what had expired by the instant it is given, and nothing else", async (t) => {
+        const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
         // Swept from an instant still ahead of now, so what survives is observable: a
         // session left behind by a sweep run at 1_000 would read as absent anyway, and
@@ -296,26 +289,22 @@ for (const [name, createStore] of implementations) {
         assert.equal(await store.findSession("long expired"), null);
         assert.equal(await store.findSession("expiring on the instant"), null);
         assert.equal(await store.findSession("expiring after it"), id);
-        await store.close();
       });
 
-      it("leaves the account a swept session belonged to alone", async () => {
-        const store = createStore();
+      it("leaves the account a swept session belonged to alone", async (t) => {
+        const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
         await store.createSession(id, "hash-1", Date.now() + MINUTE);
 
         await store.deleteExpiredSessions(Date.now() + MINUTE);
 
         assert.equal((await store.loadAccount(id))?.displayName, "Ada");
-        await store.close();
       });
     });
 
     describe("close", () => {
       it("resolves, having nothing of its own to let go of", async () => {
-        const store = createStore();
-
-        await store.close();
+        await createStore().close();
       });
     });
   });

@@ -150,7 +150,14 @@ interface SessionRow {
  * to use either, and neither buys it anything: an id is read back off what was returned,
  * and the only instant the store decides for itself is *now* — `expiresAt` is the
  * caller's, passed in. Postgres answers that one with its own `now()`, so a clock on this
- * seam would be a concept only one implementation could honour.
+ * seam would be a concept only one implementation could honour, and an injected one here
+ * would make the two stores disagree about when a session lapses.
+ *
+ * The consequence, for whoever mints an `expiresAt`: **expiry is judged against wall
+ * clock**, in both implementations. An instant taken from a test clock that starts at
+ * zero is an instant long past, and the session created with it is absent the moment it
+ * is written — which is correct, and is why `deleteExpiredSessions` takes its `now` while
+ * this does not: sweeping is a job run at an instant somebody chose, and expiring is not.
  */
 export function createMemoryProfileStore(): ProfileStore {
   const accounts = new Map<AccountId, Account>();
@@ -168,7 +175,7 @@ export function createMemoryProfileStore(): ProfileStore {
    */
   const copy = (account: Account): Account => ({ ...account });
 
-  const mustLoad = (id: AccountId): Account => {
+  const requireAccount = (id: AccountId): Account => {
     const account = accounts.get(id);
     if (!account) throw new Error(`no account ${id}`);
     return account;
@@ -198,15 +205,15 @@ export function createMemoryProfileStore(): ProfileStore {
     },
 
     async renameAccount(id, displayName) {
-      mustLoad(id).displayName = displayName;
+      requireAccount(id).displayName = displayName;
     },
 
     async recordYanivCall(id) {
-      mustLoad(id).yanivCalls += 1;
+      requireAccount(id).yanivCalls += 1;
     },
 
     async createSession(id, tokenHash, expiresAt) {
-      mustLoad(id);
+      requireAccount(id);
       if (sessions.has(tokenHash)) throw new Error("session token hash is taken");
       sessions.set(tokenHash, { accountId: id, expiresAt });
     },
