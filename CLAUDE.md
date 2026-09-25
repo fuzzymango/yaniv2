@@ -525,17 +525,21 @@ gap — behaviour worth testing belongs in the session core or in one of the pur
 it, which `docs/code-map.md` names.
 
 Snapshots are **replaced wholesale, never mutated**, `useSyncExternalStore` comparing by
-identity. Eight fields, each answering a different question: `view` (null *is* the main menu),
-`error`, `notice`, `connected`, `resuming`, `selection` (surviving the views that arrive
-underneath it), and the two **one-shots**, `flight` and `announcement`. **`busy` locks on emit
-and settles two ways** — on the ack for entering, leaving and anything producing a new position,
-on a strictly newer position for a move — so a control is never released over a position still
+identity. Nine fields, each answering a different question: `view` (null *is* the main menu),
+`account` (tagged: `guest` / `nameNeeded` / `signedIn`), `error`, `notice`, `connected`,
+`resuming`, `selection` (surviving the views that arrive underneath it), and the two
+**one-shots**, `flight` and `announcement`. **No credential is on it**: the Google ID token a
+first sign-in resends is held privately, and the session token sits in a second injected store
+beside the seat's (`tokens.ts`). A cold boot resumes the **account, then the seat**, `resuming`
+up across both. **`busy` locks on emit
+and settles two ways** — on the ack for entering, leaving, the five account events and anything
+producing a new position, on a strictly newer position for a move — so a control is never released over a position still
 showing the mover's own turn. **The client never enforces a rule the server owns**: what is
 legal about the cards is all it applies ahead of the server (ADR-0002), and everything else it
 offers is sent and refused.
 
-**Every rule of the snapshot, `busy`, the seat resumed from `localStorage` and the screen a
-dropped socket puts up is in `docs/client-session.md`.**
+**Every rule of the snapshot, `busy`, the seat and account resumed from `localStorage` and the
+screen a dropped socket puts up is in `docs/client-session.md`.**
 
 ### Tooling
 

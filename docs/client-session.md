@@ -1,7 +1,7 @@
 # The client's session core
 
 How `client/src/session.ts` behaves: the snapshot it publishes, what locks and releases
-`busy`, how a seat is claimed back and what a dropped socket does. `docs/client-table.md`
+`busy`, how an account and a seat are claimed back and what a dropped socket does. `docs/client-table.md`
 is its sibling — that one is the felt, this one is the wire behind it. Referenced from
 `CLAUDE.md`, which keeps only the shape.
 
@@ -19,19 +19,23 @@ modules beside it (`turn.ts`, `seating.ts`, `fan.ts`, `flight.ts`, `ghosts.ts`, 
 `useSession`.
 
 Snapshots are **replaced wholesale, never mutated**: `useSyncExternalStore` compares by
-identity. Eight fields, and each answers a different question:
+identity. Nine fields, and each answers a different question:
 
 - **`view`** — the position, or `null`. Null *is* the main menu: the one screen not a function of
   `view.phase`, there being nothing sent before a room exists — `resuming` qualifies it, below.
+- **`account`** — where the connection stands on identity, **tagged**: `guest`, `nameNeeded`
+  (Google vouched, a name to confirm, prefilled with `suggestedName`) or `signedIn` with its
+  `AccountView`. Tagged on `SelfView`'s precedent, so "signed in with no name" is unrepresentable.
+  Independent of `view`, as the server's two bindings are. See "Accounts" below.
 - **`error`** — a `GameError`: something the player asked for and was refused, or one the server
   pushed as `errorMessage`. Cleared the moment they try again — a refusal costs them nothing.
-- **`notice`** — news about the room that is *not* a refusal: today only a seat that could not be
-  claimed back. No action to blame and nothing to retry, and it arrives while they sit still.
+- **`notice`** — news that is *not* a refusal: a seat that could not be claimed back, or a session
+  that has lapsed. No action to blame and nothing to retry, and it arrives while they sit still.
 - **`connected`** — whether there is a socket to play over (this session's own, not the wire's
   per-seat `connected`). See "A session that loses its socket" below.
-- **`resuming`** — a seat is being claimed back and the answer has not landed. Always rides with
-  `busy`, and says what `busy` cannot: a null view is a table still being asked for rather than
-  the main menu. See "Claiming a seat back" below.
+- **`resuming`** — an account or a seat is being claimed back and the answer has not landed.
+  Always rides with `busy`, and says what `busy` cannot: a null view is a table (or an account)
+  still being asked for rather than the main menu. See "Claiming a seat back" below.
 - **`selection`** — the cards tapped for the next turn, by id, in tap order. Here rather than in a
   component because it has to survive views arriving underneath it: `retainSelection` on every
   broadcast of a position still being played drops whatever has left the hand, which is also what
@@ -47,8 +51,9 @@ identity. Eight fields, and each answers a different question:
   one-shot in the same place, asking `announcement.ts` — which keys on the **scorecard growing**,
   never on a round result standing. See "Call announcement" in `CONTEXT.md` and docs/adr/0018.
 
-**`busy` locks on emit, and settles two different ways.** Entering or leaving a room
-settles on the **ack**: entry has been broadcast before it is acked, and a departing
+**`busy` locks on emit, and settles two different ways.** Entering or leaving a room, and all
+five account events, settle on the **ack** — the account events producing no position at all, so
+there is no newer broadcast to wait for: entry has been broadcast before it is acked, and a departing
 connection is published to no longer. So do dealing the next round, dealing another match,
 and editing the room's settings, which produce a position rather than moving within one —
 and, in the settings case, none at all when refused, since a rejected edit is broadcast to
@@ -89,7 +94,8 @@ itself. The CLI needs those nudges only because its frames scroll apart.
 **The client never enforces a rule the server owns.** Showing the start control to the host
 alone is a courtesy, so a guest is not hunting for a button that was never theirs; the rule is
 `NOT_HOST` and the server says it. The deal is the same — drawn for a viewer still in the match,
-enforced by `NOT_IN_MATCH`. Refusing an empty name is the one exception.
+enforced by `NOT_IN_MATCH`. Refusing an unusable name — for a room, or for an account — is the one exception,
+the rule being `shared`'s (ADR-0002).
 
 ## Claiming a seat back
 
@@ -115,6 +121,38 @@ screen would read the moment between them as the main menu. A refused claim clea
 credential and lands on `view: null` with one `notice` — the same sentence a room that has
 gone gets, the server deliberately not drawing that distinction. A successful one publishes
 the acked view with nothing in flight: a table sat back down at, not a move anybody watched.
+
+## Accounts
+
+**Neither credential is ever on the snapshot.** The Google ID token `signIn` is handed is held in
+a private variable while a name is `nameNeeded`, because `createAccount` resends it, and dropped
+the moment that step ends — signed in, "Not now" (`cancelSignIn`, which sends nothing: nothing
+was bound), or a `createAccount` refused `INVALID_CREDENTIAL`, Google's tokens being short-lived.
+A refused *name* leaves the step open. The **session** token is what survives a reload, so it is
+held in memory and in an injected **`AccountStore`** — `accountStore` in `tokens.ts`, its own
+`localStorage` key, `yaniv.account`, with the seat's fail-quiet rules. The suite sweeps every
+snapshot of a sign-in and of a resume for both, by marked token.
+
+**Signed in, a room's name is the account's.** `createRoom`/`joinRoom` send the account's display
+name and never read the one passed in, so the menu needs no field and no branch; the server
+ignores a signed-in payload's name anyway (docs/adr/0022).
+
+**Sign-out is the main menu's.** It sends nothing from a table (#174 §2): it forgets **both**
+keys (docs/adr/0020), and at a table the seat is the one being sat in. Both are cleared before
+the emit and Google's `disableAutoSelect()` is called — injected as `GoogleSignIn`, `google.ts`
+being the one file that knows `window.google` — so a reload mid-flight cannot sign back in. A
+`renameAccount` refused `INVALID_SESSION` lands where a lapsed session does, below.
+
+## Claiming an account and a seat back
+
+**Every connect presents the session first, then the seat** (docs/adr/0022): the seat may be the
+account's, and claiming it before knowing who is asking asks the wrong question. The seat is
+claimed whether or not the session was refused — a guest seat is its token's either way — and
+`resuming` stays up across **both** round trips, so the moment between them never reads as the
+main menu (or as a guest's menu). Every *reconnect* does the same, the server's account binding
+dying with the socket. A refused session clears `yaniv.account`, lands as a guest, and carries
+**one** `notice`: it outranks the seat's own, an account's seat refused to a guest being the
+same piece of news. A guest seat claimed behind it keeps that notice until the player next acts.
 
 ## A session that loses its socket
 

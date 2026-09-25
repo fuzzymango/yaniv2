@@ -25,7 +25,9 @@ Two distinct concepts, easy to conflate because both sit "before the game":
 
 - **Main menu** — a client-side, room-less screen. No `GameState` exists yet; there is no
   room code and nothing on a server to point at. Its only options are to create a lobby,
-  join one by code, or quit the application.
+  join one by code, or quit the application. It is also the one screen where a player signs
+  in or out: an account binds before any room exists, so identity is asked about here and
+  nowhere else, and the two doors into a room are unchanged by it.
 - **Lobby** — `GameState.phase === "lobby"` (see above): a room already exists
   server-side, has a code, and players are staged in it up to the player cap.
 
