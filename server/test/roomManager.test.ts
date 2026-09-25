@@ -212,7 +212,8 @@ describe("the account a seat was taken under", () => {
 
   /**
    * The account *is* that seat's credential, so joining again is claiming it back — at
-   * any phase and however full the table, those being refusals of a *new* seat.
+   * any phase, however full the table and whatever name is typed, those being refusals of
+   * a *new* seat.
    */
   it("hands an account back the seat it already holds rather than seating it twice", () => {
     const rooms = manager();
@@ -220,7 +221,7 @@ describe("the account a seat was taken under", () => {
     for (let i = 1; i < MAX_PLAYERS; i++) unwrap(rooms.joinRoom(roomCode, `P${i}`, null));
     unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
 
-    const again = unwrap(rooms.joinRoom(roomCode, "Anyone", "account-ada"));
+    const again = unwrap(rooms.joinRoom(roomCode, "", "account-ada"));
 
     assert.equal(again.playerId, playerId);
     assert.equal(again.resumed, true);

@@ -515,7 +515,7 @@ export function createSocketServer(
      * that is enough is `RoomManager`'s to judge (`claims`, docs/adr/0022); this only says
      * who is asking.
      */
-    function claimant(resumeToken: string | null): Claimant {
+    function claimant(resumeToken: string): Claimant {
       return { accountId: socket.data.account?.accountId ?? null, resumeToken };
     }
 
