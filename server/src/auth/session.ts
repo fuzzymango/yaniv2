@@ -83,7 +83,7 @@ export const SESSION_SWEEP_MS = 24 * 60 * 60 * 1000;
  * - **A failed sweep is logged, never thrown.** The store throws when the database is
  *   down (docs/adr/0019), and an unhandled rejection from a timer would take every match
  *   in progress down with it — for a delete the next day's sweep does just as well.
- *   The Yaniv-call write's reasoning (docs/adr/0023), and its shape.
+ *   The reasoning docs/adr/0023 gives the Yaniv-call write, applied to housekeeping.
  */
 export function startSessionSweep(
   store: ProfileStore,

@@ -3,7 +3,8 @@
  * store the accounts go in.
  *
  * Everything interesting lives in `socketServer.ts`, which only wires handlers onto an
- * `io` instance — Google's verifier and real session tokens being its defaults — and `staticServer.ts`, which serves the built client (docs/adr/0003).
+ * `io` instance — Google's verifier and real session tokens being its defaults — and
+ * `staticServer.ts`, which serves the built client (docs/adr/0003).
  * Keeping `listen` here is what lets tests and harnesses stand up their own server on an
  * ephemeral port without duplicating any handler logic — and is why this file has no
  * tests of its own: there is nothing here but composition.

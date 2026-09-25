@@ -161,6 +161,15 @@ describe("serializeStateForPlayer", () => {
     }
   });
 
+  /*
+   * No session-token sibling of the test above, and none should be added. A resume token
+   * is on `Player`, inside `GameState`, so the serializer holds it and must drop it — break
+   * the serializer and that test fails. A session token is never in `GameState` at all (it
+   * lives in the store, hashed, and on `socket.data`), so the same assertion would pass
+   * against a serializer broken on purpose: vacuous, and withdrawn as such (#175,
+   * docs/adr/0021). The test with teeth is the wire sweep in `socketServer.test.ts`.
+   */
+
   it("shows the current turn only while a round is running", () => {
     const view = serializeStateForPlayer(scenario(), "p1", NO_CONNECTIONS);
     assert.equal(view.currentTurnPlayerId, "p1");
