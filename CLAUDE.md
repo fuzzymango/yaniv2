@@ -76,7 +76,10 @@ holds across the trees, and is not discoverable by reading one file:
   secret**. `google.ts` is the only file importing `google-auth-library`, behind the
   `TokenVerifier` in `verifier.ts`, whose **fake is a test helper** (`test/auth/verifier.ts`) —
   nothing shipped calls one. `session.ts` mints behind an injectable generator and is **the one
-  place a token is hashed**: the store holds SHA-256s only, thirty days fixed from issue.
+  place a token is hashed**: the store holds SHA-256s only, thirty days fixed from issue. It also
+  exports the daily sweep of lapsed sessions — server-wide, so `index.ts` starts it rather than
+  the per-room timer registry — which logs a failure rather than throwing, being housekeeping.
+  The flows take their wire payloads as `unknown`: a non-string is refused, never hashed.
 - **`bot.ts` is shipped, not a dev tool**, and decides only from a `PlayerGameView` — the same
   payload a real client gets — so it cannot see hidden hands or the draw pile.
 - **`server/scripts/` imports nothing from `src/` except types.** Reaching for `RoomManager`
@@ -253,11 +256,25 @@ the round is scored, and the serializer uses that rather than the id's entry in 
 never a socket id: the domain model has zero transport awareness, which is what let
 `resumeSeat` rebind a seat to a second socket without touching a fixture.
 
-The socket layer bridges the two with a **session bound to the connection**: on a successful
-`createRoom`/`joinRoom`, `socket.data.session = { playerId, roomCode }`, and every later
+The socket layer bridges the two with a **seat bound to the connection**: on a successful
+`createRoom`/`joinRoom`, `socket.data.seat = { playerId, roomCode }`, and every later
 handler reads identity from there. A client-supplied player id is **never** trusted — a
-socket could otherwise act as any player just by saying so. The session is one optional
+socket could otherwise act as any player just by saying so. The seat is one optional
 object rather than two optional fields, so a half-bound connection is unrepresentable.
+**It was `socket.data.session` until the accounts arrived** and was renamed `seat`
+(docs/adr/0022): "session" already meant the main menu's session core, and the session token
+made it three.
+
+**`socket.data.account = { accountId, sessionToken }` sits beside it, independent**: an account
+binds at the main menu before any room and survives leaving one. Five acked events drive it —
+`signIn`, `createAccount`, `resumeSession`, `signOut`, `renameAccount` (docs/adr/0021) — no
+HTTP surface and no `handshake.auth`. Each handler is a flow from `auth/flows.ts` and a binding,
+holding no auth logic; all five are accepted seated or not, and **binding an account over
+another replaces it** without error, an account binding orphaning nobody. The session token
+reaches the wire in exactly one payload, its `signIn`/`createAccount` ack — the marked-token
+sweep in `socketServer.test.ts` records every payload of a whole visit to prove it.
+`createSocketServer`'s `verifier` and `newSessionToken` options default to Google's and a
+CSPRNG, as its clock defaults to real time.
 
 A connection binds **once**. A second `createRoom`/`joinRoom`/`resumeSeat` on an already-bound
 socket is rejected with `ALREADY_IN_ROOM` (the one error code that exists purely because there
@@ -297,7 +314,7 @@ first deal locks the lot; `playAgain` never returns to the lobby.
 **mutates nothing** — the seat, the player and the room are left as they were — and republishes
 the room, the only way whoever is left learns a seat has gone quiet (docs/adr/0013), and what
 starts the room's grace period (docs/adr/0015). Whoever dropped comes back through
-**`resumeSeat({ roomCode, playerId, resumeToken })`**: session rebound, room rejoined, the
+**`resumeSeat({ roomCode, playerId, resumeToken })`**: seat rebound, room rejoined, the
 position answered in the ack and the room published to behind it. A wrong token, an unknown
 player and a seat given up share `INVALID_RESUME_TOKEN`, or a room code would be a way of
 fishing for the seats behind it. One live connection per seat: a resume disconnects whatever
@@ -333,7 +350,7 @@ opens on the first seat still playing where the round's winner has since left.
 
 The exit is not `act()`-shaped: `removePlayer` is a pure transition and "the room must be
 destroyed" is no `GameState` it could return, so that branch lives in `socketServer.ts`, which
-**clears `socket.data.session`** (or `ALREADY_IN_ROOM` would mean "for the life of this
+**clears `socket.data.seat`** (or `ALREADY_IN_ROOM` would mean "for the life of this
 connection") **and calls `socket.leave(roomCode)`**, keeping it out of the next broadcast.
 
 **`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a table
@@ -382,7 +399,7 @@ broadcast**, **spaced out by the server**: five bot turns are five updates in tu
 every `BOT_THINK_MS` (below) — the rhythm is a fact about when the moves *happen*.
 
 Every in-game handler shares one `act(ack, transition)` helper: identify the caller from their
-session, apply, and on success ack, broadcast, then run any bot turns. A rejection acks the
+seat, apply, and on success ack, broadcast, then run any bot turns. A rejection acks the
 error and publishes nothing, so a refused action costs the player nothing.
 
 ### Bots think before they move

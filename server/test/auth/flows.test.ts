@@ -200,3 +200,40 @@ describe("renameAccount", () => {
     });
   });
 });
+
+/**
+ * A payload's wire type is a claim by whoever sent it (`updateSettings`' reasoning), and
+ * these flows are the first thing to read one: a non-string must be refused like any bad
+ * string, not reach a `.trim()` or a hash and throw — a throw here is a crashed server.
+ */
+describe("a payload that is not a string", () => {
+  const offContract: unknown[] = [undefined, null, 42, { token: "id-ada" }, ["id-ada"]];
+
+  it("is a credential nobody vouched for", async () => {
+    const { auth, google } = setup();
+    google.vouchFor("id-ada", { sub: "sub-ada" });
+    for (const idToken of offContract) {
+      expectErr(await signIn(auth, idToken), "INVALID_CREDENTIAL");
+      expectErr(await createAccount(auth, idToken, "Ada"), "INVALID_CREDENTIAL");
+    }
+  });
+
+  it("is a session nobody issued", async () => {
+    const { auth } = setup();
+    for (const sessionToken of offContract) {
+      expectErr(await resumeSession(auth, sessionToken), "INVALID_SESSION");
+    }
+  });
+
+  it("is a name the rule refuses", async () => {
+    const { auth, google } = setup();
+    google.vouchFor("id-ada", { sub: "sub-ada" });
+    const created = unwrap(await createAccount(auth, "id-ada", "Ada"));
+    google.vouchFor("id-grace", { sub: "sub-grace" });
+
+    for (const displayName of offContract) {
+      expectErr(await createAccount(auth, "id-grace", displayName), "INVALID_NAME");
+      expectErr(await renameAccount(auth, created.account.id, displayName), "INVALID_NAME");
+    }
+  });
+});

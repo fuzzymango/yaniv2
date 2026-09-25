@@ -14,11 +14,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  SESSION_SWEEP_MS,
+  endSession,
   hashSessionToken,
   openSession,
   randomSessionToken,
+  startSessionSweep,
 } from "../../src/auth/session.ts";
 import { createMemoryProfileStore, type ProfileStore } from "../../src/profiles.ts";
+import { testClock } from "../helpers.ts";
 
 const MINUTE = 60_000;
 const THIRTY_DAYS = 30 * 24 * 60 * MINUTE;
@@ -75,5 +79,96 @@ describe("openSession", () => {
 
     assert.equal(await store.findSession(hashSessionToken(lapsing)), accountId);
     assert.equal(await store.findSession(hashSessionToken(lapsed)), null);
+  });
+});
+
+describe("endSession", () => {
+  it("ends the session the token opened, and no other", async () => {
+    const { store, accountId } = await storeWithAccount();
+    const ending = await openSession(store, accountId, Date.now(), () => "ending");
+    const staying = await openSession(store, accountId, Date.now(), () => "staying");
+
+    await endSession(store, ending);
+
+    assert.equal(await store.findSession(hashSessionToken(ending)), null);
+    assert.equal(await store.findSession(hashSessionToken(staying)), accountId);
+  });
+
+  it("is a no-op for a token with no session behind it", async () => {
+    const { store } = await storeWithAccount();
+    await endSession(store, "never-issued");
+  });
+});
+
+/**
+ * The sweep is observed through what it asks the store to do, not through the store's
+ * answers: `findSession` already treats a lapsed session as absent, so a sweep that never
+ * ran and one that ran are indistinguishable from outside — the difference is only the
+ * rows a table keeps.
+ */
+describe("startSessionSweep", () => {
+  /** A store that records the instant of every sweep it is asked for, and can fail one. */
+  function sweepRecorder(): { store: ProfileStore; sweeps: number[]; failNext: () => void } {
+    const store = createMemoryProfileStore();
+    const sweeps: number[] = [];
+    let failing = false;
+    return {
+      sweeps,
+      failNext: () => {
+        failing = true;
+      },
+      store: {
+        ...store,
+        async deleteExpiredSessions(now) {
+          sweeps.push(now);
+          if (failing) {
+            failing = false;
+            throw new Error("database unreachable");
+          }
+          await store.deleteExpiredSessions(now);
+        },
+      },
+    };
+  }
+
+  it("sweeps at once, then every twenty-four hours on the clock it is given", async () => {
+    const { store, sweeps } = sweepRecorder();
+    const clock = testClock();
+
+    startSessionSweep(store, clock);
+    assert.equal(sweeps.length, 1, "swept at startup");
+    assert.deepEqual(clock.delays(), [SESSION_SWEEP_MS]);
+    assert.equal(SESSION_SWEEP_MS, 24 * 60 * MINUTE);
+
+    clock.tick();
+    clock.tick();
+    assert.equal(sweeps.length, 3);
+    assert.deepEqual(clock.delays(), [SESSION_SWEEP_MS], "always exactly one waiting");
+  });
+
+  it("stops when told to, with nothing left waiting", () => {
+    const { store, sweeps } = sweepRecorder();
+    const clock = testClock();
+
+    const stop = startSessionSweep(store, clock);
+    stop();
+
+    assert.equal(clock.pending(), 0);
+    assert.equal(sweeps.length, 1);
+  });
+
+  it("logs a failed sweep and keeps its schedule", async () => {
+    const { store, sweeps, failNext } = sweepRecorder();
+    const clock = testClock();
+    const logged: unknown[] = [];
+    failNext();
+
+    startSessionSweep(store, clock, (...args) => logged.push(args));
+    // The failure is the store's promise rejecting, a tick after the call.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(logged.length, 1);
+    clock.tick();
+    assert.equal(sweeps.length, 2, "the next day still sweeps");
   });
 });

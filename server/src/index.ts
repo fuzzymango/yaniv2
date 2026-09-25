@@ -3,7 +3,7 @@
  * store the accounts go in.
  *
  * Everything interesting lives in `socketServer.ts`, which only wires handlers onto an
- * `io` instance, and `staticServer.ts`, which serves the built client (docs/adr/0003).
+ * `io` instance — Google's verifier and real session tokens being its defaults — and `staticServer.ts`, which serves the built client (docs/adr/0003).
  * Keeping `listen` here is what lets tests and harnesses stand up their own server on an
  * ephemeral port without duplicating any handler logic — and is why this file has no
  * tests of its own: there is nothing here but composition.
@@ -28,6 +28,8 @@
  */
 
 import { createServer } from "node:http";
+import { startSessionSweep } from "./auth/session.ts";
+import { systemClock } from "./clock.ts";
 import { createMemoryProfileStore, type ProfileStore } from "./profiles.ts";
 import { RoomManager } from "./roomManager.ts";
 import { createSocketServer } from "./socketServer.ts";
@@ -60,6 +62,9 @@ const serveClient = serveStatic(clientDist);
 // Before the port, deliberately: a server that will not have a store is a server that
 // should never have accepted a connection.
 const profiles = await openProfileStore();
+// Lapsed sessions, cleared now and daily: server-wide housekeeping, so started here and not
+// in the per-room timer registry, on real time that never keeps the process up by itself.
+startSessionSweep(profiles, systemClock);
 
 const httpServer = createServer((req, res) => {
   // socket.io attaches its own `request` listener below; requests under `/socket.io/`

@@ -11,8 +11,13 @@
  * throws for one. What does throw is what `result.ts` says a throw is for — the store or
  * Google unreachable, or a row that the schema's cascades say cannot be missing.
  *
- * `signOut` is not here. Giving up a session is one `deleteSession` of a hash the socket
- * already holds, with nothing to refuse, so there is no `Result` for it to be a flow over.
+ * **What arrives off the wire is `unknown`** — `updateSettings`' reasoning: a payload's type
+ * is a claim by whoever sent it. A non-string is refused as the bad string it stands in
+ * for, not handed to a `.trim()` or a hash to throw on, since a throw here is a defect
+ * report and a malformed payload is not one.
+ *
+ * `signOut` is not here. Giving up a session is `endSession` of a token the socket already
+ * holds, with nothing to refuse, so there is no `Result` for it to be a flow over.
  */
 
 import {
@@ -26,7 +31,7 @@ import type { Clock } from "../clock.ts";
 import type { Account, AccountId, ProfileStore } from "../profiles.ts";
 import { err, ok, type Result } from "../result.ts";
 import { hashSessionToken, openSession, type SessionTokenGenerator } from "./session.ts";
-import type { TokenVerifier } from "./verifier.ts";
+import type { TokenVerifier, VerifiedIdentity } from "./verifier.ts";
 
 /**
  * What every flow runs over. All four are required, on ADR-0013's grounds: a capability a
@@ -52,8 +57,8 @@ export interface Auth {
  * longer than the limit) suggests **nothing** rather than some fixed default: a prefill
  * the player never chose is one they would have to notice and delete.
  */
-export async function signIn(auth: Auth, idToken: string): Promise<Result<SignInResult>> {
-  const identity = await auth.verifier.verify(idToken);
+export async function signIn(auth: Auth, idToken: unknown): Promise<Result<SignInResult>> {
+  const identity = await verify(auth, idToken);
   if (!identity) return invalidCredential();
 
   const known = await signInIfKnown(auth, identity.sub);
@@ -82,16 +87,16 @@ export async function signIn(auth: Auth, idToken: string): Promise<Result<SignIn
  */
 export async function createAccount(
   auth: Auth,
-  idToken: string,
-  displayName: string,
+  idToken: unknown,
+  displayName: unknown,
 ): Promise<Result<SignedIn>> {
-  const identity = await auth.verifier.verify(idToken);
+  const identity = await verify(auth, idToken);
   if (!identity) return invalidCredential();
 
   const known = await signInIfKnown(auth, identity.sub);
   if (known) return ok(known);
 
-  const name = normalizeDisplayName(displayName);
+  const name = displayNameFrom(displayName);
   if (name === null) return invalidName();
 
   // Only the `sub`, and no secret: Google's signature is the proof, and it is on a token
@@ -114,9 +119,12 @@ export async function createAccount(
  */
 export async function resumeSession(
   auth: Auth,
-  sessionToken: string,
+  sessionToken: unknown,
 ): Promise<Result<{ account: AccountView }>> {
-  const accountId = await auth.store.findSession(hashSessionToken(sessionToken));
+  const accountId =
+    typeof sessionToken === "string"
+      ? await auth.store.findSession(hashSessionToken(sessionToken))
+      : null;
   if (accountId === null) return err("INVALID_SESSION", "That session is no longer valid");
   return ok({ account: toView(await requireAccount(auth, accountId)) });
 }
@@ -129,13 +137,23 @@ export async function resumeSession(
 export async function renameAccount(
   auth: Auth,
   accountId: AccountId,
-  displayName: string,
+  displayName: unknown,
 ): Promise<Result<{ account: AccountView }>> {
-  const name = normalizeDisplayName(displayName);
+  const name = displayNameFrom(displayName);
   if (name === null) return invalidName();
 
   await auth.store.renameAccount(accountId, name);
   return ok({ account: { id: accountId, displayName: name } });
+}
+
+/** Who Google says presented this, or `null` — a non-string being no token at all. */
+function verify(auth: Auth, idToken: unknown): Promise<VerifiedIdentity | null> {
+  return typeof idToken === "string" ? auth.verifier.verify(idToken) : Promise.resolve(null);
+}
+
+/** The display-name rule over a payload, a non-string having no usable name in it. */
+function displayNameFrom(displayName: unknown): string | null {
+  return typeof displayName === "string" ? normalizeDisplayName(displayName) : null;
 }
 
 /**

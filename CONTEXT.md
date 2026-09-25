@@ -478,6 +478,21 @@ read back down to what fits, recomputed wherever it's read rather than stored cl
 This is why a room can never reject a join over a stale setting: the number simply means
 less than the host asked for, the same way an empty seat has always just gone to a bot.
 
+## Account, guest and display name
+
+**Account** — an identity that outlives every room: a display name and one counter, keyed by
+its own id and never by anything Google issued. A connection binds one at the main menu,
+before any room; a seat records the one that took it, for life. Newer wins: an account is
+live on one connection at a time.
+
+**Guest** — a human with no account. Their seat's identity is its resume token; their calls
+are counted nowhere. Bots are not guests.
+
+**Display name** — the name a player is known by at a table. A guest types one per room; an
+account carries its own, the same in every room, changed only by renaming the account.
+**Never unique** — two players may share one, at the same table. Identity is the account id
+and never the name, which is what lets a player choose any name they like.
+
 ## Resume token
 
 The secret that proves a connection is entitled to a **seat**. One per seat, issued from a
@@ -485,9 +500,11 @@ CSPRNG the moment the seat is created (`createRoom`, `joinRoom`, bot seating) an
 the life of the room — never rotated, never reissued, so it names one seat for as long as
 that seat exists.
 
-Deliberately *not* called a session: "session" is already double-booked, for the socket's
-own `socket.data.session` and for the client's session core (`client/src/session.ts`).
-A resume token is neither — it is a credential, and outlives any connection holding it.
+Deliberately *not* called a session: "session" means the client's session core
+(`client/src/session.ts`) and an account's session token — and once meant the socket's own
+binding to a seat, since renamed `socket.data.seat` for exactly this reason
+([ADR-0022](docs/adr/0022-a-seat-is-claimed-by-whoever-took-it.md)). A resume token is none
+of these — it is a credential, and outlives any connection holding it.
 
 It is a secret of the same class as a hidden hand, and a worse one to lose: a leaked hand
 is a look at someone's cards, a leaked token is their whole seat. So it lives in

@@ -17,6 +17,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
+import type { Clock } from "../clock.ts";
 import type { AccountId, ProfileStore } from "../profiles.ts";
 
 /**
@@ -55,4 +56,49 @@ export async function openSession(
   const token = newToken();
   await store.createSession(accountId, hashSessionToken(token), issuedAt + SESSION_LIFETIME_MS);
   return token;
+}
+
+/**
+ * Give a session up: the store forgets it, and the token that opened it resumes nobody
+ * from here on — signing out. A token with no session behind it is nothing to refuse.
+ */
+export async function endSession(store: ProfileStore, token: string): Promise<void> {
+  await store.deleteSession(hashSessionToken(token));
+}
+
+/** How often lapsed sessions are cleared out of the store: daily. */
+export const SESSION_SWEEP_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Clear out lapsed sessions now and every `SESSION_SWEEP_MS` after, until the returned
+ * function is called. Started by `index.ts` and nothing else.
+ *
+ * **Housekeeping, not a rule**: `findSession` already treats a lapsed session as absent,
+ * so a sweep that never ran costs a table its rows and nobody their sign-in. That is what
+ * the two choices below rest on.
+ *
+ * - **On the injected clock**, and not in `roomTimers.ts`: that registry is per room and
+ *   keyed by what a room has waiting, and this is the whole server's. Real time is
+ *   `systemClock`, unref'd, so a pending sweep never keeps a process alive.
+ * - **A failed sweep is logged, never thrown.** The store throws when the database is
+ *   down (docs/adr/0019), and an unhandled rejection from a timer would take every match
+ *   in progress down with it — for a delete the next day's sweep does just as well.
+ *   The Yaniv-call write's reasoning (docs/adr/0023), and its shape.
+ */
+export function startSessionSweep(
+  store: ProfileStore,
+  clock: Clock,
+  log: (...args: unknown[]) => void = console.error,
+): () => void {
+  let cancel = () => {};
+
+  function sweep(): void {
+    store
+      .deleteExpiredSessions(clock.now())
+      .catch((error: unknown) => log("Sweeping expired sessions failed:", error));
+    cancel = clock.after(SESSION_SWEEP_MS, sweep);
+  }
+
+  sweep();
+  return () => cancel();
 }
