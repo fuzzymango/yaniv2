@@ -411,6 +411,14 @@ Every in-game handler shares one `act(ack, transition)` helper: identify the cal
 seat, apply, and on success ack, broadcast, then run any bot turns. A rejection acks the
 error and publishes nothing, so a refused action costs the player nothing.
 
+**The one stat hangs off that tail, last** (docs/adr/0023): `act` takes an optional side effect
+run after the bot turns, and `callYaniv` is its only user. It asks `accountToCredit`
+(`stats.ts`) — the caller's account, or null for a guest and for a bot, two nulls kept apart
+by a name — and starts `recordYanivCall`, **never awaited**: a failure is logged naming the
+account and dropped, so a slow or dead database costs a counter and never the table. The call
+is counted, never the verdict, and nothing can count one twice, a second call being
+`WRONG_PHASE` with no tail.
+
 ### Bots think before they move
 
 A bot's turn is **scheduled, not played in the tick that handed it over**: the runner in

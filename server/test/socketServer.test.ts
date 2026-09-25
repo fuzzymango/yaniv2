@@ -19,6 +19,7 @@ import type {
   PlayerGameView,
   ResumeRequest,
   RoomSettings,
+  RoundResultView,
   SignedIn,
   SignInResult,
 } from "@yaniv/shared";
@@ -4007,5 +4008,203 @@ describe("the scorecard on the wire", () => {
     );
 
     assert.deepEqual(view.scorecard, dealtOn.scorecard, "the match's history, not a blank sheet");
+  });
+});
+
+/**
+ * The one stat, over the wire (docs/adr/0023): a signed-in player's accepted `callYaniv`
+ * is counted on their account, and nothing about that write reaches the game.
+ *
+ * Each test builds its own server around a store it can see into — or one that never
+ * answers, or always fails — which is the whole reason `startServer` takes one. And each
+ * plays a real table out to real calls: `accountToCredit` is unit-tested and the store is
+ * contract-tested, and both would pass against a handler that wrote nothing at all.
+ */
+describe("a Yaniv call counted on the caller's account", () => {
+  const opened: Harness[] = [];
+  after(async () => {
+    for (const harness of opened) await harness.close();
+  });
+
+  interface Table {
+    client: ClientSocket;
+    watcher: Watcher;
+    playerId: string;
+    /** The account the player sat down under, or `null` for a guest. */
+    accountId: string | null;
+  }
+
+  /**
+   * A player and three bots, dealt in, at a limit nobody reaches: several rounds are
+   * played here, and a table that emptied on the way would stop answering.
+   */
+  async function sitDown(
+    profiles: ProfileStore,
+    { signedIn = true, ...options }: { signedIn?: boolean } & SocketServerOptions = {},
+  ): Promise<Table> {
+    const harness = await startServer(
+      7,
+      3,
+      { thinkTimeMs: 0, ...options },
+      LONG_MATCH,
+      profiles,
+    );
+    opened.push(harness);
+
+    const client = await harness.connect();
+    const watcher = watch(client);
+    const accountId = signedIn ? (await signUp(client, "Ada", harness)).account.id : null;
+    const { playerId } = expectOk(
+      await ask<{ playerId: string }>(client, "createRoom", "Ada"),
+    );
+    watcher.reset();
+    expectOk(await ask(client, "startGame"));
+    return { client, watcher, playerId, accountId };
+  }
+
+  /** Every round a table has scored so far, split by whose call ended it. */
+  interface Calls {
+    mine: RoundResultView[];
+    bots: RoundResultView[];
+  }
+
+  /**
+   * Play on with the bots' own judgement until `done` says enough rounds have been called,
+   * answering each call's verdict — so a test can ask for a call that was Assafed without
+   * knowing in advance which round that will be.
+   */
+  async function playUntil(t: Table, done: (calls: Calls) => boolean): Promise<Calls> {
+    const calls: Calls = { mine: [], bots: [] };
+
+    for (let step = 0; step < 3000; step++) {
+      const current = await t.watcher.until(
+        (v) =>
+          v.phase !== "lobby" &&
+          (v.phase !== "playing" || v.currentTurnPlayerId === t.playerId),
+        "the player to be needed",
+      );
+      t.watcher.reset();
+
+      if (current.phase === "roundEnd") {
+        const result = current.roundResult!;
+        (result.callerId === t.playerId ? calls.mine : calls.bots).push(result);
+        if (done(calls)) return calls;
+        expectOk(await ask(t.client, "startNextRound"));
+        continue;
+      }
+      assert.equal(current.phase, "playing", "the match ended first");
+
+      const decision = decideTurn(current);
+      if (decision.type === "yaniv") {
+        expectOk(await ask(t.client, "callYaniv"));
+      } else {
+        expectOk(await ask(t.client, "takeTurn", decision.action));
+      }
+    }
+    assert.fail("the table never called the rounds under test");
+  }
+
+  /** The memory store, with every account a Yaniv call was written to recorded in order. */
+  function spiedStore(): { profiles: ProfileStore; written: string[] } {
+    const store = createMemoryProfileStore();
+    const written: string[] = [];
+    return {
+      written,
+      profiles: {
+        ...store,
+        recordYanivCall: (id) => {
+          written.push(id);
+          return store.recordYanivCall(id);
+        },
+      },
+    };
+  }
+
+  it("counts a signed-in player's call on their account", async () => {
+    const profiles = createMemoryProfileStore();
+    const t = await sitDown(profiles);
+
+    await playUntil(t, ({ mine }) => mine.length === 1);
+
+    assert.equal((await profiles.loadAccount(t.accountId!))!.yanivCalls, 1);
+  });
+
+  it("counts a call that was Assafed exactly as one that stood", async () => {
+    const profiles = createMemoryProfileStore();
+    const t = await sitDown(profiles);
+
+    const { mine } = await playUntil(
+      t,
+      ({ mine }) =>
+        mine.some((r) => r.assaferId !== null) && mine.some((r) => r.assaferId === null),
+    );
+
+    assert.equal((await profiles.loadAccount(t.accountId!))!.yanivCalls, mine.length);
+  });
+
+  it("writes nothing for a bot's call", async () => {
+    const { profiles, written } = spiedStore();
+    const t = await sitDown(profiles);
+
+    const { mine, bots } = await playUntil(
+      t,
+      ({ mine, bots }) => mine.length > 0 && bots.length > 0,
+    );
+
+    assert.ok(bots.length > 0);
+    assert.deepEqual(written, mine.map(() => t.accountId));
+  });
+
+  it("writes nothing for a guest's call", async () => {
+    const { profiles, written } = spiedStore();
+    const t = await sitDown(profiles, { signedIn: false });
+
+    await playUntil(t, ({ mine }) => mine.length === 2);
+
+    assert.deepEqual(written, []);
+  });
+
+  /**
+   * The write is started after the broadcast and awaited nowhere, so a database that has
+   * stopped answering holds up nothing: the call is acked, the scored round goes out, and
+   * the next round is dealt and played — bots and all — over the writes still pending.
+   */
+  it("holds up nothing when the store never answers", async () => {
+    const asked: string[] = [];
+    const profiles: ProfileStore = {
+      ...createMemoryProfileStore(),
+      recordYanivCall: (id) => {
+        asked.push(id);
+        return new Promise(() => {});
+      },
+    };
+    const t = await sitDown(profiles);
+
+    const { mine } = await playUntil(t, ({ mine }) => mine.length === 2);
+
+    assert.deepEqual(asked, mine.map(() => t.accountId), "the store was asked, and hung");
+  });
+
+  /**
+   * Dropped, and logged naming the account — so a missing account can be told from a dead
+   * connection — and nothing else. An unhandled rejection would take the whole process
+   * down, and this suite with it.
+   */
+  it("logs a failed write naming the account, and plays on", async () => {
+    const logged: unknown[][] = [];
+    const failure = new Error("the database is down");
+    const profiles: ProfileStore = {
+      ...createMemoryProfileStore(),
+      recordYanivCall: () => Promise.reject(failure),
+    };
+    const t = await sitDown(profiles, { log: (...args) => logged.push(args) });
+
+    const { mine } = await playUntil(t, ({ mine }) => mine.length === 2);
+
+    assert.equal(logged.length, mine.length);
+    for (const entry of logged) {
+      assert.ok(String(entry[0]).includes(t.accountId!), "the log names the account");
+      assert.ok(entry.includes(failure), "and carries the failure");
+    }
   });
 });

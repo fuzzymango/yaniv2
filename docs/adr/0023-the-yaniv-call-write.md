@@ -139,3 +139,14 @@ Deliberately untested in V0, and deliberately recorded as a short step rather th
 #175's wire sweep gives `socketServer.test.ts` a sign-in fixture anyway, and that suite already
 plays on to a legal Yaniv call in several places. **"The pipe works" is an unfalsifiable claim in
 V0** — the cost #166 accepted when stats UI went out of scope, priced here rather than dissolved.
+
+## Amended: the joint is tested after all (issue #191)
+
+The end-to-end test described above turned out to be the short step it was priced as, and was
+written with the write rather than after the client: `socketServer.test.ts` builds a server
+around a store it can see into, signs in over the wire and plays a real table out to real
+calls. It proves the counter moves for a signed-in call — Assafed or standing alike — and for
+nobody else's; that a store which never answers holds up neither the next round nor the bots
+in it; and that a failed write is logged naming the account and goes no further. **Step 5 is
+now wired to `callYaniv` by a test that fails if it is not.** What stays unproven is the
+Postgres arm of the same write, which is ADR-0019's gap and not this one's.

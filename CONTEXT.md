@@ -488,6 +488,11 @@ live on one connection at a time.
 **Guest** — a human with no account. Their seat's identity is its resume token; their calls
 are counted nowhere. Bots are not guests.
 
+**Yaniv call** — the act of ending a round by calling, and what an account's one counter
+counts: every accepted call, whether it stood or was Assafed. **Assaf** qualifies the round's
+outcome and says nothing about whether a call happened
+([ADR-0023](docs/adr/0023-the-yaniv-call-write.md)).
+
 **Display name** — the name a player is known by at a table. A guest types one per room; an
 account carries its own, the same in every room, changed only by renaming the account.
 **Never unique** — two players may share one, at the same table. Identity is the account id

@@ -41,6 +41,7 @@ import { createRoomSweeper, unattended } from "./roomSweep.ts";
 import { createRoomTimers } from "./roomTimers.ts";
 import type { Rng } from "./rng.ts";
 import { serializeStateForPlayer } from "./serialize.ts";
+import { accountToCredit } from "./stats.ts";
 import type { ActionResult, GameState, Player } from "./state.ts";
 import { getPlayer } from "./state.ts";
 
@@ -119,6 +120,11 @@ export interface SocketServerOptions extends BotTurnRunnerOptions {
   verifier?: TokenVerifier;
   /** Defaults to a CSPRNG. A test issues marked tokens, to sweep the wire for them. */
   newSessionToken?: SessionTokenGenerator;
+  /**
+   * Where a failure nobody is waiting on is reported — a Yaniv call the store would not
+   * count (docs/adr/0023). Defaults to `console.error`; a test listens in.
+   */
+  log?: (...args: unknown[]) => void;
 }
 
 /**
@@ -146,6 +152,7 @@ export function createSocketServer(
   const botTurns = createBotTurnRunner(rooms, timers, options);
   const autoDeal = createAutoDealer(rooms, timers);
   const roomSweep = createRoomSweeper(rooms, timers);
+  const log = options.log ?? console.error;
   const auth: Auth = {
     verifier: options.verifier ?? googleVerifier(GOOGLE_CLIENT_ID),
     store: profiles,
@@ -633,10 +640,16 @@ export function createSocketServer(
      *
      * A rejection acks the error and stops there. Nothing is published, so a refused
      * action costs the player nothing: the turn is still theirs to take again.
+     *
+     * `after` is a side effect of the move having stood, run **last** — behind the ack,
+     * the broadcast and the bot turns, so the order the tail reads in is the order that
+     * matters: the game first, anything else after it. It is handed the position the
+     * transition produced and must not make the tail wait on it (docs/adr/0023).
      */
     function act(
       ack: Ack<null>,
       transition: (seat: Seat, state: GameState, rng: Rng) => ActionResult,
+      after?: (seat: Seat, state: GameState) => void,
     ): void {
       const seat = socket.data.seat;
       if (!seat) {
@@ -655,6 +668,7 @@ export function createSocketServer(
       ack({ ok: true, value: null });
       broadcastState(seat.roomCode);
       runBotTurns(seat.roomCode);
+      after?.(seat, result.value);
     }
 
     /**
@@ -687,8 +701,33 @@ export function createSocketServer(
       );
     });
 
+    /**
+     * The one stat: an accepted call is counted on the caller's account, whether it stood
+     * or was Assafed — the call, never the verdict (docs/adr/0023). Hung off this handler
+     * rather than read back off the state, because this handler *is* the knowledge that a
+     * human called; and never twice for one round, a second call being `WRONG_PHASE` and
+     * a refused action having no tail.
+     *
+     * Started and awaited nowhere, so a database that is slow or down is a counter lost
+     * and nothing more: the failure is logged naming the account — a missing account told
+     * apart from a dead connection — and dropped. No retry and no queue. The store still
+     * throws, as ADR-0019 says it must; it is this one caller that decides its write is
+     * not worth a card game waiting on.
+     */
     socket.on("callYaniv", (ack) => {
-      act(ack, (seat, state) => callYaniv(state, seat.playerId));
+      act(
+        ack,
+        (seat, state) => callYaniv(state, seat.playerId),
+        (seat, state) => {
+          const accountId = accountToCredit(state, seat.playerId);
+          if (accountId === null) return;
+          profiles
+            .recordYanivCall(accountId)
+            .catch((error: unknown) =>
+              log(`Counting a Yaniv call for account ${accountId} failed:`, error),
+            );
+        },
+      );
     });
 
     /**
