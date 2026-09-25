@@ -21,6 +21,7 @@ import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import {
   HAND_SIZE,
+  MAX_DISPLAY_NAME_LENGTH,
   MAX_PLAYERS,
   MAX_SCORE,
   YANIV_THRESHOLD,
@@ -33,9 +34,13 @@ import {
   type ResumeRequest,
   type RoomSettings,
 } from "@yaniv/shared";
+import { systemClock } from "@yaniv/server/src/clock.ts";
+import { createMemoryProfileStore } from "@yaniv/server/src/profiles.ts";
 import { RoomManager } from "@yaniv/server/src/roomManager.ts";
 import { mulberry32 } from "@yaniv/server/src/rng.ts";
 import { createSocketServer } from "@yaniv/server/src/socketServer.ts";
+import { fakeVerifier } from "@yaniv/server/test/auth/verifier.ts";
+import { SESSION_TOKEN_MARK, markedSessionTokens } from "@yaniv/server/test/helpers.ts";
 import {
   io as connectClient,
   type ManagerOptions,
@@ -46,7 +51,9 @@ import type { Announcement } from "../src/announcement.ts";
 import type { CardFlight } from "../src/flight.ts";
 import {
   createSession,
+  type AccountStore,
   type Session,
+  type SessionOptions,
   type SessionSnapshot,
   type TokenStore,
 } from "../src/session.ts";
@@ -75,6 +82,34 @@ function fakeTokens(seat: ResumeRequest | null = null) {
   return { store, stored: () => held };
 }
 
+/** The same, for the session token: `fakeTokens`' reasoning, one key over. */
+function fakeAccount(sessionToken: string | null = null) {
+  let held = sessionToken;
+  const store: AccountStore = {
+    get: () => held,
+    set: (next) => {
+      held = next;
+    },
+    clear: () => {
+      held = null;
+    },
+  };
+  return { store, stored: () => held };
+}
+
+/**
+ * Google, as far as the session core reaches for it: the one call sign-out makes so Google
+ * does not sign the player straight back in (docs/adr/0020). Counted, since that it was
+ * made is the whole of what can be asserted about it without a browser.
+ */
+function fakeGoogle() {
+  let disabled = 0;
+  return {
+    google: { disableAutoSelect: () => void disabled++ },
+    disabled: () => disabled,
+  };
+}
+
 interface Harness {
   /**
    * A session on its own connection — one per player, as in a browser tab each.
@@ -82,7 +117,7 @@ interface Harness {
    * The store is optional for the same reason it is optional in `main.tsx`: a session that
    * keeps nothing behaves exactly as one did before there was anything to keep.
    */
-  openSession: (tokens?: TokenStore) => Promise<Session>;
+  openSession: (options?: SessionOptions) => Promise<Session>;
   /**
    * A session opened the way a page load opens one — built on a socket that has not
    * connected yet, rather than waited for.
@@ -91,7 +126,7 @@ interface Harness {
    * the session core from `openSession`: a claim made before there is a socket to make it
    * on has to wait for one.
    */
-  bootSession: (tokens: TokenStore) => Session;
+  bootSession: (options: SessionOptions) => Session;
   /**
    * Take a session's connection away, the way a tunnel or a locked phone does.
    *
@@ -110,6 +145,21 @@ interface Harness {
    * why a test has to.
    */
   announce: (error: GameError) => void;
+  /**
+   * Make `idToken` a Google ID token this server's verifier accepts, as the identity
+   * named. Every other string is one Google did not vouch for. The real verifier is the
+   * one thing no test can reach (docs/adr/0020), so the suite says outright who Google
+   * would have vouched for.
+   */
+  vouchFor: (idToken: string, identity: { sub: string; name?: string | null }) => void;
+  /**
+   * Set the server's idea of *now* this far from real time — how a session is let lapse
+   * without a month of waiting. It is issued in the past rather than judged in the future,
+   * because the store judges expiry against wall time (`profiles.ts`), and only the
+   * issuing reads this clock. Every timer still runs in real time, which is what the rest
+   * of the suite is written against.
+   */
+  skewClock: (ms: number) => void;
   close: () => Promise<void>;
 }
 
@@ -130,6 +180,8 @@ async function startServer(
   botCount = MAX_PLAYERS - 1,
 ): Promise<Harness> {
   const httpServer = createServer();
+  const verifier = fakeVerifier();
+  let skew = 0;
   const io = createSocketServer(
     httpServer,
     new RoomManager({
@@ -140,10 +192,20 @@ async function startServer(
       // it yet, so this keeps the tables the size these tests were written against.
       defaultSettings: { botCount },
     }),
-    // Bot think time off. This suite is about a client, and a bot pausing before every
-    // turn would cost it real seconds per fished window without telling it anything new —
-    // the pause is the server's, and is asserted at the server's own seam.
-    { thinkTimeMs: 0 },
+    // The store the server is composed with (docs/adr/0019): the in-memory one, which is
+    // what needs nothing installed, and is where the accounts below are kept.
+    createMemoryProfileStore(),
+    {
+      // Bot think time off. This suite is about a client, and a bot pausing before every
+      // turn would cost it real seconds per fished window without telling it anything
+      // new — the pause is the server's, and is asserted at the server's own seam.
+      thinkTimeMs: 0,
+      verifier,
+      // Marked, so a snapshot can be swept for one: a token nobody can name is a token
+      // nobody can prove stayed off the screen.
+      newSessionToken: markedSessionTokens(),
+      clock: { after: systemClock.after, now: () => Date.now() + skew },
+    },
   );
 
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
@@ -156,20 +218,20 @@ async function startServer(
   const connections = new Map<Session, ClientSocket>();
 
   return {
-    openSession: (tokens) =>
+    openSession: (options) =>
       new Promise((resolve) => {
         const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
         // `once`, because a connection that comes back fires this again — and a second
         // session on the same socket would double every handler the first one attached.
         client.once("connect", () => {
-          const session = createSession(client, tokens);
+          const session = createSession(client, options);
           connections.set(session, client);
           resolve(session);
         });
       }),
-    bootSession: (tokens) => {
+    bootSession: (options) => {
       const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
-      const session = createSession(client, tokens);
+      const session = createSession(client, options);
       connections.set(session, client);
       return session;
     },
@@ -180,6 +242,10 @@ async function startServer(
       else client.disconnect();
     },
     announce: (error) => io.emit("errorMessage", error),
+    vouchFor: verifier.vouchFor,
+    skewClock: (ms) => {
+      skew = ms;
+    },
     close: async () => {
       for (const client of connections.values()) client.disconnect();
       await io.close();
@@ -572,18 +638,26 @@ describe("the session core", () => {
     }
   });
 
-  it("refuses an empty name without asking the server", async () => {
+  it("refuses an unusable name without asking the server", async () => {
     const server = await startServer(7);
     try {
       const session = await server.openSession();
-      session.createRoom("   ");
 
-      const refused = await waitForSnapshot(session, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "INVALID_NAME");
-      assert.equal(refused.view, null);
+      // Both ways a name can fail the shared rule, refused by the same check (ADR-0002):
+      // a name the server would turn away costs no round trip to be turned away here.
+      for (const unusable of ["   ", "x".repeat(MAX_DISPLAY_NAME_LENGTH + 1)]) {
+        session.createRoom(unusable);
 
-      // The proof that nothing was emitted, phrased in the only terms a client has: a
-      // connection the server had seated would be turned away with ALREADY_IN_ROOM.
+        // Asserted without awaiting anything, which is the proof that nothing was sent:
+        // an answer that had come from the server could not be on the snapshot yet.
+        const refused = session.getSnapshot();
+        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${unusable.length}`);
+        assert.equal(refused.busy, false, "nothing is in flight to wait for");
+        assert.equal(refused.view, null);
+      }
+
+      // And the controls really are free — which also says the server was never asked
+      // for a room: a connection it had seated would answer this with ALREADY_IN_ROOM.
       session.createRoom("Ada");
       const created = await waitForSnapshot(session, "the room", (s) => s.view !== null);
       assert.equal(created.view!.you.name, "Ada");
@@ -827,7 +901,7 @@ describe("the session core", () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
-      const host = await server.openSession(tokens.store);
+      const host = await server.openSession({ seat: tokens.store });
       host.createRoom("Ada");
       await waitForSnapshot(host, "the room", (s) => s.view !== null && !s.busy);
       assert.ok(tokens.stored(), "seated, so there is a seat to claim back");
@@ -882,7 +956,7 @@ describe("the session core", () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
-      const host = await server.openSession(tokens.store);
+      const host = await server.openSession({ seat: tokens.store });
       host.createRoom("Ada");
       await waitForSnapshot(host, "the room", (s) => s.view !== null && !s.busy);
       host.startGame();
@@ -2395,7 +2469,7 @@ describe("when the connection goes", () => {
         resumeToken: "for a room that is not there",
       });
 
-      const player = await server.openSession(tokens.store);
+      const player = await server.openSession({ seat: tokens.store });
 
       const back = await waitForSnapshot(
         player,
@@ -2454,7 +2528,7 @@ describe("when the connection goes", () => {
     });
     const client = connectClient(`http://localhost:${port}`, { ...CONNECTION });
     try {
-      const session = createSession(client, tokens.store);
+      const session = createSession(client, { seat: tokens.store });
       assert.equal(session.getSnapshot().resuming, true, "the claim is owed from the off");
 
       const nothing = await waitForSnapshot(session, "the failure", (s) => !s.connected);
@@ -2503,7 +2577,7 @@ describe("when the connection goes", () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
-      const first = await server.openSession(tokens.store);
+      const first = await server.openSession({ seat: tokens.store });
       first.createRoom("Ada");
       const lobby = await waitForSnapshot(
         first,
@@ -2516,7 +2590,7 @@ describe("when the connection goes", () => {
       // The page is reloaded: the socket goes for good and a fresh session comes up on
       // the same store, which is all a new page inherits from the old one.
       server.drop(first);
-      const back = server.bootSession(tokens.store);
+      const back = server.bootSession({ seat: tokens.store });
 
       assert.equal(back.getSnapshot().resuming, true, "the claim is under way at once");
       assert.equal(back.getSnapshot().view, null, "with nothing yet to show for it");
@@ -2536,7 +2610,7 @@ describe("when the connection goes", () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
-      const first = await server.openSession(tokens.store);
+      const first = await server.openSession({ seat: tokens.store });
       first.createRoom("Ada");
       await waitForSnapshot(first, "the room", (s) => s.view !== null && !s.busy);
 
@@ -2545,7 +2619,7 @@ describe("when the connection goes", () => {
       tokens.store.set({ ...tokens.stored()!, resumeToken: "not-that-seat's-token" });
       server.drop(first);
 
-      const back = server.bootSession(tokens.store);
+      const back = server.bootSession({ seat: tokens.store });
       const menu = await waitForSnapshot(back, "the refusal", (s) => !s.resuming);
 
       assert.equal(menu.view, null, "which leaves the main menu");
@@ -2562,7 +2636,7 @@ describe("when the connection goes", () => {
     const server = await startServer(7);
     try {
       const tokens = fakeTokens();
-      const session = await server.openSession(tokens.store);
+      const session = await server.openSession({ seat: tokens.store });
       session.createRoom("Ada");
       await waitForSnapshot(session, "the room", (s) => s.view !== null && !s.busy);
       assert.ok(tokens.stored(), "seated, so there is a seat to claim back");
@@ -2594,7 +2668,7 @@ describe("when the connection goes", () => {
     try {
       const [, roomCode] = await hostARoom(server, "Ada");
       const tokens = fakeTokens();
-      const guest = await server.openSession(tokens.store);
+      const guest = await server.openSession({ seat: tokens.store });
       guest.joinRoom(roomCode.toLowerCase(), "Grace");
       await seated(guest, "the guest");
       assert.equal(
@@ -2607,6 +2681,576 @@ describe("when the connection goes", () => {
       await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null && !s.busy);
 
       assert.equal(tokens.stored(), null, "a seat given up is not one to claim back");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/** What every Google ID token this suite presents starts with, so a snapshot can be swept for one. */
+const ID_TOKEN_MARK = "id-token-for-";
+
+/**
+ * Every snapshot a session publishes from here on, in order — what a screen would have
+ * been handed, frame by frame. The sweeps below read the lot rather than the last one,
+ * because a credential that was on the screen for one frame was on the screen.
+ */
+function recordSnapshots(session: Session): SessionSnapshot[] {
+  const seen = [session.getSnapshot()];
+  session.subscribe(() => seen.push(session.getSnapshot()));
+  return seen;
+}
+
+/** Whether no snapshot so far carried any trace of either credential. */
+function carriesNoCredential(seen: readonly SessionSnapshot[]): boolean {
+  return seen.every((snapshot) => {
+    const written = JSON.stringify(snapshot);
+    return !written.includes(ID_TOKEN_MARK) && !written.includes(SESSION_TOKEN_MARK);
+  });
+}
+
+/** Settled: nothing in flight and nothing still being claimed back. */
+const settled = (session: Session, what: string) =>
+  waitForSnapshot(session, what, (s) => !s.busy && !s.resuming);
+
+/**
+ * A player who has signed in for the first time and confirmed their name — the account
+ * exists on the server, and this session holds the session token that remembers it.
+ */
+async function signUp(
+  server: Harness,
+  who: { sub: string; name: string },
+  options: SessionOptions = {},
+): Promise<Session> {
+  const idToken = `${ID_TOKEN_MARK}${who.sub}`;
+  server.vouchFor(idToken, { sub: who.sub, name: who.name });
+  const session = await server.openSession(options);
+  session.signIn(idToken);
+  await waitForSnapshot(session, "the name to confirm", (s) => s.account.status === "nameNeeded");
+  session.createAccount(who.name);
+  await waitForSnapshot(
+    session,
+    "the account",
+    (s) => s.account.status === "signedIn" && !s.busy,
+  );
+  return session;
+}
+
+describe("an account", () => {
+  it("starts every session a guest", async () => {
+    const server = await startServer(7);
+    try {
+      const session = await server.openSession();
+      assert.deepEqual(session.getSnapshot().account, { status: "guest" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("asks a new player to confirm the name Google suggested, then signs them in", async () => {
+    const server = await startServer(7);
+    try {
+      const account = fakeAccount();
+      const idToken = `${ID_TOKEN_MARK}ada`;
+      server.vouchFor(idToken, { sub: "google-ada", name: "Ada Lovelace" });
+      const session = await server.openSession({ account: account.store });
+
+      session.signIn(idToken);
+      const confirm = await settled(session, "the name to confirm");
+      assert.deepEqual(confirm.account, { status: "nameNeeded", suggestedName: "Ada Lovelace" });
+      assert.equal(account.stored(), null, "no account exists yet, so there is none to remember");
+
+      session.createAccount("Ada");
+      const signedIn = await settled(session, "the account");
+      assert.equal(signedIn.account.status, "signedIn");
+      assert.equal(
+        signedIn.account.status === "signedIn" && signedIn.account.account.displayName,
+        "Ada",
+      );
+      assert.equal(signedIn.error, null);
+      assert.ok(account.stored()?.startsWith(SESSION_TOKEN_MARK), "the session is written down");
+      assert.equal(signedIn.view, null, "still the main menu: signing in is not a room");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("signs a returning player straight in, with no name to confirm", async () => {
+    const server = await startServer(7);
+    try {
+      await signUp(server, { sub: "google-ada", name: "Ada" });
+
+      const account = fakeAccount();
+      const again = await server.openSession({ account: account.store });
+      again.signIn(`${ID_TOKEN_MARK}google-ada`);
+      const back = await settled(again, "the account");
+
+      assert.equal(back.account.status, "signedIn");
+      assert.ok(account.stored(), "and remembered on this page too");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("never puts either credential on the snapshot", async () => {
+    const server = await startServer(7);
+    try {
+      const account = fakeAccount();
+      const idToken = `${ID_TOKEN_MARK}ada`;
+      server.vouchFor(idToken, { sub: "google-ada", name: "Ada" });
+      const session = await server.openSession({ account: account.store });
+      const seen = recordSnapshots(session);
+
+      session.signIn(idToken);
+      await settled(session, "the name to confirm");
+      session.createAccount("Ada");
+      await settled(session, "the account");
+      session.renameAccount("Countess");
+      await waitForSnapshot(
+        session,
+        "the new name",
+        (s) => s.account.status === "signedIn" && s.account.account.displayName === "Countess",
+      );
+      session.createRoom("");
+      await seated(session, "the account");
+
+      // The reload, and everything it resumes.
+      const back = server.bootSession({ account: account.store });
+      const seenAfter = recordSnapshots(back);
+      await settled(back, "the account back");
+
+      assert.ok(account.stored(), "the session was really issued and really held");
+      assert.ok(carriesNoCredential(seen), "no frame of the sign-in carried a credential");
+      assert.ok(carriesNoCredential(seenAfter), "nor any frame of the resume");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("releases the controls on each account event's own answer", async () => {
+    const server = await startServer(7);
+    try {
+      const idToken = `${ID_TOKEN_MARK}ada`;
+      server.vouchFor(idToken, { sub: "google-ada", name: "Ada" });
+      const session = await server.openSession();
+
+      // None of these produces a position, so no newer broadcast is coming to wait for:
+      // the ack is the only answer there is, and the lock goes with it.
+      session.signIn(idToken);
+      assert.equal(session.getSnapshot().busy, true, "locked on the way out");
+      assert.equal((await settled(session, "signIn's ack")).view, null);
+
+      session.createAccount("Ada");
+      assert.equal(session.getSnapshot().busy, true);
+      await settled(session, "createAccount's ack");
+
+      session.renameAccount("Countess");
+      assert.equal(session.getSnapshot().busy, true);
+      await settled(session, "renameAccount's ack");
+
+      session.signOut();
+      assert.equal(session.getSnapshot().busy, true);
+      const out = await settled(session, "signOut's ack");
+      assert.equal(out.error, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("sends one sign-in however many times it is asked for", async () => {
+    const server = await startServer(7);
+    try {
+      const idToken = `${ID_TOKEN_MARK}ada`;
+      server.vouchFor(idToken, { sub: "google-ada", name: "Ada" });
+      const session = await server.openSession();
+
+      session.signIn(idToken);
+      session.signIn("a second token, dropped on the locked controls");
+      const answer = await settled(session, "the answer");
+
+      assert.equal(answer.account.status, "nameNeeded", "the first was the one sent");
+      assert.equal(answer.error, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says so when Google did not vouch for the token, and stays a guest", async () => {
+    const server = await startServer(7);
+    try {
+      const session = await server.openSession();
+
+      session.signIn("a token nobody vouched for");
+      const refused = await settled(session, "the refusal");
+
+      assert.equal(refused.error?.code, "INVALID_CREDENTIAL");
+      assert.deepEqual(refused.account, { status: "guest" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("drops a first sign-in the player backs out of, holding nothing from it", async () => {
+    const server = await startServer(7);
+    try {
+      const account = fakeAccount();
+      const idToken = `${ID_TOKEN_MARK}ada`;
+      server.vouchFor(idToken, { sub: "google-ada", name: "Ada" });
+      const session = await server.openSession({ account: account.store });
+      session.signIn(idToken);
+      await settled(session, "the name to confirm");
+
+      session.cancelSignIn();
+      assert.deepEqual(session.getSnapshot().account, { status: "guest" });
+      assert.equal(session.getSnapshot().busy, false, "nothing was sent to wait on");
+
+      // The ID token went with it: there is nothing left to confirm a name against.
+      session.createAccount("Ada");
+      assert.equal(session.getSnapshot().busy, false, "so nothing is sent");
+      assert.deepEqual(session.getSnapshot().account, { status: "guest" });
+      assert.equal(account.stored(), null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refuses an unusable account name without asking the server", async () => {
+    const server = await startServer(7);
+    try {
+      const idToken = `${ID_TOKEN_MARK}ada`;
+      server.vouchFor(idToken, { sub: "google-ada", name: "Ada" });
+      const session = await server.openSession();
+      session.signIn(idToken);
+      await settled(session, "the name to confirm");
+
+      session.createAccount("   ");
+      const refused = session.getSnapshot();
+      assert.equal(refused.error?.code, "INVALID_NAME");
+      assert.equal(refused.busy, false, "answered here, with nothing sent");
+      assert.equal(refused.account.status, "nameNeeded", "still there to be answered");
+
+      // And the ID token is still held: a better name goes through.
+      session.createAccount("Ada");
+      const signedIn = await settled(session, "the account");
+      assert.equal(signedIn.account.status, "signedIn");
+      assert.equal(signedIn.error, null);
+
+      session.renameAccount("x".repeat(MAX_DISPLAY_NAME_LENGTH + 1));
+      const tooLong = session.getSnapshot();
+      assert.equal(tooLong.error?.code, "INVALID_NAME");
+      assert.equal(tooLong.busy, false);
+      assert.equal(
+        tooLong.account.status === "signedIn" && tooLong.account.account.displayName,
+        "Ada",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  /*
+   * The rename panel closes on exactly this — the standing it was opened over being
+   * replaced — so it is pinned here rather than left an accident of `publish`: a panel
+   * answered by a refusal has to stay up to say so, and one answered by the new name has
+   * to go, even when the new name is the old one.
+   */
+  it("replaces the standing a rename was asked over only when the rename lands", async () => {
+    const server = await startServer(7);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      const asked = session.getSnapshot().account;
+
+      session.renameAccount("   ");
+      assert.equal(session.getSnapshot().error?.code, "INVALID_NAME");
+      assert.equal(session.getSnapshot().account, asked, "refused: the same standing");
+
+      session.renameAccount("Ada");
+      const renamed = await settled(session, "renameAccount's ack");
+      assert.equal(renamed.error, null);
+      assert.notEqual(renamed.account, asked, "landed, if to the very same name: a new one");
+      assert.deepEqual(renamed.account, asked);
+    } finally {
+      await server.close();
+    }
+  });
+
+  /*
+   * What the rename panel does on its way in and out: a refusal it was showing is about a
+   * question nobody is asking once it closes, and one left over from the menu is not an
+   * answer about a name — so neither is carried across the panel's edge.
+   */
+  it("lets go of a refusal once it has been read, and of nothing else", async () => {
+    const server = await startServer(7);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      const standing = session.getSnapshot().account;
+      session.renameAccount("   ");
+      assert.equal(session.getSnapshot().error?.code, "INVALID_NAME");
+
+      session.clearError();
+
+      const after = session.getSnapshot();
+      assert.equal(after.error, null);
+      assert.equal(after.account, standing, "the rename panel it was asked from stays open");
+      assert.equal(after.busy, false, "nothing was sent");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("seats a signed-in player under their account's name, asking them for none", async () => {
+    const server = await startServer(7);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.renameAccount("Countess");
+      await settled(session, "the new name");
+
+      // No name typed: a signed-in menu has no field to type one into.
+      session.createRoom("");
+      const lobby = await seated(session, "the account");
+
+      assert.equal(lobby.error, null);
+      assert.equal(lobby.view!.you.name, "Countess", "the account's name, renamed");
+      assert.ok(lobby.view!.you.accountId, "and a seat taken by the account");
+      assert.equal(
+        lobby.account.status === "signedIn" && lobby.account.account.id,
+        lobby.view!.you.accountId,
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("signs out: forgets both credentials, tells Google, and plays on as a guest", async () => {
+    const server = await startServer(7);
+    try {
+      const account = fakeAccount();
+      const tokens = fakeTokens();
+      const { google, disabled } = fakeGoogle();
+      const session = await signUp(
+        server,
+        { sub: "google-ada", name: "Ada" },
+        { account: account.store, seat: tokens.store, google },
+      );
+      // A seat written down on this page some other time — a guest's, from before signing
+      // in, which is the one the rule costs (docs/adr/0020).
+      tokens.store.set({ roomCode: "WXYZ", playerId: "p", resumeToken: "t" });
+      assert.ok(account.stored());
+
+      session.signOut();
+      const out = await settled(session, "the sign-out");
+
+      assert.deepEqual(out.account, { status: "guest" });
+      assert.equal(account.stored(), null, "the session is forgotten");
+      assert.equal(tokens.stored(), null, "and the seat with it (docs/adr/0020)");
+      assert.equal(disabled(), 1, "and Google is asked not to sign them straight back in");
+
+      // The server let go too: a room made now is a guest's, under the name typed.
+      session.createRoom("Grace");
+      const lobby = await seated(session, "the guest");
+      assert.equal(lobby.view!.you.name, "Grace");
+      assert.equal(lobby.view!.you.accountId, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("is not offered at a table, where it would forget the seat being sat in", async () => {
+    const server = await startServer(7);
+    try {
+      const tokens = fakeTokens();
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" }, { seat: tokens.store });
+      session.createRoom("");
+      await seated(session, "the account");
+
+      session.signOut();
+
+      assert.equal(session.getSnapshot().busy, false, "nothing was sent");
+      assert.equal(session.getSnapshot().account.status, "signedIn");
+      assert.ok(tokens.stored(), "and the seat is still there to come back to");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not sign out over a connection that is down", async () => {
+    const server = await startServer(7);
+    try {
+      const account = fakeAccount();
+      const { google, disabled } = fakeGoogle();
+      const session = await signUp(
+        server,
+        { sub: "google-ada", name: "Ada" },
+        { account: account.store, google },
+      );
+      server.drop(session);
+      await waitForSnapshot(session, "the drop", (s) => !s.connected);
+
+      // Sent now, it would reach the next connection bound to no account, and the server
+      // would have no session left to end: the row would outlive the sign-out by a month.
+      session.signOut();
+
+      const after = session.getSnapshot();
+      assert.equal(after.busy, false, "nothing was sent into the dead socket");
+      assert.equal(after.account.status, "signedIn");
+      assert.ok(account.stored(), "and nothing forgotten that the server still holds");
+      assert.equal(disabled(), 0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("stays signed in when the connection drops and comes back", async () => {
+    const server = await startServer(7);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+
+      server.drop(session, true);
+      await waitForSnapshot(session, "the drop", (s) => !s.connected);
+      const back = await waitForSnapshot(
+        session,
+        "the connection",
+        (s) => s.connected && !s.resuming && !s.busy,
+      );
+      assert.equal(back.account.status, "signedIn");
+      assert.equal(back.notice, null);
+
+      // Bound on the new connection, not merely remembered by the old one's screen: a room
+      // made now is the account's.
+      session.createRoom("");
+      const lobby = await seated(session, "the account");
+      assert.ok(lobby.view!.you.accountId);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("a cold boot with an account", () => {
+  /** Whether a snapshot is one a screen would draw as the main menu. */
+  const readsAsMainMenu = (s: SessionSnapshot) => s.view === null && !s.resuming;
+
+  it("resumes the session, then the seat, never showing the main menu between them", async () => {
+    const server = await startServer(7);
+    try {
+      const account = fakeAccount();
+      const tokens = fakeTokens();
+      const first = await signUp(
+        server,
+        { sub: "google-ada", name: "Ada" },
+        { account: account.store, seat: tokens.store },
+      );
+      first.createRoom("");
+      const lobby = await seated(first, "the account");
+      server.drop(first);
+
+      const back = server.bootSession({ account: account.store, seat: tokens.store });
+      const seen = recordSnapshots(back);
+      assert.equal(back.getSnapshot().resuming, true, "under way from the off");
+
+      const table = await settled(back, "the seat");
+
+      assert.equal(table.view!.roomCode, lobby.view!.roomCode, "the room it left off in");
+      assert.equal(table.view!.you.id, lobby.view!.you.id, "the account's own seat");
+      assert.equal(table.account.status, "signedIn");
+      assert.equal(table.notice, null);
+      assert.equal(table.error, null);
+      assert.deepEqual(
+        seen.filter(readsAsMainMenu),
+        [],
+        "no frame between the two answers read as the main menu",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("resumes an account with no seat, coming up signed in rather than as a guest", async () => {
+    const server = await startServer(7);
+    try {
+      const account = fakeAccount();
+      const first = await signUp(server, { sub: "google-ada", name: "Ada" }, { account: account.store });
+      server.drop(first);
+
+      const back = server.bootSession({ account: account.store });
+      const seen = recordSnapshots(back);
+      const menu = await settled(back, "the account");
+
+      assert.equal(menu.view, null);
+      assert.equal(menu.account.status, "signedIn");
+      assert.equal(menu.notice, null);
+      assert.deepEqual(
+        seen.filter((s) => readsAsMainMenu(s) && s.account.status === "guest"),
+        [],
+        "no frame drew a guest's menu before the account came back",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("lands a lapsed session on the main menu as a guest, told once", async () => {
+    const server = await startServer(7);
+    try {
+      const account = fakeAccount();
+      const tokens = fakeTokens();
+      // Thirty days fixed from issue (docs/adr/0020), and issued thirty-one days ago.
+      server.skewClock(-31 * 24 * 60 * 60 * 1000);
+      const first = await signUp(
+        server,
+        { sub: "google-ada", name: "Ada" },
+        { account: account.store, seat: tokens.store },
+      );
+      first.createRoom("");
+      await seated(first, "the account");
+      server.drop(first);
+      server.skewClock(0);
+
+      const back = server.bootSession({ account: account.store, seat: tokens.store });
+      const seen = recordSnapshots(back);
+      const menu = await settled(back, "the refusals");
+
+      assert.equal(menu.view, null, "the account's seat cannot be claimed by a guest");
+      assert.deepEqual(menu.account, { status: "guest" });
+      assert.ok(menu.notice, "and the player is told");
+      assert.equal(menu.error, null, "news, not a refusal of anything they did");
+      assert.equal(
+        new Set(seen.map((s) => s.notice).filter((n) => n !== null)).size,
+        1,
+        "once: the session and the seat it took are one piece of news",
+      );
+      assert.equal(account.stored(), null, "a session that fails is not kept to fail again");
+      assert.equal(tokens.stored(), null, "nor the seat that went with it");
+
+      // The game still works: a guest's room, under the name typed.
+      back.createRoom("Grace");
+      const lobby = await seated(back, "the guest");
+      assert.equal(lobby.view!.you.accountId, null);
+      assert.equal(lobby.notice, null, "and the news goes when they act again");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("still claims a guest seat behind a session it is refused", async () => {
+    const server = await startServer(7);
+    try {
+      const tokens = fakeTokens();
+      const guest = await server.openSession({ seat: tokens.store });
+      guest.createRoom("Grace");
+      const lobby = await seated(guest, "the guest");
+      server.drop(guest);
+
+      // A session token the server never issued: refused, as a lapsed one is.
+      const account = fakeAccount(`${SESSION_TOKEN_MARK}never-issued`);
+      const back = server.bootSession({ account: account.store, seat: tokens.store });
+      const table = await settled(back, "the seat");
+
+      assert.equal(table.view!.roomCode, lobby.view!.roomCode, "a guest seat is its token's");
+      assert.deepEqual(table.account, { status: "guest" });
+      assert.ok(table.notice, "the lapsed sign-in is still news");
+      assert.equal(account.stored(), null);
+      assert.ok(tokens.stored(), "and the seat is kept");
     } finally {
       await server.close();
     }

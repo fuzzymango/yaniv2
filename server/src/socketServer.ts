@@ -7,8 +7,18 @@
  */
 
 import type { Server as HttpServer } from "node:http";
-import type { Ack, ClientToServerEvents, ServerToClientEvents } from "@yaniv/shared";
+import type {
+  AccountView,
+  Ack,
+  ClientToServerEvents,
+  ServerToClientEvents,
+} from "@yaniv/shared";
+import { GOOGLE_CLIENT_ID } from "@yaniv/shared";
 import { Server, type Socket } from "socket.io";
+import { createAccount, renameAccount, resumeSession, signIn, type Auth } from "./auth/flows.ts";
+import { googleVerifier } from "./auth/google.ts";
+import { endSession, randomSessionToken, type SessionTokenGenerator } from "./auth/session.ts";
+import type { TokenVerifier } from "./auth/verifier.ts";
 import { createAutoDealer } from "./autoDeal.ts";
 import type { BotTurnRunnerOptions } from "./botTurns.ts";
 import { createBotTurnRunner } from "./botTurns.ts";
@@ -24,31 +34,58 @@ import {
   takeTurn,
   updateSettings,
 } from "./game.ts";
+import type { AccountId, ProfileStore } from "./profiles.ts";
 import { err, ok, type Result } from "./result.ts";
 import type { RoomManager } from "./roomManager.ts";
 import { createRoomSweeper, unattended } from "./roomSweep.ts";
 import { createRoomTimers } from "./roomTimers.ts";
 import type { Rng } from "./rng.ts";
 import { serializeStateForPlayer } from "./serialize.ts";
-import type { ActionResult, GameState } from "./state.ts";
+import { accountToCredit } from "./stats.ts";
+import type { ActionResult, GameState, Player } from "./state.ts";
 import { getPlayer } from "./state.ts";
 
 /**
- * Who a connection is. Set once, when the connection creates, joins or resumes a seat in
- * a room, and read by every handler thereafter — a client-supplied player id is never
- * trusted, or a socket could act as any player simply by saying so. `resumeSeat` is no
- * exception: what it trusts is the token presented alongside the id, not the id.
+ * Which seat a connection holds. Set once, when the connection creates, joins or resumes a
+ * seat in a room, and read by every in-game handler thereafter — a client-supplied player
+ * id is never trusted, or a socket could act as any player simply by saying so.
+ * `resumeSeat` is no exception: what it trusts is the credential behind the id — the token
+ * for a guest's seat, the bound account for an account's — never the id.
  *
  * Stored as one optional object rather than two optional fields so a half-bound
- * connection (a room without a player, or the reverse) is unrepresentable.
+ * connection (a room without a player, or the reverse) is unrepresentable. Called `seat`
+ * and not `session`, which the main menu's screen and the session token already mean
+ * (docs/adr/0022).
  */
-interface Session {
+interface Seat {
   playerId: string;
   roomCode: string;
 }
 
+/**
+ * Which account a connection is signed in as, and the session that proved it — kept so
+ * `signOut` can end that session. Bound by `signIn`, `createAccount` and `resumeSession`,
+ * cleared by `signOut`, and read for a seat twice: the account a new seat is taken under,
+ * and the one an account seat is claimed back by (docs/adr/0022).
+ *
+ * Beside the seat rather than inside it (docs/adr/0022): an account binds at the main menu
+ * before any room exists and survives leaving one, so the two are independent, each
+ * all-or-nothing on its own. The session token is held here and nowhere a view is built
+ * from — it is not in `GameState` — so it has nothing to leak through but an ack.
+ *
+ * The display name rides along so seating a signed-in player never waits on the store: it
+ * is what every bind was just answered with, and `renameAccount` keeps it current. It
+ * cannot go stale behind another connection's back, an account being bound to one at a time.
+ */
+interface AccountBinding {
+  accountId: AccountId;
+  displayName: string;
+  sessionToken: string;
+}
+
 interface SocketData {
-  session?: Session;
+  seat?: Seat;
+  account?: AccountBinding;
 }
 
 export type YanivServer = Server<
@@ -67,30 +104,61 @@ type YanivSocket = Socket<
 
 /**
  * What a server may be built with rather than told at runtime: the clock its bots think
- * on and how long they think for, both defaulted, so production construction is one line
- * and unchanged.
+ * on and how long they think for, who verifies a Google sign-in and where session tokens
+ * come from — all defaulted to the real thing, so production construction is one line.
  *
  * The runner's own options plus the clock every timer in the server is set on — the one
  * thing owned here rather than by a behaviour, since the registry it builds is shared by
  * all of them. A test seam first: a suite about something other than timing switches the
- * pause off, and one about timing drives the clock by hand.
+ * pause off, and one about timing drives the clock by hand; a suite that signs in vouches
+ * for its own Google identities and issues marked session tokens.
  */
 export interface SocketServerOptions extends BotTurnRunnerOptions {
   /** Defaults to real time. A test drives one by hand instead. */
   clock?: Clock;
+  /** Defaults to Google's own, for `GOOGLE_CLIENT_ID`. A test fakes it (`test/auth/`). */
+  verifier?: TokenVerifier;
+  /** Defaults to a CSPRNG. A test issues marked tokens, to sweep the wire for them. */
+  newSessionToken?: SessionTokenGenerator;
+  /**
+   * Where a failure nobody is waiting on is reported — a Yaniv call the store would not
+   * count (docs/adr/0023). Defaults to `console.error`; a test listens in.
+   */
+  log?: (...args: unknown[]) => void;
 }
 
-/** Attach the game's event handlers to a new Socket.io server on `httpServer`. */
+/**
+ * Attach the game's event handlers to a new Socket.io server on `httpServer`.
+ *
+ * `profiles` is **required, not defaulted**, for ADR-0013's reason: a call site needing a
+ * capability should not be able to forget it, and a server that had quietly composed
+ * itself a store nobody chose would be a server whose accounts go wherever the default
+ * went. Which store it is, is stated in the command that boots — `npm run serve` against
+ * a database, `npm run serve:memory` against memory (docs/adr/0019) — and this layer is
+ * indifferent to the answer.
+ *
+ * The sign-in events are the handlers that read it, and only through `auth/flows.ts`: they
+ * hold no auth logic of their own, as the in-game handlers hold no rules.
+ */
 export function createSocketServer(
   httpServer: HttpServer,
   rooms: RoomManager,
+  profiles: ProfileStore,
   options: SocketServerOptions = {},
 ): YanivServer {
   const io: YanivServer = new Server(httpServer);
-  const timers = createRoomTimers(options.clock ?? systemClock);
+  const clock = options.clock ?? systemClock;
+  const timers = createRoomTimers(clock);
   const botTurns = createBotTurnRunner(rooms, timers, options);
   const autoDeal = createAutoDealer(rooms, timers);
   const roomSweep = createRoomSweeper(rooms, timers);
+  const log = options.log ?? console.error;
+  const auth: Auth = {
+    verifier: options.verifier ?? googleVerifier(GOOGLE_CLIENT_ID),
+    store: profiles,
+    clock,
+    newSessionToken: options.newSessionToken ?? randomSessionToken,
+  };
 
   /**
    * Send every connection in a room its own view of the current state.
@@ -121,7 +189,7 @@ export function createSocketServer(
     const members = membersOf(roomCode);
     const connected = connectedPlayers(members);
     for (const member of members) {
-      const playerId = member.data.session?.playerId;
+      const playerId = member.data.seat?.playerId;
       if (!playerId) continue;
       member.emit("gameStateUpdate", serializeStateForPlayer(state, playerId, connected));
     }
@@ -155,7 +223,7 @@ export function createSocketServer(
   function connectedPlayers(members: YanivSocket[]): ReadonlySet<string> {
     const present = new Set<string>();
     for (const member of members) {
-      const playerId = member.data.session?.playerId;
+      const playerId = member.data.seat?.playerId;
       if (playerId) present.add(playerId);
     }
     return present;
@@ -191,22 +259,22 @@ export function createSocketServer(
   }
 
   /**
-   * Release a connection from the room it is bound to: no session, no membership.
+   * Release a connection from the room it is bound to: no seat, no membership.
    *
-   * Both halves matter. Without the cleared session the connection would still be told
+   * Both halves matter. Without the cleared seat the connection would still be told
    * `ALREADY_IN_ROOM` by every later create or join, so leaving a room would be as final
    * as it is today. Without the `leave` it would stay a member of the Socket.io room, and
    * a later room issued the same code would leak its broadcasts to a stranger.
    *
-   * Clearing the session first is also what makes it safe to publish immediately
-   * afterwards: `broadcastState` skips sessionless sockets, so a player who has just left
+   * Clearing the seat first is also what makes it safe to publish immediately
+   * afterwards: `broadcastState` skips seatless sockets, so a player who has just left
    * is never handed a view of a table they are no longer seated at — which the serializer
    * would refuse to build in any case.
    */
   function release(target: YanivSocket, roomCode: string): void {
     // Deleted rather than set to undefined: the field is genuinely absent on a connection
     // that is not in a room, which is exactly the shape a fresh connection has.
-    delete target.data.session;
+    delete target.data.seat;
     void target.leave(roomCode);
   }
 
@@ -269,32 +337,175 @@ export function createSocketServer(
     return state.players.every((p) => p.departed || p.isBot);
   }
 
+  /**
+   * One live connection per seat, and the newer one wins. A second tab is not
+   * co-presence: two connections acting as one player would each be shown a table the
+   * other could move out from under it. Dropped rather than merely unbound, so the device
+   * it belongs to finds out — an unbound socket would sit there looking connected and
+   * refusing every tap.
+   *
+   * Called *after* `claimant` is seated, not before: the drop publishes the room (issue
+   * #146), and evicting first would broadcast one position with this seat absent from the
+   * room's sockets — a reload would blink "away" at everybody on its way back to the table.
+   */
+  function evictOtherHolders(claimant: YanivSocket, roomCode: string, playerId: string): void {
+    for (const member of membersOf(roomCode)) {
+      if (member.id === claimant.id) continue;
+      if (member.data.seat?.playerId === playerId) member.disconnect();
+    }
+  }
+
   io.on("connection", (socket) => {
     const alreadySeated = () =>
       err("ALREADY_IN_ROOM", "This connection is already in a room");
 
     /**
-     * The caller's session and the room behind it, or the rejection to ack instead.
+     * The caller's seat and the room behind it, or the rejection to ack instead.
      *
      * Used by the one handler that is not `act`-shaped — leaving — because it needs the
      * room itself to decide what to do with it, rather than only a transition to apply.
      */
-    function currentRoom(): Result<{ session: Session; state: GameState }> {
-      const session = socket.data.session;
-      if (!session) return err("PLAYER_NOT_FOUND", "This connection is not in a room");
+    function currentRoom(): Result<{ seat: Seat; state: GameState }> {
+      const seat = socket.data.seat;
+      if (!seat) return err("PLAYER_NOT_FOUND", "This connection is not in a room");
 
-      const state = rooms.getState(session.roomCode);
-      if (!state) return err("ROOM_NOT_FOUND", `No room with code ${session.roomCode}`);
-      return ok({ session, state });
+      const state = rooms.getState(seat.roomCode);
+      if (!state) return err("ROOM_NOT_FOUND", `No room with code ${seat.roomCode}`);
+      return ok({ seat, state });
+    }
+
+    /*
+     * The account, from the main menu (docs/adr/0021). Each handler is a flow and a
+     * binding: every decision — whether Google vouched, whether a session is live, whether
+     * a name is legal, and a payload that is not a string at all — is `auth/flows.ts`'s,
+     * and all that is left here is whose connection this now is.
+     *
+     * Accepted with or without a seat, and binding over an account already bound replaces
+     * it: unlike a seat, an account binding orphans nobody, so there is no
+     * `ALREADY_IN_ROOM` for it to answer (docs/adr/0022). Bound *before* the ack, so a
+     * client told it is signed in can act as the account at once.
+     *
+     * **Newer wins**: an account is live on one connection at a time, so any other bound to
+     * it is put down — the seat rule's mirror (`evictOtherHolders`), and a tab left open at
+     * work must not lock its player out at home. A server-side disconnect is not
+     * auto-reconnected by socket.io-client, so two tabs cannot ping-pong. The older socket
+     * is gone before this one can join anything, so whether both were in one room does not
+     * matter; a seat it held is this connection's to claim, by its account.
+     */
+    function bindAccount(account: AccountView, sessionToken: string): void {
+      // Every bind lands after an await on the store. A connection that went in the
+      // meantime — the old tab of a reload, answered last — binds nothing, or it would put
+      // down the live tab that has taken its place, and nothing reconnects that one.
+      if (!socket.connected) return;
+      socket.data.account = {
+        accountId: account.id,
+        displayName: account.displayName,
+        sessionToken,
+      };
+      // Copied out first: a disconnect mutates the very map being walked.
+      for (const other of [...io.sockets.sockets.values()]) {
+        if (other.id !== socket.id && other.data.account?.accountId === account.id) {
+          other.disconnect();
+        }
+      }
+    }
+
+    socket.on("signIn", async (idToken, ack) => {
+      const result = await signIn(auth, idToken);
+      if (result.ok && result.value.status === "signedIn") {
+        bindAccount(result.value.account, result.value.sessionToken);
+      }
+      ack(result);
+    });
+
+    socket.on("createAccount", async (idToken, displayName, ack) => {
+      const result = await createAccount(auth, idToken, displayName);
+      if (result.ok) bindAccount(result.value.account, result.value.sessionToken);
+      ack(result);
+    });
+
+    /** A refusal binds nothing and unbinds nothing: a refused request costs nothing. */
+    socket.on("resumeSession", async (sessionToken, ack) => {
+      const result = await resumeSession(auth, sessionToken);
+      if (result.ok) bindAccount(result.value.account, sessionToken);
+      ack(result);
+    });
+
+    /**
+     * Unbound first, then the session ended, so no request arriving while the store is
+     * answering is served as the account being signed out of. A seat this connection holds
+     * is not touched: it was taken under the account and stays that account's.
+     */
+    socket.on("signOut", async (ack) => {
+      const account = socket.data.account;
+      delete socket.data.account;
+      if (account) await endSession(profiles, account.sessionToken);
+      ack(ok(null));
+    });
+
+    /**
+     * Whose account is renamed is the binding's to say, never the payload's — the seat's
+     * rule, one binding over. A connection with none is told its session is not valid,
+     * which is the client's cue that it is a guest.
+     *
+     * The new name is what the next seat is taken under. A seat already taken keeps the
+     * name it was taken with, as it keeps everything else it was seated with.
+     */
+    socket.on("renameAccount", async (displayName, ack) => {
+      const account = socket.data.account;
+      if (!account) {
+        ack(err("INVALID_SESSION", "This connection is not signed in"));
+        return;
+      }
+      const result = await renameAccount(auth, account.accountId, displayName);
+      // Onto the binding that was renamed, and only if it is still this connection's: a
+      // sign-out or another account bound while the store was answering has replaced it.
+      if (result.ok && socket.data.account === account) {
+        socket.data.account = { ...account, displayName: result.value.account.displayName };
+      }
+      ack(result);
+    });
+
+    /**
+     * Who a new seat is taken by: the account bound to this connection, under its own
+     * display name, or a guest under the name they typed. **A signed-in player is never
+     * asked for a name** — whatever the payload claims is ignored — because identity is one
+     * answer and not one per table (docs/adr/0019), and the seat label is then always a
+     * reliable "who is that".
+     */
+    function seatedAs(typedName: string): { name: string; accountId: AccountId | null } {
+      const account = socket.data.account;
+      return account
+        ? { name: account.displayName, accountId: account.accountId }
+        : { name: typedName, accountId: null };
+    }
+
+    /**
+     * Whether this connection may take back `player`'s seat by `resumeSeat`: the claim
+     * rule, and its shape is the point (docs/adr/0022). `joinRoom`'s hand-back is the same
+     * rule's account half, asked by `RoomManager` of the seats in one room. An account seat is its account's — the
+     * token, issued for a uniform seat and a uniform ack, is not consulted, so a token left
+     * in a shared browser after signing out claims nothing. A guest seat is its token's,
+     * exactly as before an account existed, whoever is signed in on the connection: signing
+     * in while seated as a guest bound the connection, never the seat.
+     *
+     * A seat given up is nobody's: leaving is final, and the server is what says so.
+     */
+    function mayClaim(player: Player, resumeToken: string): boolean {
+      if (player.departed) return false;
+      return player.accountId !== null
+        ? socket.data.account?.accountId === player.accountId
+        : resumeToken === player.resumeToken;
     }
 
     socket.on("createRoom", async (playerName, ack) => {
-      if (socket.data.session) {
+      if (socket.data.seat) {
         ack(alreadySeated());
         return;
       }
 
-      const created = rooms.createRoom(playerName);
+      const { name, accountId } = seatedAs(playerName);
+      const created = rooms.createRoom(name, accountId);
       if (!created.ok) {
         ack({ ok: false, error: created.error });
         return;
@@ -303,7 +514,7 @@ export function createSocketServer(
       // Destructured deliberately: `createRoom` also hands back the full `GameState`,
       // which must never cross this boundary. See serialize.ts.
       const { roomCode, playerId, resumeToken } = created.value;
-      socket.data.session = { playerId, roomCode };
+      socket.data.seat = { playerId, roomCode };
 
       // Socket.io's own room concept maps 1:1 onto a game's room code, so broadcasts to
       // a game can address it by code directly. Awaited so membership is established
@@ -326,25 +537,33 @@ export function createSocketServer(
     });
 
     socket.on("joinRoom", async (roomCode, playerName, ack) => {
-      if (socket.data.session) {
+      if (socket.data.seat) {
         ack(alreadySeated());
         return;
       }
 
-      const joined = rooms.joinRoom(roomCode, playerName);
+      const { name, accountId } = seatedAs(playerName);
+      const joined = rooms.joinRoom(roomCode, name, accountId);
       if (!joined.ok) {
         ack({ ok: false, error: joined.error });
         return;
       }
 
-      const { playerId, resumeToken, state } = joined.value;
-      socket.data.session = { playerId, roomCode };
+      const { playerId, resumeToken, state, resumed } = joined.value;
+      socket.data.seat = { playerId, roomCode };
       await socket.join(roomCode);
 
-      // The engine's normalised name, not the raw one off the wire.
-      const seatedName = getPlayer(state, playerId)?.name ?? playerName;
-      // `socket.to` excludes the sender: an arrival is news to everyone but the arriver.
-      socket.to(roomCode).emit("playerJoined", seatedName);
+      if (resumed) {
+        // The account's own seat, handed back rather than a second one taken (docs/adr/
+        // 0022): nobody arrived, so nobody is told so, and it is claimed exactly as
+        // `resumeSeat` claims one — including off a connection that still holds it.
+        evictOtherHolders(socket, roomCode, playerId);
+      } else {
+        // The engine's normalised name, not the raw one off the wire.
+        const seatedName = getPlayer(state, playerId)?.name ?? name;
+        // `socket.to` excludes the sender: an arrival is news to everyone but the arriver.
+        socket.to(roomCode).emit("playerJoined", seatedName);
+      }
 
       // Everyone, the arriver included, gets the new roster — the announcement above
       // says who turned up, this is the table they turned up to. Ordered ahead of the
@@ -357,16 +576,16 @@ export function createSocketServer(
     /**
      * Take back a seat that already exists. The credential is the whole of the check:
      * a player id is public — it names opponents in every view — so presenting one
-     * proves nothing, and the token is what says this connection is entitled to the
-     * seat behind it.
+     * proves nothing, and what says this connection is entitled to the seat behind it is
+     * the token for a guest's seat and the bound account for an account's (`mayClaim`).
      *
      * A room that has gone is said so plainly, since `joinRoom` already answers that
      * question for any code and there is nothing left to withhold. What is inside one is
-     * a different matter: a wrong token, a player the room never held and a seat that has
-     * been given up share a single code, or a room code would become a way of fishing for
-     * the seats behind it.
+     * a different matter: a wrong token, a player the room never held, a seat that has
+     * been given up and a seat that is somebody else's share a single code, or a room code
+     * would become a way of fishing for the seats behind it — and for which are accounts'.
      *
-     * That last case is checked here rather than left to the client forgetting its
+     * A seat given up is checked here rather than left to the client forgetting its
      * credential: a roster is append-only from the first deal, so a departed seat and its
      * token now outlive the player, and a stale tab holding one would otherwise rebind to
      * a seat its owner gave up and be handed every broadcast after it. Leaving is final,
@@ -379,7 +598,7 @@ export function createSocketServer(
      * every other action here is, and the broadcast reaches it as one more position.
      */
     socket.on("resumeSeat", async (request, ack) => {
-      if (socket.data.session) {
+      if (socket.data.seat) {
         ack(alreadySeated());
         return;
       }
@@ -392,30 +611,14 @@ export function createSocketServer(
       }
 
       const player = getPlayer(state, playerId);
-      if (!player || player.departed || player.resumeToken !== resumeToken) {
+      if (!player || !mayClaim(player, resumeToken)) {
         ack(err("INVALID_RESUME_TOKEN", "That seat cannot be resumed"));
         return;
       }
 
-      socket.data.session = { playerId, roomCode };
+      socket.data.seat = { playerId, roomCode };
       await socket.join(roomCode);
-
-      /*
-       * One live connection per seat, and the newer one wins. A second tab is not
-       * co-presence: two connections acting as one player would each be shown a table
-       * the other could move out from under it. Dropped rather than merely unbound, so
-       * the device it belongs to finds out — an unbound socket would sit there looking
-       * connected and refusing every tap.
-       *
-       * *After* this connection is seated, not before: the drop publishes the room
-       * (issue #146), and evicting first would broadcast one position with this seat
-       * absent from the room's sockets — a reload would blink "away" at everybody on its
-       * way back to the table.
-       */
-      for (const member of membersOf(roomCode)) {
-        if (member.id === socket.id) continue;
-        if (member.data.session?.playerId === playerId) member.disconnect();
-      }
+      evictOtherHolders(socket, roomCode, playerId);
 
       ack({
         ok: true,
@@ -431,25 +634,31 @@ export function createSocketServer(
     });
 
     /**
-     * Every in-game action has the same shape: identify the caller from their session,
+     * Every in-game action has the same shape: identify the caller from their seat,
      * run the transition, and — only if it stood — publish the new position and play
      * out whatever bot turns it handed over to.
      *
      * A rejection acks the error and stops there. Nothing is published, so a refused
      * action costs the player nothing: the turn is still theirs to take again.
+     *
+     * `after` is a side effect of the move having stood, run **last** — behind the ack,
+     * the broadcast and the bot turns, so the order the tail reads in is the order that
+     * matters: the game first, anything else after it. It is handed the position the
+     * transition produced and must not make the tail wait on it (docs/adr/0023).
      */
     function act(
       ack: Ack<null>,
-      transition: (session: Session, state: GameState, rng: Rng) => ActionResult,
+      transition: (seat: Seat, state: GameState, rng: Rng) => ActionResult,
+      after?: (seat: Seat, state: GameState) => void,
     ): void {
-      const session = socket.data.session;
-      if (!session) {
+      const seat = socket.data.seat;
+      if (!seat) {
         ack(err("PLAYER_NOT_FOUND", "This connection is not in a room"));
         return;
       }
 
-      const result = rooms.apply(session.roomCode, (state, rng) =>
-        transition(session, state, rng),
+      const result = rooms.apply(seat.roomCode, (state, rng) =>
+        transition(seat, state, rng),
       );
       if (!result.ok) {
         ack({ ok: false, error: result.error });
@@ -457,8 +666,9 @@ export function createSocketServer(
       }
 
       ack({ ok: true, value: null });
-      broadcastState(session.roomCode);
-      runBotTurns(session.roomCode);
+      broadcastState(seat.roomCode);
+      runBotTurns(seat.roomCode);
+      after?.(seat, result.value);
     }
 
     /**
@@ -472,7 +682,7 @@ export function createSocketServer(
      * and `updateSettings` is where that claim is checked.
      */
     socket.on("updateSettings", (settings, ack) => {
-      act(ack, (session, state) => updateSettings(state, session.playerId, settings));
+      act(ack, (seat, state) => updateSettings(state, seat.playerId, settings));
     });
 
     socket.on("startGame", (ack) => {
@@ -480,19 +690,46 @@ export function createSocketServer(
       // starts the game, and never manages bots. It happens inside the transition so a
       // start that is then rejected — by someone who is not the host, say — discards the
       // seating along with it, rather than filling the table off a refused call.
-      act(ack, (session, state, rng) =>
-        startGame(rooms.seatBots(state), session.playerId, rng),
+      act(ack, (seat, state, rng) =>
+        startGame(rooms.seatBots(state), seat.playerId, rng),
       );
     });
 
     socket.on("takeTurn", (action, ack) => {
-      act(ack, (session, state, rng) =>
-        takeTurn(state, session.playerId, action, rng),
+      act(ack, (seat, state, rng) =>
+        takeTurn(state, seat.playerId, action, rng),
       );
     });
 
+    /**
+     * The one stat: an accepted call is counted on the caller's account, whether it stood
+     * or was Assafed — the call, never the verdict (docs/adr/0023). Hung off this handler
+     * rather than read back off the state, because this handler *is* the knowledge that a
+     * human called; and never twice for one round, a second call being `WRONG_PHASE` and
+     * a refused action having no tail.
+     *
+     * Started and awaited nowhere, so a database that is slow or down is a counter lost
+     * and nothing more: the failure is logged naming the account — a missing account told
+     * apart from a dead connection — and dropped. No retry and no queue. The store still
+     * throws, as ADR-0019 says it must; it is this one caller that decides its write is
+     * not worth a card game waiting on.
+     */
     socket.on("callYaniv", (ack) => {
-      act(ack, (session, state) => callYaniv(state, session.playerId));
+      act(
+        ack,
+        (seat, state) => callYaniv(state, seat.playerId),
+        (seat, state) => {
+          const accountId = accountToCredit(state, seat.playerId);
+          if (accountId === null) return;
+          // Called from inside a `.then`, so a store that throws rather than rejecting
+          // lands in the same `.catch` instead of out of this handler.
+          Promise.resolve()
+            .then(() => profiles.recordYanivCall(accountId))
+            .catch((error: unknown) =>
+              log(`Counting a Yaniv call for account ${accountId} failed:`, error),
+            );
+        },
+      );
     });
 
     /**
@@ -510,12 +747,12 @@ export function createSocketServer(
      * against the position the slap produced. Acting is punished in neither direction.
      */
     socket.on("slapDown", (ack) => {
-      act(ack, (session, state) => slapDown(state, session.playerId));
+      act(ack, (seat, state) => slapDown(state, seat.playerId));
     });
 
     socket.on("startNextRound", (ack) => {
-      act(ack, (session, state, rng) =>
-        startNextRound(state, session.playerId, rng),
+      act(ack, (seat, state, rng) =>
+        startNextRound(state, seat.playerId, rng),
       );
     });
 
@@ -523,7 +760,7 @@ export function createSocketServer(
     // up by an exit to the menu stays given up. Otherwise ordinary — a randomly chosen
     // opening player may well be a bot, which `act` plays out like any other handover.
     socket.on("playAgain", (ack) => {
-      act(ack, (session, state, rng) => playAgain(state, session.playerId, rng));
+      act(ack, (seat, state, rng) => playAgain(state, seat.playerId, rng));
     });
 
     /**
@@ -546,32 +783,32 @@ export function createSocketServer(
         return;
       }
 
-      const { session, state } = current.value;
+      const { seat, state } = current.value;
       // Read before the removal, since afterwards there is no player to read it from.
-      const name = getPlayer(state, session.playerId)?.name ?? "";
+      const name = getPlayer(state, seat.playerId)?.name ?? "";
 
-      const result = rooms.apply(session.roomCode, (current) =>
-        removePlayer(current, session.playerId),
+      const result = rooms.apply(seat.roomCode, (current) =>
+        removePlayer(current, seat.playerId),
       );
       if (!result.ok) {
         ack({ ok: false, error: result.error });
         return;
       }
 
-      release(socket, session.roomCode);
+      release(socket, seat.roomCode);
       ack({ ok: true, value: null });
 
       // The seat that has just gone was the last one: there is nobody to announce it to,
       // and nothing left for the room to be.
       if (abandoned(result.value)) {
-        destroyRoom(session.roomCode);
+        destroyRoom(seat.roomCode);
         return;
       }
 
       // The leaver is already out of the room, so this reaches exactly whoever stayed:
       // who left, and then the table they are left with.
-      io.to(session.roomCode).emit("playerLeft", name);
-      broadcastState(session.roomCode);
+      io.to(seat.roomCode).emit("playerLeft", name);
+      broadcastState(seat.roomCode);
       /*
        * And the same tail every in-game action has (`act`), for the same reason: leaving
        * mid-round hands the turn on where it was the leaver's (issue #147), and a turn
@@ -579,7 +816,7 @@ export function createSocketServer(
        * with no connection behind it — a wedge of exactly the kind the withdrawal from the
        * round exists to prevent.
        */
-      runBotTurns(session.roomCode);
+      runBotTurns(seat.roomCode);
     });
 
     /**
@@ -602,9 +839,9 @@ export function createSocketServer(
      * a minute left, and one whose player reloads is republished to before it is up.
      */
     socket.on("disconnect", () => {
-      const session = socket.data.session;
-      if (!session) return;
-      broadcastState(session.roomCode);
+      const seat = socket.data.seat;
+      if (!seat) return;
+      broadcastState(seat.roomCode);
     });
   });
 

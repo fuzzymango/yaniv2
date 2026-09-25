@@ -161,6 +161,15 @@ describe("serializeStateForPlayer", () => {
     }
   });
 
+  /*
+   * No session-token sibling of the test above, and none should be added. A resume token
+   * is on `Player`, inside `GameState`, so the serializer holds it and must drop it — break
+   * the serializer and that test fails. A session token is never in `GameState` at all (it
+   * lives in the store, hashed, and on `socket.data`), so the same assertion would pass
+   * against a serializer broken on purpose: vacuous, and withdrawn as such (#175,
+   * docs/adr/0021). The test with teeth is the wire sweep in `socketServer.test.ts`.
+   */
+
   it("shows the current turn only while a round is running", () => {
     const view = serializeStateForPlayer(scenario(), "p1", NO_CONNECTIONS);
     assert.equal(view.currentTurnPlayerId, "p1");
@@ -1151,5 +1160,54 @@ describe("serializeStateForPlayer — round end", () => {
     const grace = view.roundResult.players.find((p) => p.playerId === "p2")!;
     assert.equal(grace.name, "Grace");
     assert.equal(grace.scoreAfter, 115, "and what the round cost her");
+  });
+});
+
+/**
+ * The account a seat was taken under is public — the handle a later stats view taps on —
+ * and it is the only thing about an account a view carries (docs/adr/0022). Asserted
+ * positively, on both views and in every phase, so a redaction that grew too eager would
+ * be caught here rather than by the screen that one day needs it.
+ */
+describe("serializeStateForPlayer — the account behind a seat", () => {
+  const accounts = (phase: "lobby" | "playing" | "roundEnd" | "gameEnd") =>
+    makeState({
+      phase,
+      players: [
+        { id: "p1", name: "Ada", accountId: "account-ada" },
+        { id: "p2", name: "Grace" },
+        { id: "p3", name: "Alan", accountId: "account-alan" },
+      ],
+    });
+
+  for (const phase of ["lobby", "playing", "roundEnd", "gameEnd"] as const) {
+    it(`names it on the viewer's own seat and every other one, at ${phase}`, () => {
+      const view = serializeStateForPlayer(accounts(phase), "p1", NO_CONNECTIONS);
+
+      assert.equal(view.you.accountId, "account-ada");
+      assert.deepEqual(
+        view.opponents.map((o) => [o.id, o.accountId]),
+        [
+          ["p2", null],
+          ["p3", "account-alan"],
+        ],
+      );
+    });
+  }
+
+  it("names it on a spectator's own seat too", () => {
+    const state = makeState({
+      players: [
+        { id: "p1", name: "Ada", accountId: "account-ada", outInRound: 1, score: 120 },
+        { id: "p2", name: "Grace" },
+        { id: "p3", name: "Alan" },
+      ],
+      hands: { p2: ["spades-K"], p3: ["clubs-9"] },
+    });
+
+    const view = serializeStateForPlayer(state, "p1", NO_CONNECTIONS);
+
+    assert.equal(view.you.spectating, true);
+    assert.equal(view.you.accountId, "account-ada");
   });
 });

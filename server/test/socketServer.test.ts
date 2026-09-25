@@ -14,10 +14,14 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
 import type {
+  AccountView,
   GameError,
   PlayerGameView,
   ResumeRequest,
   RoomSettings,
+  RoundResultView,
+  SignedIn,
+  SignInResult,
 } from "@yaniv/shared";
 import {
   HAND_SIZE,
@@ -31,13 +35,17 @@ import { io as connectClient, type Socket as ClientSocket } from "socket.io-clie
 import { decideTurn } from "../src/bot.ts";
 import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
+import { createMemoryProfileStore, type ProfileStore } from "../src/profiles.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import type { SocketServerOptions } from "../src/socketServer.ts";
 import { createSocketServer } from "../src/socketServer.ts";
+import { fakeVerifier, type FakeVerifier } from "./auth/verifier.ts";
 import {
   RESUME_TOKEN_MARK,
+  SESSION_TOKEN_MARK,
   markedResumeTokens,
+  markedSessionTokens,
   playingSelf,
   slapdownOpen,
   testClock,
@@ -50,6 +58,8 @@ type AckResult<T> = { ok: true; value: T } | { ok: false; error: GameError };
 interface Harness {
   /** Open a new client connection, resolving once it is actually connected. */
   connect: () => Promise<ClientSocket>;
+  /** Google, as far as this server knows: a token verifies if a test vouched for it. */
+  google: FakeVerifier;
   close: () => Promise<void>;
 }
 
@@ -91,12 +101,15 @@ const LONG_MATCH: Partial<RoomSettings> = { maxScore: MAX_SCORE_LIMITS.max };
  * left rather than when the first goes over (docs/rules.md §7), so at the default limit a
  * full table has to be knocked out one seat at a time — a great many rounds over a real
  * socket, for no coverage the same match at a lower limit does not give.
+ *
+ * `profiles` is the in-memory store unless a suite needs one that answers when it says.
  */
 async function startServer(
   seed?: number,
   botCount = MAX_PLAYERS - 1,
   timing: SocketServerOptions = { thinkTimeMs: 0 },
   settings: Partial<RoomSettings> = {},
+  profiles: ProfileStore = createMemoryProfileStore(),
 ): Promise<Harness> {
   const httpServer = createServer();
   // Every seat this server issues holds a marked token, so a leak test can grep a payload
@@ -112,7 +125,14 @@ async function startServer(
           newRoomRng: () => mulberry32(seed + 1),
           defaultSettings,
         });
-  const io = createSocketServer(httpServer, rooms, timing);
+  // The in-memory store, which is what the repo's tests run against (docs/adr/0019); a
+  // fake Google; and marked session tokens, for the reason the resume tokens are marked.
+  const google = fakeVerifier();
+  const io = createSocketServer(httpServer, rooms, profiles, {
+    verifier: google,
+    newSessionToken: markedSessionTokens(),
+    ...timing,
+  });
 
   await new Promise<void>((resolve) => httpServer.listen(0, resolve));
   const { port } = httpServer.address() as AddressInfo;
@@ -120,6 +140,7 @@ async function startServer(
   const clients: ClientSocket[] = [];
 
   return {
+    google,
     connect: () =>
       new Promise((resolve) => {
         // Skip the HTTP long-polling handshake: it adds latency and a second
@@ -431,6 +452,680 @@ describe("one identity per connection", () => {
     const result = await ask(client, "joinRoom", second, "Alan elsewhere");
 
     assert.equal(expectError(result).code, "ALREADY_IN_ROOM");
+  });
+});
+
+/** A fresh Google identity for each sign-in, so tests sharing a server share no account. */
+let googleAccounts = 0;
+
+/**
+ * The sign-in fixture: vouch for a new Google identity, sign in with it and confirm the
+ * name — the whole first-visit path, over the wire. Answers the signed-in ack, session
+ * token and all, and the ID token, for a test that wants to present it again.
+ */
+async function signUp(
+  client: ClientSocket,
+  displayName = "Ada",
+  on: Harness = server,
+): Promise<SignedIn & { idToken: string }> {
+  const idToken = `id-token-${++googleAccounts}`;
+  on.google.vouchFor(idToken, { sub: `sub-${googleAccounts}`, name: displayName });
+
+  const first = expectOk(await ask<SignInResult>(client, "signIn", idToken));
+  assert.equal(first.status, "nameNeeded");
+  const created = expectOk(await ask<SignedIn>(client, "createAccount", idToken, displayName));
+  return { ...created, idToken };
+}
+
+/** The account a session token resumes, asked from a connection of its own. */
+async function resumeFresh(sessionToken: string): Promise<AckResult<{ account: AccountView }>> {
+  const other = await server.connect();
+  return ask<{ account: AccountView }>(other, "resumeSession", sessionToken);
+}
+
+describe("signing in", () => {
+  it("drives a first visit end to end: sign in, name, rename, sign out", async () => {
+    const client = await server.connect();
+    server.google.vouchFor("id-token-ada", { sub: "sub-ada", name: "  Ada Lovelace " });
+
+    assert.deepEqual(expectOk(await ask(client, "signIn", "id-token-ada")), {
+      status: "nameNeeded",
+      suggestedName: "Ada Lovelace",
+    });
+
+    const created = expectOk(
+      await ask<SignedIn>(client, "createAccount", "id-token-ada", "Ada"),
+    );
+    assert.equal(created.status, "signedIn");
+    assert.equal(created.account.displayName, "Ada");
+
+    const renamed = { id: created.account.id, displayName: "Countess" };
+    assert.deepEqual(expectOk(await ask(client, "renameAccount", " Countess ")), {
+      account: renamed,
+    });
+
+    // The next visit, which takes the account over from this one (newer wins at bind).
+    const next = await server.connect();
+    assert.deepEqual(expectOk(await ask(next, "resumeSession", created.sessionToken)), {
+      account: renamed,
+    });
+
+    assert.equal(expectOk(await ask(next, "signOut")), null);
+    assert.equal(
+      expectError(await resumeFresh(created.sessionToken)).code,
+      "INVALID_SESSION",
+      "a signed-out session resumes nobody",
+    );
+    assert.equal(
+      expectError(await ask(next, "renameAccount", "Ada")).code,
+      "INVALID_SESSION",
+      "and the connection is no longer anybody's",
+    );
+  });
+
+  it("signs a returning credential straight in, with a session of its own", async () => {
+    const first = await server.connect();
+    const created = await signUp(first);
+
+    const second = await server.connect();
+    const again = expectOk(await ask<SignInResult>(second, "signIn", created.idToken));
+
+    assert.equal(again.status, "signedIn");
+    if (again.status !== "signedIn") return;
+    assert.deepEqual(again.account, created.account);
+    assert.notEqual(again.sessionToken, created.sessionToken);
+  });
+
+  it("binds the account a resumed session names", async () => {
+    const created = await signUp(await server.connect());
+    const returning = await server.connect();
+
+    assert.deepEqual(
+      expectOk(await ask(returning, "resumeSession", created.sessionToken)),
+      { account: created.account },
+    );
+    // Bound, as proven by acting as it.
+    expectOk(await ask(returning, "renameAccount", "Returned"));
+    assert.equal(
+      expectOk(await resumeFresh(created.sessionToken)).account.displayName,
+      "Returned",
+    );
+  });
+
+  it("refuses a token Google did not vouch for, and a session it never issued", async () => {
+    const client = await server.connect();
+
+    assert.equal(expectError(await ask(client, "signIn", "forged")).code, "INVALID_CREDENTIAL");
+    assert.equal(
+      expectError(await ask(client, "createAccount", "forged", "Ada")).code,
+      "INVALID_CREDENTIAL",
+    );
+    assert.equal(
+      expectError(await ask(client, "resumeSession", `${SESSION_TOKEN_MARK}never`)).code,
+      "INVALID_SESSION",
+    );
+  });
+
+  it("refuses a name the display-name rule does not allow", async () => {
+    const client = await server.connect();
+    const created = await signUp(client);
+    server.google.vouchFor("id-token-unnamed", { sub: "sub-unnamed" });
+
+    assert.equal(
+      expectError(await ask(client, "createAccount", "id-token-unnamed", "   ")).code,
+      "INVALID_NAME",
+    );
+    assert.equal(
+      expectError(await ask(client, "renameAccount", "x".repeat(21))).code,
+      "INVALID_NAME",
+    );
+    assert.deepEqual(expectOk(await resumeFresh(created.sessionToken)), {
+      account: created.account,
+    });
+  });
+
+  it("refuses a rename from a connection nobody is signed in on", async () => {
+    const client = await server.connect();
+    assert.equal(expectError(await ask(client, "renameAccount", "Ada")).code, "INVALID_SESSION");
+  });
+
+  it("signs out a connection nobody is signed in on without complaint", async () => {
+    const client = await server.connect();
+    assert.equal(expectOk(await ask(client, "signOut")), null);
+  });
+
+  /*
+   * A payload's wire type is a claim, and a hash or a `.trim()` over a number throws — in
+   * an async handler, an unhandled rejection, which is a crashed server. Asked again after
+   * each, so a crash shows up as the next ack never arriving.
+   */
+  it("refuses a payload that is not a string, and stays up", async () => {
+    const client = await server.connect();
+    const created = await signUp(client);
+
+    assert.equal(expectError(await ask(client, "signIn", 42)).code, "INVALID_CREDENTIAL");
+    assert.equal(expectError(await ask(client, "resumeSession", 42)).code, "INVALID_SESSION");
+    assert.equal(
+      expectError(await ask(client, "createAccount", created.idToken.slice(0, -1), null)).code,
+      "INVALID_CREDENTIAL",
+    );
+    assert.equal(expectError(await ask(client, "renameAccount", {})).code, "INVALID_NAME");
+    assert.deepEqual(expectOk(await resumeFresh(created.sessionToken)), {
+      account: created.account,
+    });
+  });
+});
+
+/**
+ * An account binding is not a seat binding (docs/adr/0022): it arrives at the main menu
+ * before any room, and outlives leaving one. So neither is refused for the other, and
+ * binding an account over another replaces it — unlike a room, orphaning nobody.
+ */
+describe("the account beside the seat", () => {
+  it("replaces an account bound already, with no ALREADY_IN_ROOM analogue", async () => {
+    const client = await server.connect();
+    const ada = await signUp(client, "Ada");
+    const grace = await signUp(client, "Grace");
+
+    expectOk(await ask(client, "renameAccount", "Hopper"));
+
+    assert.equal(expectOk(await resumeFresh(grace.sessionToken)).account.displayName, "Hopper");
+    assert.equal(
+      expectOk(await resumeFresh(ada.sessionToken)).account.displayName,
+      "Ada",
+      "the account replaced is left as it was",
+    );
+  });
+
+  it("signs in and out mid-match without touching the seat", async () => {
+    const client = await server.connect();
+    const watcher = watch(client);
+    expectOk(await ask(client, "createRoom", "Ada"));
+    expectOk(await ask(client, "startGame"));
+    await watcher.until((v) => v.phase === "playing", "the deal");
+
+    const created = await signUp(client);
+    expectOk(await ask(client, "resumeSession", created.sessionToken));
+    expectOk(await ask(client, "signOut"));
+
+    // Still seated: a second room is refused, and leaving this one is not.
+    assert.equal(
+      expectError(await ask(client, "createRoom", "Ada")).code,
+      "ALREADY_IN_ROOM",
+    );
+    expectOk(await ask(client, "exitToMenu"));
+  });
+
+  it("keeps the account bound through leaving a room", async () => {
+    const client = await server.connect();
+    const created = await signUp(client);
+    expectOk(await ask(client, "createRoom", "Ada"));
+    expectOk(await ask(client, "exitToMenu"));
+
+    expectOk(await ask(client, "renameAccount", "Still me"));
+    assert.equal(
+      expectOk(await resumeFresh(created.sessionToken)).account.displayName,
+      "Still me",
+    );
+  });
+});
+
+/**
+ * The session token's half of the resume-token sweep above, and stricter: every payload
+ * the server sends any socket across a whole signed-in visit is recorded — broadcasts,
+ * announcements and acks alike — and each token must turn up in exactly one of them, the
+ * ack of the event that issued it (docs/adr/0021). The mutation it catches is the token
+ * reaching anywhere else: another ack, a view, another player.
+ *
+ * What it replaces is a serializer mutation test, withdrawn as vacuous (#175): a session
+ * token is never in `GameState`, so no serializer holds one to leak, and a test that broke
+ * the serializer on purpose would pass regardless.
+ */
+describe("session tokens on the wire", () => {
+  it("reach the connection that signed in, in the ack that issued them and nowhere else", async () => {
+    const payloads: { where: string; payload: unknown }[] = [];
+
+    async function connect(who: string): Promise<ClientSocket> {
+      const client = await server.connect();
+      client.onAny((event: string, ...args: unknown[]) =>
+        payloads.push({ where: `${who} <- ${event}`, payload: args }),
+      );
+      return client;
+    }
+    async function recorded<T>(
+      who: string,
+      client: ClientSocket,
+      event: string,
+      ...args: unknown[]
+    ): Promise<AckResult<T>> {
+      const result = await ask<T>(client, event, ...args);
+      payloads.push({ where: `${who} <- ${event} ack`, payload: result });
+      return result;
+    }
+
+    const ada = await connect("ada");
+    const grace = await connect("grace");
+    const adaViews = watch(ada);
+    const graceViews = watch(grace);
+
+    // A first visit: the name step, then the account.
+    server.google.vouchFor("id-token-sweep", { sub: "sub-sweep", name: "Ada" });
+    await recorded("ada", ada, "signIn", "id-token-sweep");
+    const created = expectOk(
+      await recorded<SignedIn>("ada", ada, "createAccount", "id-token-sweep", "Ada"),
+    );
+
+    // A table, with a guest at it, played into.
+    const { roomCode } = expectOk(
+      await recorded<{ roomCode: string }>("ada", ada, "createRoom", "Ada"),
+    );
+    expectOk(await recorded("grace", grace, "joinRoom", roomCode, "Grace"));
+    expectOk(await recorded("ada", ada, "startGame"));
+    await adaViews.until((v) => v.phase === "playing", "ada's deal");
+    await graceViews.until((v) => v.phase === "playing", "grace's deal");
+    await recorded("ada", ada, "renameAccount", "Countess");
+
+    // A second tab: resumed — taking the account, and so the seat, over from the first —
+    // then signed in afresh with a session of its own, and sat back down at the table.
+    const tab = await connect("ada's second tab");
+    expectOk(await recorded("tab", tab, "resumeSession", created.sessionToken));
+    const again = expectOk(await recorded<SignInResult>("tab", tab, "signIn", "id-token-sweep"));
+    assert.equal(again.status, "signedIn");
+    if (again.status !== "signedIn") return;
+    expectOk(await recorded("tab", tab, "joinRoom", roomCode, "Ada"));
+
+    await recorded("tab", tab, "signOut");
+    await recorded("tab", tab, "exitToMenu");
+    await graceViews.until((v) => v.opponents.some((o) => o.departed), "ada gone");
+
+    for (const [token, issuedBy] of [
+      [created.sessionToken, "ada <- createAccount ack"],
+      [again.sessionToken, "tab <- signIn ack"],
+    ] as const) {
+      assert.ok(token.startsWith(SESSION_TOKEN_MARK), "tokens under test are marked");
+      assert.deepEqual(
+        payloads.filter((p) => JSON.stringify(p.payload).includes(token)).map((p) => p.where),
+        [issuedBy],
+      );
+    }
+    assert.equal(
+      payloads.filter((p) => JSON.stringify(p.payload).includes(SESSION_TOKEN_MARK)).length,
+      2,
+      "no other session token reached any payload",
+    );
+  });
+});
+
+/**
+ * A seat is bound to one identity for life and claimed back by that one (docs/adr/0022): a
+ * guest seat by its resume token, exactly as before, and an account seat by its account,
+ * the token issued and never consulted. The whole check is
+ * `player.accountId ? account === player.accountId : token === player.resumeToken`.
+ */
+describe("a seat claimed by whoever took it", () => {
+  interface Seating {
+    roomCode: string;
+    playerId: string;
+    resumeToken: string;
+  }
+
+  /** A signed-in connection with a room of its own, and everything needed to come back. */
+  async function accountSeat(name = "Ada") {
+    const client = await server.connect();
+    const account = await signUp(client, name);
+    const seat = expectOk(await ask<Seating>(client, "createRoom", "Typed"));
+    return { client, account, ...seat };
+  }
+
+  async function guestSeat(name = "Grace") {
+    const client = await server.connect();
+    const seat = expectOk(await ask<Seating>(client, "createRoom", name));
+    return { client, ...seat };
+  }
+
+  /** Picked field by field, so a fixture spread into one sends nothing but the claim. */
+  function resume(client: ClientSocket, { roomCode, playerId, resumeToken }: ResumeRequest) {
+    return ask<{ view: PlayerGameView }>(client, "resumeSeat", {
+      roomCode,
+      playerId,
+      resumeToken,
+    });
+  }
+
+  /** A fresh connection, signed into `sessionToken`'s account — a reload, or a second tab. */
+  async function signedInAs(sessionToken: string): Promise<ClientSocket> {
+    const client = await server.connect();
+    expectOk(await ask(client, "resumeSession", sessionToken));
+    return client;
+  }
+
+  describe("seating a signed-in player", () => {
+    it("takes the name from the account and ignores the one in the payload", async () => {
+      const host = await server.connect();
+      const hostViews = watch(host);
+      await signUp(host, "Ada");
+      const { roomCode } = expectOk(await ask<Seating>(host, "createRoom", "Typed"));
+
+      const joiner = await server.connect();
+      await signUp(joiner, "Grace");
+      expectOk(await ask(joiner, "joinRoom", roomCode, "Also typed"));
+
+      const lobby = await hostViews.until((v) => v.opponents.length === 1, "the join");
+      assert.equal(lobby.you.name, "Ada");
+      assert.equal(lobby.opponents[0]!.name, "Grace");
+    });
+
+    it("takes the name the account was last renamed to", async () => {
+      const client = await server.connect();
+      const views = watch(client);
+      await signUp(client, "Ada");
+      expectOk(await ask(client, "renameAccount", "Countess"));
+
+      expectOk(await ask(client, "createRoom", "Ada"));
+
+      const lobby = await views.until((v) => v.phase === "lobby", "the lobby");
+      assert.equal(lobby.you.name, "Countess");
+    });
+
+    /**
+     * Positive, on both views, so an over-zealous redaction is caught at the wire and not
+     * by the stats screen that will one day need it. A guest's is null, and so is a bot's.
+     */
+    it("puts the account on the wire at every seat, the viewer's own included", async () => {
+      const host = await server.connect();
+      const hostViews = watch(host);
+      const ada = await signUp(host, "Ada");
+      const { roomCode } = expectOk(await ask<Seating>(host, "createRoom", "Ada"));
+
+      const guest = await server.connect();
+      const guestViews = watch(guest);
+      const grace = expectOk(await ask<Seating>(guest, "joinRoom", roomCode, "Grace"));
+      expectOk(await ask(host, "startGame"));
+
+      const hostView = await hostViews.until((v) => v.phase === "playing", "the deal");
+      assert.equal(hostView.you.accountId, ada.account.id);
+      assert.equal(hostView.opponents.find((o) => o.id === grace.playerId)!.accountId, null);
+      assert.ok(hostView.opponents.length > 1, "bots were seated too");
+      for (const opponent of hostView.opponents) {
+        if (opponent.id !== grace.playerId) assert.equal(opponent.accountId, null, "a bot's");
+      }
+
+      const guestView = await guestViews.until((v) => v.phase === "playing", "the deal");
+      assert.equal(guestView.you.accountId, null);
+      assert.equal(
+        guestView.opponents.find((o) => o.name === "Ada")!.accountId,
+        ada.account.id,
+      );
+    });
+  });
+
+  describe("resumeSeat", () => {
+    it("hands an account seat back to its account, the token not consulted", async () => {
+      const seat = await accountSeat();
+      seat.client.disconnect();
+
+      const returning = await signedInAs(seat.account.sessionToken);
+      const { view } = expectOk(
+        await resume(returning, { ...seat, resumeToken: "not-the-token" }),
+      );
+
+      assert.equal(view.you.id, seat.playerId);
+      assert.equal(view.you.accountId, seat.account.account.id);
+    });
+
+    it("refuses an account seat to its own token, presented by a guest", async () => {
+      const seat = await accountSeat();
+      seat.client.disconnect();
+
+      const guest = await server.connect();
+      assert.equal(expectError(await resume(guest, seat)).code, "INVALID_RESUME_TOKEN");
+    });
+
+    it("refuses an account seat to another account, token and all", async () => {
+      const seat = await accountSeat();
+      seat.client.disconnect();
+
+      const other = await server.connect();
+      await signUp(other, "Mallory");
+      assert.equal(expectError(await resume(other, seat)).code, "INVALID_RESUME_TOKEN");
+    });
+
+    /** The cost ADR-0022 accepts: a signed-out reload cannot claim what the account took. */
+    it("refuses an account seat to a connection whose account signed out", async () => {
+      const seat = await accountSeat();
+      seat.client.disconnect();
+
+      const returning = await signedInAs(seat.account.sessionToken);
+      expectOk(await ask(returning, "signOut"));
+      assert.equal(expectError(await resume(returning, seat)).code, "INVALID_RESUME_TOKEN");
+    });
+
+    it("hands a guest seat back to its token, exactly as before", async () => {
+      const seat = await guestSeat();
+      seat.client.disconnect();
+
+      const returning = await server.connect();
+      assert.equal(expectOk(await resume(returning, seat)).view.you.id, seat.playerId);
+    });
+
+    /**
+     * Signing in while seated as a guest binds the connection, not the seat — so the seat
+     * is still its token's, and a reload that has since signed in gets it back by that.
+     */
+    it("hands a guest seat back to its token whoever is signed in on the connection", async () => {
+      const seat = await guestSeat();
+      await signUp(seat.client, "Grace");
+      seat.client.disconnect();
+
+      const returning = await server.connect();
+      await signUp(returning, "Somebody");
+      const { view } = expectOk(await resume(returning, seat));
+
+      assert.equal(view.you.id, seat.playerId);
+      assert.equal(view.you.accountId, null, "still a guest seat");
+    });
+
+    it("refuses a guest seat to a signed-in connection with the wrong token", async () => {
+      const seat = await guestSeat();
+      seat.client.disconnect();
+
+      const returning = await server.connect();
+      await signUp(returning, "Grace");
+      assert.equal(
+        expectError(await resume(returning, { ...seat, resumeToken: "not-the-token" })).code,
+        "INVALID_RESUME_TOKEN",
+      );
+    });
+
+    /**
+     * Any other answer to any of these would say "that seat exists, and belongs to an
+     * account", which is the fishing the shared answer exists to prevent.
+     */
+    it("answers every failed claim the same way, whatever was wrong", async () => {
+      const seat = await accountSeat();
+      const guest = await guestSeat();
+      const claimant = await server.connect();
+
+      const refusals = [
+        await resume(claimant, { ...guest, resumeToken: "not-the-token" }),
+        await resume(claimant, { ...guest, playerId: "nobody" }),
+        await resume(claimant, seat),
+      ].map(expectError);
+
+      assert.deepEqual(refusals, [refusals[0], refusals[0], refusals[0]]);
+      assert.equal(refusals[0]!.code, "INVALID_RESUME_TOKEN");
+    });
+  });
+
+  /**
+   * An account is live on one connection at a time, and the newer one wins: a tab left
+   * open somewhere else must not lock its player out.
+   */
+  describe("newer wins at bind", () => {
+    for (const how of ["resumeSession", "signIn"] as const) {
+      it(`puts down the older connection when a newer one binds the account by ${how}`, async () => {
+        const older = await server.connect();
+        const account = await signUp(older);
+        const dropped = nextEvent<string>(older, "disconnect");
+
+        const newer = await server.connect();
+        expectOk(
+          how === "resumeSession"
+            ? await ask(newer, "resumeSession", account.sessionToken)
+            : await ask(newer, "signIn", account.idToken),
+        );
+
+        await dropped;
+        assert.ok(newer.connected, "the newer connection is the one kept");
+      });
+    }
+
+    it("puts down the older connection when a newer one creates the account", async () => {
+      const older = await server.connect();
+      server.google.vouchFor("id-token-twice", { sub: "sub-twice", name: "Ada" });
+      expectOk(await ask(older, "createAccount", "id-token-twice", "Ada"));
+      const dropped = nextEvent<string>(older, "disconnect");
+
+      // The same credential finishing the name step a second time signs it in.
+      const newer = await server.connect();
+      expectOk(await ask(newer, "createAccount", "id-token-twice", "Ada"));
+
+      await dropped;
+    });
+
+    it("leaves a connection signed into another account alone", async () => {
+      const ada = await server.connect();
+      await signUp(ada, "Ada");
+      const grace = await server.connect();
+      await signUp(grace, "Grace");
+
+      // Asked of Ada's connection, and answered: it was not put down.
+      expectOk(await ask(ada, "renameAccount", "Still here"));
+    });
+
+    it("leaves the connection itself alone when it signs in again", async () => {
+      const client = await server.connect();
+      const account = await signUp(client);
+
+      expectOk(await ask(client, "resumeSession", account.sessionToken));
+      expectOk(await ask(client, "renameAccount", "Still here"));
+    });
+
+    /**
+     * A reload races its own dead socket: the old tab's `resumeSession` may still be with
+     * the store when the new tab's is answered, and a store may answer out of order. The
+     * old request resolving last must bind nothing — otherwise it would put down the live
+     * tab, which socket.io-client does not reconnect, and strand the player.
+     */
+    it("binds nothing for a connection that went while the store was answering", async () => {
+      const memory = createMemoryProfileStore();
+      let held: Promise<void> | null = null;
+      let answer = () => {};
+      const slow = await startServer(undefined, MAX_PLAYERS - 1, { thinkTimeMs: 0 }, {}, {
+        ...memory,
+        findSession: async (tokenHash) => {
+          if (held) await held;
+          return memory.findSession(tokenHash);
+        },
+      });
+      try {
+        const account = await signUp(await slow.connect(), "Ada", slow);
+
+        held = new Promise((resolve) => (answer = resolve));
+        const dead = await slow.connect();
+        dead.emit("resumeSession", account.sessionToken, () => {});
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        dead.disconnect();
+        const pending = held;
+        held = null;
+
+        const live = await slow.connect();
+        expectOk(await ask(live, "resumeSession", account.sessionToken));
+        answer();
+        await pending;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        assert.ok(live.connected, "the live tab was not put down");
+        expectOk(await ask(live, "renameAccount", "Still here"));
+      } finally {
+        await slow.close();
+      }
+    });
+
+    it("hands the seat over too, which the newer connection then sits back down at", async () => {
+      const seat = await accountSeat();
+      const dropped = nextEvent<string>(seat.client, "disconnect");
+
+      const tab = await signedInAs(seat.account.sessionToken);
+      await dropped;
+
+      assert.equal(expectOk(await resume(tab, seat)).view.you.id, seat.playerId);
+    });
+  });
+
+  /**
+   * Joining a room the account already holds a seat in is claiming that seat — the
+   * account *is* its credential — so it resumes rather than sitting the player down twice.
+   */
+  describe("joining a room the account already sits in", () => {
+    it("returns the seat it holds, mid-match, rather than adding one", async () => {
+      const seat = await accountSeat();
+      const guest = await server.connect();
+      const guestViews = watch(guest);
+      expectOk(await ask(guest, "joinRoom", seat.roomCode, "Grace"));
+      expectOk(await ask(seat.client, "startGame"));
+      const dealt = await guestViews.until((v) => v.phase === "playing", "the deal");
+
+      const tab = await signedInAs(seat.account.sessionToken);
+      const tabViews = watch(tab);
+      const joined = expectOk(await ask<Seating>(tab, "joinRoom", seat.roomCode, "Other"));
+
+      assert.equal(joined.playerId, seat.playerId);
+      assert.equal(joined.resumeToken, seat.resumeToken, "the seat's own, uniformly acked");
+      const view = await tabViews.until((v) => v.phase === "playing", "the seat's position");
+      assert.equal(view.you.id, seat.playerId);
+      assert.equal(view.you.name, "Ada");
+      assert.deepEqual(view.seating, dealt.seating, "nobody was added to the table");
+    });
+
+    /**
+     * One live connection per seat, whichever door the claim came in by. Signed out while
+     * seated, the older connection is bound to no account, so newer-wins never saw it.
+     */
+    it("puts down a connection still holding the seat", async () => {
+      const seat = await accountSeat();
+      expectOk(await ask(seat.client, "signOut"));
+      const dropped = nextEvent<string>(seat.client, "disconnect");
+
+      const returning = await server.connect();
+      expectOk(await ask(returning, "signIn", seat.account.idToken));
+      const joined = expectOk(await ask<Seating>(returning, "joinRoom", seat.roomCode, "Ada"));
+
+      assert.equal(joined.playerId, seat.playerId);
+      await dropped;
+    });
+
+    it("announces no arrival — nobody arrived", async () => {
+      const seat = await accountSeat();
+      const guest = await server.connect();
+      const guestViews = watch(guest);
+      expectOk(await ask(guest, "joinRoom", seat.roomCode, "Grace"));
+      await guestViews.until((v) => v.opponents.length === 1, "the lobby");
+
+      const announced: string[] = [];
+      guest.on("playerJoined", (name: string) => announced.push(name));
+      seat.client.disconnect();
+      const tab = await signedInAs(seat.account.sessionToken);
+      guestViews.reset();
+      expectOk(await ask(tab, "joinRoom", seat.roomCode, "Ada"));
+
+      const back = await guestViews.until(
+        (v) => v.opponents.length === 1 && v.opponents[0]!.connected,
+        "the seat back",
+      );
+      assert.equal(back.opponents[0]!.id, seat.playerId);
+      assert.deepEqual(announced, []);
+    });
   });
 });
 
@@ -3313,5 +4008,219 @@ describe("the scorecard on the wire", () => {
     );
 
     assert.deepEqual(view.scorecard, dealtOn.scorecard, "the match's history, not a blank sheet");
+  });
+});
+
+/**
+ * The one stat, over the wire (docs/adr/0023): a signed-in player's accepted `callYaniv`
+ * is counted on their account, and nothing about that write reaches the game.
+ *
+ * Each test builds its own server around a store it can see into — or one that never
+ * answers, or always fails — which is the whole reason `startServer` takes one. And each
+ * plays a real table out to real calls: `accountToCredit` is unit-tested and the store is
+ * contract-tested, and both would pass against a handler that wrote nothing at all.
+ */
+describe("a Yaniv call counted on the caller's account", () => {
+  const opened: Harness[] = [];
+  after(async () => {
+    for (const harness of opened) await harness.close();
+  });
+
+  interface Player {
+    client: ClientSocket;
+    watcher: Watcher;
+    playerId: string;
+    /** The account the player sat down under, or `null` for a guest. */
+    accountId: string | null;
+  }
+
+  /**
+   * A player and three bots, dealt in, at a limit nobody reaches: several rounds are
+   * played here, and a table that emptied on the way would stop answering.
+   */
+  async function sitDown(
+    profiles: ProfileStore,
+    signedIn = true,
+    options: SocketServerOptions = {},
+  ): Promise<Player> {
+    const harness = await startServer(
+      7,
+      3,
+      { thinkTimeMs: 0, ...options },
+      LONG_MATCH,
+      profiles,
+    );
+    opened.push(harness);
+
+    const client = await harness.connect();
+    const watcher = watch(client);
+    const accountId = signedIn ? (await signUp(client, "Ada", harness)).account.id : null;
+    const { playerId } = expectOk(
+      await ask<{ playerId: string }>(client, "createRoom", "Ada"),
+    );
+    watcher.reset();
+    expectOk(await ask(client, "startGame"));
+    return { client, watcher, playerId, accountId };
+  }
+
+  /** Every round a table has scored so far, split by whose call ended it. */
+  interface Calls {
+    mine: RoundResultView[];
+    bots: RoundResultView[];
+  }
+
+  /**
+   * Play on with the bots' own judgement until `done` says enough rounds have been called,
+   * answering each call's verdict — so a test can ask for a call that was Assafed without
+   * knowing in advance which round that will be.
+   */
+  async function playUntil(player: Player, done: (calls: Calls) => boolean): Promise<Calls> {
+    const calls: Calls = { mine: [], bots: [] };
+
+    for (let step = 0; step < 3000; step++) {
+      const current = await player.watcher.until(
+        (v) =>
+          v.phase !== "lobby" &&
+          (v.phase !== "playing" || v.currentTurnPlayerId === player.playerId),
+        "the player to be needed",
+      );
+      player.watcher.reset();
+
+      if (current.phase === "roundEnd") {
+        const result = current.roundResult!;
+        (result.callerId === player.playerId ? calls.mine : calls.bots).push(result);
+        if (done(calls)) return calls;
+        expectOk(await ask(player.client, "startNextRound"));
+        continue;
+      }
+      assert.equal(current.phase, "playing", "the match ended first");
+
+      const decision = decideTurn(current);
+      if (decision.type === "yaniv") {
+        expectOk(await ask(player.client, "callYaniv"));
+      } else {
+        expectOk(await ask(player.client, "takeTurn", decision.action));
+      }
+    }
+    assert.fail("the table never called the rounds under test");
+  }
+
+  /**
+   * The memory store with its Yaniv-call write replaced, and every account that write was
+   * asked for recorded in order — whatever the replacement then does with it. The
+   * replacement is handed the store underneath, which is where the accounts are.
+   */
+  function storeWith(
+    recordYanivCall: (id: string, memory: ProfileStore) => Promise<void>,
+  ): { profiles: ProfileStore; asked: string[] } {
+    const memory = createMemoryProfileStore();
+    const asked: string[] = [];
+    return {
+      asked,
+      profiles: {
+        ...memory,
+        recordYanivCall: (id) => {
+          asked.push(id);
+          return recordYanivCall(id, memory);
+        },
+      },
+    };
+  }
+
+  it("counts a signed-in player's call on their account", async () => {
+    const profiles = createMemoryProfileStore();
+    const player = await sitDown(profiles);
+
+    await playUntil(player, ({ mine }) => mine.length === 1);
+
+    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, 1);
+  });
+
+  it("counts a call that was Assafed exactly as one that stood", async () => {
+    const profiles = createMemoryProfileStore();
+    const player = await sitDown(profiles);
+
+    const { mine } = await playUntil(
+      player,
+      ({ mine }) =>
+        mine.some((r) => r.assaferId !== null) && mine.some((r) => r.assaferId === null),
+    );
+
+    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, mine.length);
+  });
+
+  it("writes nothing for a bot's call", async () => {
+    const { profiles, asked } = storeWith((id, memory) => memory.recordYanivCall(id));
+    const player = await sitDown(profiles);
+
+    const { mine } = await playUntil(
+      player,
+      ({ mine, bots }) => mine.length > 0 && bots.length > 0,
+    );
+
+    assert.deepEqual(asked, mine.map(() => player.accountId));
+    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, mine.length);
+  });
+
+  it("writes nothing for a guest's call", async () => {
+    const { profiles, asked } = storeWith(async () => {});
+    const player = await sitDown(profiles, false);
+
+    await playUntil(player, ({ mine }) => mine.length === 2);
+
+    assert.deepEqual(asked, []);
+  });
+
+  /**
+   * The write is started after the broadcast and awaited nowhere, so a database that has
+   * stopped answering holds up nothing: the call is acked, the scored round goes out, and
+   * the next round is dealt and played — bots and all — over the writes still pending.
+   */
+  it("holds up nothing when the store never answers", async () => {
+    const { profiles, asked } = storeWith(() => new Promise(() => {}));
+    const player = await sitDown(profiles);
+
+    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+
+    assert.deepEqual(asked, mine.map(() => player.accountId), "the store was asked, and hung");
+  });
+
+  /**
+   * Dropped, and logged naming the account — so a missing account can be told from a dead
+   * connection — and nothing else. An unhandled rejection would take the whole process
+   * down, and this suite with it.
+   */
+  it("logs a failed write naming the account, and plays on", async () => {
+    const logged: unknown[][] = [];
+    const failure = new Error("the database is down");
+    const { profiles } = storeWith(() => Promise.reject(failure));
+    const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
+
+    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+
+    assert.equal(logged.length, mine.length);
+    for (const entry of logged) {
+      assert.ok(String(entry[0]).includes(player.accountId!), "the log names the account");
+      assert.ok(entry.includes(failure), "and carries the failure");
+    }
+  });
+
+  /**
+   * `ProfileStore` promises a promise, and both shipped stores keep that by being `async`
+   * — but an implementation that threw before returning one would otherwise throw out of
+   * the handler, past the `.catch` meant for it. The same answer, whichever way it fails.
+   */
+  it("logs a store that throws rather than rejecting, and plays on", async () => {
+    const logged: unknown[][] = [];
+    const failure = new Error("thrown, not rejected");
+    const { profiles } = storeWith(() => {
+      throw failure;
+    });
+    const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
+
+    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+
+    assert.equal(logged.length, mine.length);
+    assert.ok(logged.every((entry) => entry.includes(failure)));
   });
 });

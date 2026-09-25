@@ -24,8 +24,10 @@ after: the domain distinction came first, the types are just making it real.
 Two distinct concepts, easy to conflate because both sit "before the game":
 
 - **Main menu** — a client-side, room-less screen. No `GameState` exists yet; there is no
-  room code and nothing on a server to point at. Its only options are to create a lobby,
-  join one by code, or quit the application.
+  room code and nothing on a server to point at. Its two doors are to create a lobby or join
+  one by code (or to quit the application). It is also the one screen where a player signs in
+  or out: an account binds before any room exists, so identity is asked about here and nowhere
+  else, and the two doors are unchanged by it.
 - **Lobby** — `GameState.phase === "lobby"` (see above): a room already exists
   server-side, has a code, and players are staged in it up to the player cap.
 
@@ -478,16 +480,43 @@ read back down to what fits, recomputed wherever it's read rather than stored cl
 This is why a room can never reject a join over a stale setting: the number simply means
 less than the host asked for, the same way an empty seat has always just gone to a bot.
 
+## Account, guest and display name
+
+**Account** — an identity that outlives every room: a display name and one counter, keyed by
+its own id and never by anything Google issued. A connection binds one at the main menu,
+before any room; a seat records the one that took it, for life. Newer wins: an account is
+live on one connection at a time.
+
+**Guest** — a human with no account. Their seat's identity is its resume token; their calls
+are counted nowhere. Bots are not guests.
+
+**Yaniv call** — the act of ending a round by calling, and what an account's one counter
+counts: every accepted call, whether it stood or was Assafed. **Assaf** qualifies the round's
+outcome and says nothing about whether a call happened
+([ADR-0023](docs/adr/0023-the-yaniv-call-write.md)).
+
+**Display name** — the name a player is known by at a table. A guest types one per room; an
+account carries its own, the same in every room, changed only by renaming the account.
+**Never unique** — two players may share one, at the same table. Identity is the account id
+and never the name, which is what lets a player choose any name they like.
+
 ## Resume token
 
-The secret that proves a connection is entitled to a **seat**. One per seat, issued from a
-CSPRNG the moment the seat is created (`createRoom`, `joinRoom`, bot seating) and fixed for
-the life of the room — never rotated, never reissued, so it names one seat for as long as
-that seat exists.
+The secret that proves a connection is entitled to a **guest** seat. Issued to every seat,
+consulted only for one no account took. A seat is claimed back by whoever took it: a guest
+with this, an account with itself
+([ADR-0022](docs/adr/0022-a-seat-is-claimed-by-whoever-took-it.md)).
 
-Deliberately *not* called a session: "session" is already double-booked, for the socket's
-own `socket.data.session` and for the client's session core (`client/src/session.ts`).
-A resume token is neither — it is a credential, and outlives any connection holding it.
+One per seat, issued from a CSPRNG the moment the seat is created (`createRoom`, `joinRoom`,
+bot seating) and fixed for the life of the room — never rotated, never reissued, so it names
+one seat for as long as that seat exists. An account seat carries one nothing reads, so that
+every seat and every seating ack is one shape.
+
+Deliberately *not* called a session: "session" means the client's session core
+(`client/src/session.ts`) and an account's session token — and once meant the socket's own
+binding to a seat, since renamed `socket.data.seat` for exactly this reason
+([ADR-0022](docs/adr/0022-a-seat-is-claimed-by-whoever-took-it.md)). A resume token is none
+of these — it is a credential, and outlives any connection holding it.
 
 It is a secret of the same class as a hidden hand, and a worse one to lose: a leaked hand
 is a look at someone's cards, a leaked token is their whole seat. So it lives in
@@ -497,9 +526,11 @@ seated them.
 
 **Resume seat** is what they present it back over — `resumeSeat({ roomCode, playerId,
 resumeToken })` — binding a new connection to a seat that already exists, in any phase, and
-answering with the position that seat stands in. Distinct from joining, which admits
-somebody new. A seat holds one live connection, so a resume puts down whatever socket was
-still holding it.
+answering with the position that seat stands in. For an account seat the token is ignored
+and the connection's account is what is checked; every wrong claim, whatever was wrong,
+answers `INVALID_RESUME_TOKEN`. Distinct from joining, which admits somebody new — except
+that an account joining a room it already holds a seat in is handed that seat back. A seat
+holds one live connection, so a resume puts down whatever socket was still holding it.
 
 ## Play again
 

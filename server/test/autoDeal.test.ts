@@ -28,7 +28,7 @@ function room(options: StateOptions): { rooms: RoomManager; roomCode: string } {
     rng: mulberry32(11),
     newRoomRng: () => mulberry32(22),
   });
-  const { roomCode } = unwrap(rooms.createRoom("Ada"));
+  const { roomCode } = unwrap(rooms.createRoom("Ada", null));
   unwrap(rooms.apply(roomCode, () => ok({ ...makeState(options), roomCode })));
   return { rooms, roomCode };
 }

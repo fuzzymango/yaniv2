@@ -9,7 +9,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ResumeRequest } from "@yaniv/shared";
-import { SEAT_KEY, seatStore, type SeatStorage } from "../src/tokens.ts";
+import {
+  ACCOUNT_KEY,
+  SEAT_KEY,
+  accountStore,
+  seatStore,
+  type SeatStorage,
+} from "../src/tokens.ts";
 
 const SEAT: ResumeRequest = {
   roomCode: "ABCD",
@@ -136,5 +142,79 @@ describe("the seat a page writes down", () => {
     const store = seatStore(blocked);
     assert.doesNotThrow(() => store.set(SEAT));
     assert.equal(store.get(), null);
+  });
+});
+
+/*
+ * The session token is the second thing a page writes down (docs/adr/0020), under a key of
+ * its own: the two credentials answer different questions and are cleared at different
+ * moments — leaving a room drops the seat and keeps the account — so neither is a field of
+ * the other.
+ */
+describe("the account a page writes down", () => {
+  it("hands a stored session to the next page that opens", () => {
+    const { storage } = fakeStorage();
+    accountStore({ localStorage: storage }).set("a-session");
+
+    assert.equal(accountStore({ localStorage: storage }).get(), "a-session");
+  });
+
+  it("keeps it under its own key, beside the seat and not inside it", () => {
+    const { storage, held } = fakeStorage();
+    seatStore({ localStorage: storage }).set(SEAT);
+    accountStore({ localStorage: storage }).set("a-session");
+
+    assert.ok(held.has(SEAT_KEY));
+    assert.ok(held.has(ACCOUNT_KEY));
+    assert.notEqual(ACCOUNT_KEY, SEAT_KEY);
+
+    accountStore({ localStorage: storage }).clear();
+    assert.deepEqual(
+      seatStore({ localStorage: storage }).get(),
+      SEAT,
+      "forgetting the account is not forgetting the seat",
+    );
+  });
+
+  it("keeps nothing once the session is given up", () => {
+    const { storage, held } = fakeStorage();
+    const store = accountStore({ localStorage: storage });
+    store.set("a-session");
+
+    store.clear();
+
+    assert.equal(store.get(), null);
+    assert.equal(held.size, 0);
+  });
+
+  it("knows of no account when what is written down is not one", () => {
+    for (const junk of [
+      "not json at all",
+      "null",
+      '"a bare string"',
+      "42",
+      "{}",
+      '{"sessionToken":""}',
+      '{"sessionToken":7}',
+    ]) {
+      const { storage } = fakeStorage({ [ACCOUNT_KEY]: junk });
+      assert.equal(accountStore({ localStorage: storage }).get(), null, junk);
+    }
+  });
+
+  it("carries on as a guest with no storage to write to", () => {
+    const store = accountStore({ localStorage: REFUSING });
+
+    assert.doesNotThrow(() => store.set("a-session"));
+    assert.doesNotThrow(() => store.clear());
+    assert.equal(store.get(), null);
+
+    const blocked = {
+      get localStorage(): SeatStorage {
+        throw new Error("access is denied");
+      },
+    };
+    assert.equal(accountStore(blocked).get(), null);
+    assert.doesNotThrow(() => accountStore(blocked).set("a-session"));
   });
 });

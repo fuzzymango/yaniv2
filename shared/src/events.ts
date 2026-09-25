@@ -1,3 +1,4 @@
+import type { AccountView, SignedIn, SignInResult } from "./account.ts";
 import type { GameError } from "./errors.ts";
 import type { RoomSettings } from "./settings.ts";
 import type { PlayerGameView } from "./views.ts";
@@ -32,6 +33,41 @@ export interface ResumeRequest {
 }
 
 export interface ClientToServerEvents {
+  /*
+   * The account, from the main menu (docs/adr/0021). A connection's account is bound
+   * independently of any seat it holds — it arrives before any room and survives leaving
+   * one — so every one of these is accepted in any phase, seated or not, and binding an
+   * account over another simply replaces it: unlike a seat, an account binding orphans
+   * nobody. Nothing here changes a seat already taken.
+   *
+   * The session token is a credential with the resume token's treatment: handed over in
+   * the ack of `signIn` or `createAccount` and nowhere else, never in a view.
+   */
+  /**
+   * Present a Google ID token. A known credential is signed in and bound; a new one is
+   * answered `nameNeeded`, and `createAccount` is the step after. Refused with
+   * `INVALID_CREDENTIAL` if Google did not vouch for it.
+   */
+  signIn: (idToken: string, ack: Ack<SignInResult>) => void;
+  /**
+   * The confirm-name step: the same ID token again, and the name chosen. The token is
+   * resent rather than remembered for the connection, so nothing is ever half signed in.
+   * `INVALID_CREDENTIAL`, or `INVALID_NAME` for a name the display-name rule refuses.
+   */
+  createAccount: (idToken: string, displayName: string, ack: Ack<SignedIn>) => void;
+  /**
+   * Present a session token back, on connect, and be bound to its account.
+   * `INVALID_SESSION` if it has lapsed, been signed out, or was never issued.
+   */
+  resumeSession: (sessionToken: string, ack: Ack<{ account: AccountView }>) => void;
+  /** End this connection's session and unbind its account. Fine when there is none. */
+  signOut: (ack: Ack<null>) => void;
+  /**
+   * Change the name the bound account is known by — from the next room on; a seat
+   * already taken keeps the name it was taken under. `INVALID_NAME`, or
+   * `INVALID_SESSION` from a connection not signed in.
+   */
+  renameAccount: (displayName: string, ack: Ack<{ account: AccountView }>) => void;
   /**
    * The ack of the event that seats a player is the one place their resume token is
    * handed over — never a broadcast, never another player's view. See CONTEXT.md.

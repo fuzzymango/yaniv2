@@ -1,12 +1,15 @@
 /**
  * A panel over whatever screen opened it, and the three ways back out of it.
  *
- * Three things are held up behind one of these — what the room's settings are, whether a
- * player means to leave the table, and the match's scorecard — and the only reason they
- * share a component is the part that is not visible: a dialog has to be announced as one,
- * has to take the focus, and has to be dismissable by the backdrop, by a control and by
- * Escape. Two copies of that contract is two places for it to drift, and the half that
- * drifts is the half nobody can see.
+ * Four things are held up behind one of these — what the room's settings are, whether a
+ * player means to leave the table, the match's scorecard, and the name an account goes by —
+ * and the only reason they share a component is the part that is not visible: a dialog has
+ * to be announced as one, has to take the focus, and has to be dismissable by the backdrop,
+ * by a control and by Escape. Two copies of that contract is two places for it to drift, and
+ * the half that drifts is the half nobody can see.
+ *
+ * One of them is dismissable by its control alone (`dismissible`): the name a first sign-in
+ * confirms, where there is no account yet for a stray tap on the backdrop to fall back to.
  *
  * The scorecard's dismissing control lives *outside* the panel, in the bar it was opened
  * from, and that needs nothing here: dismissal has always been a callback, so a control
@@ -44,13 +47,32 @@ interface ModalProps {
    * could see.
    */
   wide?: boolean;
+  /**
+   * Whether the backdrop and Escape close the panel. Default yes, as every panel here but one
+   * wants. The exception is a first sign-in's name (#174 §4): a tap that misses the panel
+   * there would throw away a sign-in Google has just vouched for, so the panel is left only
+   * by a control inside it that says what leaving means — its "Not now".
+   */
+  dismissible?: boolean;
   /** Everything the panel is for, controls included. */
   children: ReactNode;
-  /** The backdrop and Escape both land here. A control inside `children` may too. */
+  /**
+   * The backdrop and Escape both land here, unless the panel is not `dismissible`. A control
+   * inside `children` may too.
+   */
   onDismiss: () => void;
 }
 
-export function Modal({ title, showTitle = true, wide = false, children, onDismiss }: ModalProps) {
+export function Modal({
+  title,
+  showTitle = true,
+  wide = false,
+  dismissible = true,
+  children,
+  onDismiss,
+}: ModalProps) {
+  const dismiss = dismissible ? onDismiss : undefined;
+
   return (
     /*
       Escape is caught here rather than on the window, because the key event reaches this
@@ -60,9 +82,9 @@ export function Modal({ title, showTitle = true, wide = false, children, onDismi
     <div
       className="modal"
       role="presentation"
-      onClick={onDismiss}
+      onClick={dismiss}
       onKeyDown={(event) => {
-        if (event.key === "Escape") onDismiss();
+        if (event.key === "Escape") dismiss?.();
       }}
     >
       <div

@@ -25,8 +25,18 @@ import type { Session } from "./session.ts";
 import { useSession } from "./useSession.ts";
 
 export function App({ session }: { session: Session }) {
-  const { view, error, notice, busy, connected, resuming, selection, flight, announcement } =
-    useSession(session);
+  const {
+    view,
+    account,
+    error,
+    notice,
+    busy,
+    connected,
+    resuming,
+    selection,
+    flight,
+    announcement,
+  } = useSession(session);
 
   /*
    * Before anything else, and whatever position was last drawn: with no socket there is
@@ -49,11 +59,18 @@ export function App({ session }: { session: Session }) {
 
     return (
       <MainMenu
+        account={account}
         error={error}
         notice={notice}
         busy={busy}
         onCreate={session.createRoom}
         onJoin={session.joinRoom}
+        onSignIn={session.signIn}
+        onCreateAccount={session.createAccount}
+        onCancelSignIn={session.cancelSignIn}
+        onRenameAccount={session.renameAccount}
+        onClearError={session.clearError}
+        onSignOut={session.signOut}
       />
     );
   }

@@ -42,6 +42,18 @@ export function markedResumeTokens(): () => string {
   return () => `${RESUME_TOKEN_MARK}${++issued}`;
 }
 
+/** What every session token issued under test starts with — the resume token's sibling. */
+export const SESSION_TOKEN_MARK = "session-token-for-";
+
+/**
+ * A session-token generator under test: `markedResumeTokens`' reasoning, one credential
+ * over. A token nobody can name is a token nobody can prove stayed off the wire.
+ */
+export function markedSessionTokens(): () => string {
+  let issued = 0;
+  return () => `${SESSION_TOKEN_MARK}${++issued}`;
+}
+
 /** Look up a real card by id, so tests never hand-build inconsistent cards. */
 export function card(id: string): Card {
   const found = BY_ID.get(id);
@@ -75,6 +87,8 @@ export interface StateOptions {
     outInRound?: number | null;
     /** They gave their seat up. Implies `outInRound` — set both to pin a left seat down. */
     departed?: boolean;
+    /** The account that took the seat. Omitted means a guest's (or a bot's). */
+    accountId?: string | null;
   }>;
   /** playerId -> card ids. */
   hands?: Record<string, string[]>;
@@ -109,6 +123,7 @@ export function makeState(options: StateOptions = {}): GameState {
     // Derived from the id rather than random, so a leak test can name the exact string
     // it expects never to see. `RESUME_TOKEN_MARK` is what identifies one on the wire.
     resumeToken: `${RESUME_TOKEN_MARK}${p.id}`,
+    accountId: p.accountId ?? null,
   }));
   // Only the seats still in the match are dealt to and take turns — the roster keeps
   // whoever has gone out, in the place they were sitting. docs/rules.md §7.
@@ -283,6 +298,11 @@ export function testClock(): TestClock {
         if (at !== -1) waiting.splice(at, 1);
       };
     },
+    // Wall time, not a hand-driven instant: a timer here fires when the test says so and
+    // no sooner, but what an instant *means* is judged by the profile store against the
+    // wall (`createMemoryProfileStore`), so a clock of its own would issue sessions that
+    // were expired the moment they were written.
+    now: () => Date.now(),
     pending: () => waiting.length,
     delays: () => waiting.map((timer) => timer.ms),
     tick: () => {

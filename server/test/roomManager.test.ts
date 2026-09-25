@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MAX_PLAYERS } from "@yaniv/shared";
 import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "../src/config.ts";
-import { startGame } from "../src/game.ts";
+import { removePlayer, startGame } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { err, ok } from "../src/result.ts";
 import { mulberry32 } from "../src/rng.ts";
@@ -22,7 +22,7 @@ function manager(): RoomManager {
 describe("createRoom", () => {
   it("opens a lobby containing only the host", () => {
     const rooms = manager();
-    const { roomCode, playerId, state } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode, playerId, state } = unwrap(rooms.createRoom("Ada", null));
 
     assert.equal(state.phase, "lobby");
     assert.equal(state.roomCode, roomCode);
@@ -36,7 +36,7 @@ describe("createRoom", () => {
   });
 
   it("issues a code from the unambiguous alphabet", () => {
-    const { roomCode } = unwrap(manager().createRoom("Ada"));
+    const { roomCode } = unwrap(manager().createRoom("Ada", null));
     assert.equal(roomCode.length, ROOM_CODE_LENGTH);
     for (const char of roomCode) {
       assert.ok(ROOM_CODE_ALPHABET.includes(char), `unexpected char ${char}`);
@@ -47,7 +47,7 @@ describe("createRoom", () => {
     const rooms = manager();
     const codes = new Set<string>();
     for (let i = 0; i < 200; i++) {
-      codes.add(unwrap(rooms.createRoom("Ada")).roomCode);
+      codes.add(unwrap(rooms.createRoom("Ada", null)).roomCode);
     }
     assert.equal(codes.size, 200);
     assert.equal(rooms.roomCount, 200);
@@ -55,12 +55,12 @@ describe("createRoom", () => {
 
   it("rejects a blank or oversized name", () => {
     const rooms = manager();
-    expectErr(rooms.createRoom("   "), "INVALID_NAME");
-    expectErr(rooms.createRoom("x".repeat(21)), "INVALID_NAME");
+    expectErr(rooms.createRoom("   ", null), "INVALID_NAME");
+    expectErr(rooms.createRoom("x".repeat(21), null), "INVALID_NAME");
   });
 
   it("trims surrounding whitespace from names", () => {
-    const { state } = unwrap(manager().createRoom("  Ada  "));
+    const { state } = unwrap(manager().createRoom("  Ada  ", null));
     assert.equal(state.players[0]!.name, "Ada");
   });
 });
@@ -68,8 +68,8 @@ describe("createRoom", () => {
 describe("joinRoom", () => {
   it("adds a player to an open lobby", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
-    const { playerId, state } = unwrap(rooms.joinRoom(roomCode, "Grace"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    const { playerId, state } = unwrap(rooms.joinRoom(roomCode, "Grace", null));
 
     assert.deepEqual(
       state.players.map((p) => p.name),
@@ -80,37 +80,37 @@ describe("joinRoom", () => {
   });
 
   it("rejects an unknown room code", () => {
-    expectErr(manager().joinRoom("ZZZZ", "Grace"), "ROOM_NOT_FOUND");
+    expectErr(manager().joinRoom("ZZZZ", "Grace", null), "ROOM_NOT_FOUND");
   });
 
   it("rejects a room at capacity", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Host"));
+    const { roomCode } = unwrap(rooms.createRoom("Host", null));
     for (let i = 1; i < MAX_PLAYERS; i++) {
-      unwrap(rooms.joinRoom(roomCode, `P${i}`));
+      unwrap(rooms.joinRoom(roomCode, `P${i}`, null));
     }
-    expectErr(rooms.joinRoom(roomCode, "TooMany"), "ROOM_FULL");
+    expectErr(rooms.joinRoom(roomCode, "TooMany", null), "ROOM_FULL");
   });
 
   it("rejects joining a game already under way", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
-    unwrap(rooms.joinRoom(roomCode, "Grace"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    unwrap(rooms.joinRoom(roomCode, "Grace", null));
     unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
 
-    expectErr(rooms.joinRoom(roomCode, "Late"), "WRONG_PHASE");
+    expectErr(rooms.joinRoom(roomCode, "Late", null), "WRONG_PHASE");
   });
 
   it("rejects an invalid name", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
-    expectErr(rooms.joinRoom(roomCode, ""), "INVALID_NAME");
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    expectErr(rooms.joinRoom(roomCode, "", null), "INVALID_NAME");
   });
 });
 
 describe("resume tokens", () => {
   it("issues the host one when the room is created", () => {
-    const { state, playerId } = unwrap(manager().createRoom("Ada"));
+    const { state, playerId } = unwrap(manager().createRoom("Ada", null));
 
     const host = state.players.find((p) => p.id === playerId)!;
     assert.equal(host.resumeToken, "token-1");
@@ -118,8 +118,8 @@ describe("resume tokens", () => {
 
   it("issues each joining player their own", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
-    const { state } = unwrap(rooms.joinRoom(roomCode, "Grace"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    const { state } = unwrap(rooms.joinRoom(roomCode, "Grace", null));
 
     const tokens = state.players.map((p) => p.resumeToken);
     assert.deepEqual(tokens, ["token-1", "token-2"]);
@@ -151,8 +151,8 @@ describe("resume tokens", () => {
     const tokens = new Set<string>();
 
     for (let i = 0; i < 200; i++) {
-      const { roomCode, state } = unwrap(rooms.createRoom("Ada"));
-      const guest = unwrap(rooms.joinRoom(roomCode, "Grace")).state.players[1]!;
+      const { roomCode, state } = unwrap(rooms.createRoom("Ada", null));
+      const guest = unwrap(rooms.joinRoom(roomCode, "Grace", null)).state.players[1]!;
       for (const token of [state.players[0]!.resumeToken, guest.resumeToken]) {
         assert.ok(token.length >= 32, `too short to be a secret: ${token}`);
         tokens.add(token);
@@ -165,8 +165,8 @@ describe("resume tokens", () => {
   /** Whole-match fixity is proven over every transition in `integration.test.ts`. */
   it("leaves the seats already taken holding the token they were issued", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
-    unwrap(rooms.joinRoom(roomCode, "Grace"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    unwrap(rooms.joinRoom(roomCode, "Grace", null));
     unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
 
     assert.deepEqual(
@@ -176,10 +176,88 @@ describe("resume tokens", () => {
   });
 });
 
+/**
+ * A seat records the account that took it, or `null` for a guest (docs/adr/0022). Written
+ * once, here, and never again — the whole-match half of that is `integration.test.ts`'s.
+ */
+describe("the account a seat was taken under", () => {
+  it("is recorded on the host's seat and a joiner's, and is null for a guest", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada", "account-ada"));
+    unwrap(rooms.joinRoom(roomCode, "Grace", null));
+    const { state } = unwrap(rooms.joinRoom(roomCode, "Alan", "account-alan"));
+
+    assert.deepEqual(
+      state.players.map((p) => p.accountId),
+      ["account-ada", null, "account-alan"],
+    );
+  });
+
+  it("is null on every bot's seat — a bot is nobody's", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada", "account-ada"));
+    unwrap(
+      rooms.apply(roomCode, (state) =>
+        ok(rooms.seatBots({ ...state, settings: { ...state.settings, botCount: 2 } })),
+      ),
+    );
+
+    assert.deepEqual(
+      rooms.getState(roomCode)!.players.filter((p) => p.isBot).map((p) => p.accountId),
+      [null, null],
+    );
+  });
+
+  /**
+   * The account *is* that seat's credential, so joining again is claiming it back — at
+   * any phase and however full the table, those being refusals of a *new* seat.
+   */
+  it("hands an account back the seat it already holds rather than seating it twice", () => {
+    const rooms = manager();
+    const { roomCode, playerId } = unwrap(rooms.createRoom("Ada", "account-ada"));
+    for (let i = 1; i < MAX_PLAYERS; i++) unwrap(rooms.joinRoom(roomCode, `P${i}`, null));
+    unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
+
+    const again = unwrap(rooms.joinRoom(roomCode, "Anyone", "account-ada"));
+
+    assert.equal(again.playerId, playerId);
+    assert.equal(again.resumed, true);
+    assert.equal(again.resumeToken, "token-1", "the seat's own token, uniformly acked");
+    assert.equal(again.state.players.length, MAX_PLAYERS, "nobody was added");
+    assert.equal(again.state, rooms.getState(roomCode), "and nothing was changed");
+  });
+
+  /**
+   * A departed seat exists only once a match does, so a join that does not resume it is
+   * a join into a match under way — refused, as any latecomer's is. Leaving is final.
+   */
+  it("does not hand back a seat its account gave up", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    unwrap(rooms.joinRoom(roomCode, "Grace", "account-grace"));
+    unwrap(rooms.joinRoom(roomCode, "Alan", null));
+    unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
+    unwrap(rooms.apply(roomCode, (state) => removePlayer(state, "player-2")));
+
+    expectErr(rooms.joinRoom(roomCode, "Grace", "account-grace"), "WRONG_PHASE");
+  });
+
+  it("does not hand one account another account's seat, or a guest's", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada", "account-ada"));
+    unwrap(rooms.joinRoom(roomCode, "Grace", null));
+
+    const joined = unwrap(rooms.joinRoom(roomCode, "Alan", "account-alan"));
+
+    assert.equal(joined.resumed, false);
+    assert.equal(joined.state.players.length, 3);
+  });
+});
+
 describe("seatBots", () => {
   it("seats nobody when botCount is zero — a freshly created room's default", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
 
     const state = rooms.seatBots(rooms.getState(roomCode)!);
 
@@ -277,7 +355,7 @@ describe("seatBots", () => {
   /** Nothing is stored until a caller folds the result into a transition. */
   it("does not seat anyone in the stored room by itself", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
 
     rooms.seatBots(rooms.getState(roomCode)!);
 
@@ -288,7 +366,7 @@ describe("seatBots", () => {
 describe("isBot", () => {
   it("marks only the bot seats as bot-controlled", () => {
     const rooms = manager();
-    const { roomCode, playerId: hostId } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode, playerId: hostId } = unwrap(rooms.createRoom("Ada", null));
     unwrap(
       rooms.apply(roomCode, (state) =>
         ok(rooms.seatBots({ ...state, settings: { ...state.settings, botCount: 1 } })),
@@ -302,7 +380,7 @@ describe("isBot", () => {
 
   it("reports a player id it has never heard of as not a bot", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
 
     assert.equal(rooms.isBot(roomCode, "nobody"), false);
     assert.equal(rooms.isBot("ZZZZ", "nobody"), false);
@@ -312,8 +390,8 @@ describe("isBot", () => {
 describe("apply", () => {
   it("persists the new state when the transition succeeds", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
-    unwrap(rooms.joinRoom(roomCode, "Grace"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    unwrap(rooms.joinRoom(roomCode, "Grace", null));
 
     unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
 
@@ -324,7 +402,7 @@ describe("apply", () => {
 
   it("leaves the stored state untouched when the transition fails", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
     const before = rooms.getState(roomCode);
 
     // Only one player, so starting is rejected.
@@ -338,7 +416,7 @@ describe("apply", () => {
 
   it("does not store a state produced by a rejecting transition", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
     const before = rooms.getState(roomCode)!;
 
     rooms.apply(roomCode, (state) => {
@@ -351,7 +429,7 @@ describe("apply", () => {
 
   it("threads the room's own rng into the transition", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
     let sawRng = false;
     unwrap(
       rooms.apply(roomCode, (state, rng) => {
@@ -373,23 +451,23 @@ describe("apply", () => {
 describe("room removal", () => {
   it("forgets a removed room", () => {
     const rooms = manager();
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
     assert.equal(rooms.roomCount, 1);
 
     rooms.removeRoom(roomCode);
 
     assert.equal(rooms.roomCount, 0);
     assert.equal(rooms.getState(roomCode), undefined);
-    expectErr(rooms.joinRoom(roomCode, "Grace"), "ROOM_NOT_FOUND");
+    expectErr(rooms.joinRoom(roomCode, "Grace", null), "ROOM_NOT_FOUND");
   });
 });
 
 describe("room isolation", () => {
   it("keeps each room's state fully independent", () => {
     const rooms = manager();
-    const a = unwrap(rooms.createRoom("Ada"));
-    const b = unwrap(rooms.createRoom("Grace"));
-    unwrap(rooms.joinRoom(a.roomCode, "Alan"));
+    const a = unwrap(rooms.createRoom("Ada", null));
+    const b = unwrap(rooms.createRoom("Grace", null));
+    unwrap(rooms.joinRoom(a.roomCode, "Alan", null));
 
     assert.equal(rooms.getState(a.roomCode)!.players.length, 2);
     assert.equal(rooms.getState(b.roomCode)!.players.length, 1);
