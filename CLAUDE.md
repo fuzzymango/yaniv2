@@ -377,7 +377,8 @@ so tests can stand up a real server on an ephemeral port (`listen(0)`) without d
 handler logic — `socketServer.test.ts` drives real `socket.io-client` connections rather than a
 stub, this layer's whole job *being* its wire behaviour, and observes server-side facts through
 the socket rather than by asking `RoomManager`. `options` carries the clock every room timer is
-set on and the bot think time, both defaulted, so production construction is unchanged.
+set on, the bot think time, the verifier, the session-token generator and the `log` a dropped
+Yaniv-call write is reported to, all defaulted, so production construction is unchanged.
 
 ### There are two ways to boot, and the command says which
 

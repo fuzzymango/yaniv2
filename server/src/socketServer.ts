@@ -721,8 +721,10 @@ export function createSocketServer(
         (seat, state) => {
           const accountId = accountToCredit(state, seat.playerId);
           if (accountId === null) return;
-          profiles
-            .recordYanivCall(accountId)
+          // Called from inside a `.then`, so a store that throws rather than rejecting
+          // lands in the same `.catch` instead of out of this handler.
+          Promise.resolve()
+            .then(() => profiles.recordYanivCall(accountId))
             .catch((error: unknown) =>
               log(`Counting a Yaniv call for account ${accountId} failed:`, error),
             );

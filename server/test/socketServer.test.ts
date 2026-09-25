@@ -4026,7 +4026,7 @@ describe("a Yaniv call counted on the caller's account", () => {
     for (const harness of opened) await harness.close();
   });
 
-  interface Table {
+  interface Player {
     client: ClientSocket;
     watcher: Watcher;
     playerId: string;
@@ -4040,8 +4040,9 @@ describe("a Yaniv call counted on the caller's account", () => {
    */
   async function sitDown(
     profiles: ProfileStore,
-    { signedIn = true, ...options }: { signedIn?: boolean } & SocketServerOptions = {},
-  ): Promise<Table> {
+    signedIn = true,
+    options: SocketServerOptions = {},
+  ): Promise<Player> {
     const harness = await startServer(
       7,
       3,
@@ -4073,48 +4074,54 @@ describe("a Yaniv call counted on the caller's account", () => {
    * answering each call's verdict — so a test can ask for a call that was Assafed without
    * knowing in advance which round that will be.
    */
-  async function playUntil(t: Table, done: (calls: Calls) => boolean): Promise<Calls> {
+  async function playUntil(player: Player, done: (calls: Calls) => boolean): Promise<Calls> {
     const calls: Calls = { mine: [], bots: [] };
 
     for (let step = 0; step < 3000; step++) {
-      const current = await t.watcher.until(
+      const current = await player.watcher.until(
         (v) =>
           v.phase !== "lobby" &&
-          (v.phase !== "playing" || v.currentTurnPlayerId === t.playerId),
+          (v.phase !== "playing" || v.currentTurnPlayerId === player.playerId),
         "the player to be needed",
       );
-      t.watcher.reset();
+      player.watcher.reset();
 
       if (current.phase === "roundEnd") {
         const result = current.roundResult!;
-        (result.callerId === t.playerId ? calls.mine : calls.bots).push(result);
+        (result.callerId === player.playerId ? calls.mine : calls.bots).push(result);
         if (done(calls)) return calls;
-        expectOk(await ask(t.client, "startNextRound"));
+        expectOk(await ask(player.client, "startNextRound"));
         continue;
       }
       assert.equal(current.phase, "playing", "the match ended first");
 
       const decision = decideTurn(current);
       if (decision.type === "yaniv") {
-        expectOk(await ask(t.client, "callYaniv"));
+        expectOk(await ask(player.client, "callYaniv"));
       } else {
-        expectOk(await ask(t.client, "takeTurn", decision.action));
+        expectOk(await ask(player.client, "takeTurn", decision.action));
       }
     }
     assert.fail("the table never called the rounds under test");
   }
 
-  /** The memory store, with every account a Yaniv call was written to recorded in order. */
-  function spiedStore(): { profiles: ProfileStore; written: string[] } {
-    const store = createMemoryProfileStore();
-    const written: string[] = [];
+  /**
+   * The memory store with its Yaniv-call write replaced, and every account that write was
+   * asked for recorded in order — whatever the replacement then does with it. The
+   * replacement is handed the store underneath, which is where the accounts are.
+   */
+  function storeWith(
+    recordYanivCall: (id: string, memory: ProfileStore) => Promise<void>,
+  ): { profiles: ProfileStore; asked: string[] } {
+    const memory = createMemoryProfileStore();
+    const asked: string[] = [];
     return {
-      written,
+      asked,
       profiles: {
-        ...store,
+        ...memory,
         recordYanivCall: (id) => {
-          written.push(id);
-          return store.recordYanivCall(id);
+          asked.push(id);
+          return recordYanivCall(id, memory);
         },
       },
     };
@@ -4122,46 +4129,46 @@ describe("a Yaniv call counted on the caller's account", () => {
 
   it("counts a signed-in player's call on their account", async () => {
     const profiles = createMemoryProfileStore();
-    const t = await sitDown(profiles);
+    const player = await sitDown(profiles);
 
-    await playUntil(t, ({ mine }) => mine.length === 1);
+    await playUntil(player, ({ mine }) => mine.length === 1);
 
-    assert.equal((await profiles.loadAccount(t.accountId!))!.yanivCalls, 1);
+    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, 1);
   });
 
   it("counts a call that was Assafed exactly as one that stood", async () => {
     const profiles = createMemoryProfileStore();
-    const t = await sitDown(profiles);
+    const player = await sitDown(profiles);
 
     const { mine } = await playUntil(
-      t,
+      player,
       ({ mine }) =>
         mine.some((r) => r.assaferId !== null) && mine.some((r) => r.assaferId === null),
     );
 
-    assert.equal((await profiles.loadAccount(t.accountId!))!.yanivCalls, mine.length);
+    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, mine.length);
   });
 
   it("writes nothing for a bot's call", async () => {
-    const { profiles, written } = spiedStore();
-    const t = await sitDown(profiles);
+    const { profiles, asked } = storeWith((id, memory) => memory.recordYanivCall(id));
+    const player = await sitDown(profiles);
 
-    const { mine, bots } = await playUntil(
-      t,
+    const { mine } = await playUntil(
+      player,
       ({ mine, bots }) => mine.length > 0 && bots.length > 0,
     );
 
-    assert.ok(bots.length > 0);
-    assert.deepEqual(written, mine.map(() => t.accountId));
+    assert.deepEqual(asked, mine.map(() => player.accountId));
+    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, mine.length);
   });
 
   it("writes nothing for a guest's call", async () => {
-    const { profiles, written } = spiedStore();
-    const t = await sitDown(profiles, { signedIn: false });
+    const { profiles, asked } = storeWith(async () => {});
+    const player = await sitDown(profiles, false);
 
-    await playUntil(t, ({ mine }) => mine.length === 2);
+    await playUntil(player, ({ mine }) => mine.length === 2);
 
-    assert.deepEqual(written, []);
+    assert.deepEqual(asked, []);
   });
 
   /**
@@ -4170,19 +4177,12 @@ describe("a Yaniv call counted on the caller's account", () => {
    * the next round is dealt and played — bots and all — over the writes still pending.
    */
   it("holds up nothing when the store never answers", async () => {
-    const asked: string[] = [];
-    const profiles: ProfileStore = {
-      ...createMemoryProfileStore(),
-      recordYanivCall: (id) => {
-        asked.push(id);
-        return new Promise(() => {});
-      },
-    };
-    const t = await sitDown(profiles);
+    const { profiles, asked } = storeWith(() => new Promise(() => {}));
+    const player = await sitDown(profiles);
 
-    const { mine } = await playUntil(t, ({ mine }) => mine.length === 2);
+    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
 
-    assert.deepEqual(asked, mine.map(() => t.accountId), "the store was asked, and hung");
+    assert.deepEqual(asked, mine.map(() => player.accountId), "the store was asked, and hung");
   });
 
   /**
@@ -4193,18 +4193,34 @@ describe("a Yaniv call counted on the caller's account", () => {
   it("logs a failed write naming the account, and plays on", async () => {
     const logged: unknown[][] = [];
     const failure = new Error("the database is down");
-    const profiles: ProfileStore = {
-      ...createMemoryProfileStore(),
-      recordYanivCall: () => Promise.reject(failure),
-    };
-    const t = await sitDown(profiles, { log: (...args) => logged.push(args) });
+    const { profiles } = storeWith(() => Promise.reject(failure));
+    const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
 
-    const { mine } = await playUntil(t, ({ mine }) => mine.length === 2);
+    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
 
     assert.equal(logged.length, mine.length);
     for (const entry of logged) {
-      assert.ok(String(entry[0]).includes(t.accountId!), "the log names the account");
+      assert.ok(String(entry[0]).includes(player.accountId!), "the log names the account");
       assert.ok(entry.includes(failure), "and carries the failure");
     }
+  });
+
+  /**
+   * `ProfileStore` promises a promise, and both shipped stores keep that by being `async`
+   * — but an implementation that threw before returning one would otherwise throw out of
+   * the handler, past the `.catch` meant for it. The same answer, whichever way it fails.
+   */
+  it("logs a store that throws rather than rejecting, and plays on", async () => {
+    const logged: unknown[][] = [];
+    const failure = new Error("thrown, not rejected");
+    const { profiles } = storeWith(() => {
+      throw failure;
+    });
+    const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
+
+    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+
+    assert.equal(logged.length, mine.length);
+    assert.ok(logged.every((entry) => entry.includes(failure)));
   });
 });
