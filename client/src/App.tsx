@@ -69,6 +69,7 @@ export function App({ session }: { session: Session }) {
         onCreateAccount={session.createAccount}
         onCancelSignIn={session.cancelSignIn}
         onRenameAccount={session.renameAccount}
+        onClearError={session.clearError}
         onSignOut={session.signOut}
       />
     );

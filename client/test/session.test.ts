@@ -2974,6 +2974,30 @@ describe("an account", () => {
     }
   });
 
+  /*
+   * What the rename panel does on its way in and out: a refusal it was showing is about a
+   * question nobody is asking once it closes, and one left over from the menu is not an
+   * answer about a name — so neither is carried across the panel's edge.
+   */
+  it("lets go of a refusal once it has been read, and of nothing else", async () => {
+    const server = await startServer(7);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      const standing = session.getSnapshot().account;
+      session.renameAccount("   ");
+      assert.equal(session.getSnapshot().error?.code, "INVALID_NAME");
+
+      session.clearError();
+
+      const after = session.getSnapshot();
+      assert.equal(after.error, null);
+      assert.equal(after.account, standing, "the rename panel it was asked from stays open");
+      assert.equal(after.busy, false, "nothing was sent");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("seats a signed-in player under their account's name, asking them for none", async () => {
     const server = await startServer(7);
     try {

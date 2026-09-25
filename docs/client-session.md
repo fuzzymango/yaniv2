@@ -149,6 +149,12 @@ not sent over a dead socket: the next connection would arrive bound to no accoun
 server would have no session to end. A `renameAccount` refused `INVALID_SESSION` lands where a
 lapsed session does, below.
 
+**A refusal is put down when the panel that asked for it closes.** `cancelSignIn` clears `error`
+on its way back to a guest, and `clearError` — nothing sent, nothing else touched, the account
+standing included — is the rename panel's way in and out: a refusal left over from the menu is
+no answer about a name, and one the panel was showing is about a question nobody is asking once
+it has closed. Neither panel is the session's; the menu decides when they open.
+
 ## Claiming an account and a seat back
 
 **Every connect presents the session first, then the seat** (docs/adr/0022): the seat may be the

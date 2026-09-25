@@ -134,7 +134,7 @@ export function loadGoogleIdentity<Tag extends ScriptTag>(
  * and as wide as the column it sits in — which GIS takes as a number of pixels between these
  * two and nothing relative, so it is measured and clamped rather than stated.
  */
-const BUTTON = {
+const BUTTON_OPTIONS = {
   type: "standard",
   theme: "filled_black",
   size: "large",
@@ -150,7 +150,7 @@ export const BUTTON_MAX_WIDTH = 400;
  * `initialize`, and warns when that is called twice — so it is called once, with a callback
  * that forwards to whichever button was drawn last.
  */
-const routes = new WeakMap<object, { onCredential: (idToken: string) => void }>();
+const credentialRoutes = new WeakMap<object, { onCredential: (idToken: string) => void }>();
 
 /**
  * Draw Google's button into `slot`, `width` pixels wide as near as GIS allows, sending the ID
@@ -163,12 +163,12 @@ export function renderSignInButton<Slot>(
   width: number,
   onCredential: (idToken: string) => void,
 ): void {
-  const existing = routes.get(identity);
+  const existing = credentialRoutes.get(identity);
   if (existing) {
     existing.onCredential = onCredential;
   } else {
     const route = { onCredential };
-    routes.set(identity, route);
+    credentialRoutes.set(identity, route);
     identity.initialize({
       client_id: GOOGLE_CLIENT_ID,
       callback: ({ credential }) => {
@@ -177,5 +177,5 @@ export function renderSignInButton<Slot>(
     });
   }
   const clamped = Math.round(Math.min(BUTTON_MAX_WIDTH, Math.max(BUTTON_MIN_WIDTH, width)));
-  identity.renderButton(slot, { ...BUTTON, width: clamped });
+  identity.renderButton(slot, { ...BUTTON_OPTIONS, width: clamped });
 }

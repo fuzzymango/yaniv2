@@ -16,9 +16,9 @@
  *
  * **The panel shows the session's `error` while it is open**, and the menu behind it shows
  * none: a refused name is about what was typed here, and one message belongs in the one
- * place the player is looking — the trick `App.tsx` uses for `GameEnd`. Only once this panel
- * has sent something, though, so a refusal left over from the menu (a code nobody is behind)
- * is not read as an answer about a name.
+ * place the player is looking — the trick `App.tsx` uses for `GameEnd`. Nothing left over
+ * from the menu is here to be misread as an answer about a name: the session puts it down as
+ * either panel opens (`signIn` sending, `clearError` for a rename).
  *
  * The draft is this component's own, on the settings editor's precedent: a name half-typed
  * is no use outside the panel holding it.
@@ -52,7 +52,6 @@ export function NameDialog({
   onDismiss,
 }: NameDialogProps) {
   const [name, setName] = useState(suggestedName);
-  const [sent, setSent] = useState(false);
 
   return (
     <Modal
@@ -70,7 +69,6 @@ export function NameDialog({
         className="modal__form"
         onSubmit={(event) => {
           event.preventDefault();
-          setSent(true);
           onSave(name);
         }}
       >
@@ -99,7 +97,7 @@ export function NameDialog({
         </div>
       </form>
 
-      {sent && error && (
+      {error && (
         <p className="notice notice--error" role="alert">
           {error.message}
         </p>

@@ -69,6 +69,8 @@ body {
 /* --- main menu --- */
 
 .menu {
+  /* The corner Sign out is pinned against — see `.menu__sign-out`. */
+  position: relative;
   justify-content: center;
 }
 
@@ -139,10 +141,6 @@ body {
  * words, there being no icon for "sign out" that reads as nothing else. Pinned rather than
  * placed in the column, so the menu below it stays centred exactly as a guest's is.
  */
-.menu {
-  position: relative;
-}
-
 .menu__sign-out {
   position: absolute;
   top: max(0.5rem, env(safe-area-inset-top));

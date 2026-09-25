@@ -48,6 +48,7 @@ interface MainMenuProps {
   onCreateAccount: (displayName: string) => void;
   onCancelSignIn: () => void;
   onRenameAccount: (displayName: string) => void;
+  onClearError: () => void;
   onSignOut: () => void;
 }
 
@@ -62,6 +63,7 @@ export function MainMenu({
   onCreateAccount,
   onCancelSignIn,
   onRenameAccount,
+  onClearError,
   onSignOut,
 }: MainMenuProps) {
   const [name, setName] = useState("");
@@ -74,6 +76,10 @@ export function MainMenu({
    * suite), so the panel closes on the answer that means "done" and stays up to show the
    * one that means "not that", with no effect watching for either. Signing out or being
    * signed out replaces it too, which closes a panel with no account left to rename.
+   *
+   * The refusal on screen is put down on the way in and on the way out, as "Not now" does
+   * for the confirm step: one left over from the menu is no answer about a name, and one
+   * the panel was showing is about a question nobody is asking once it has closed.
    */
   const [renamingFrom, setRenamingFrom] = useState<AccountStanding | null>(null);
 
@@ -102,7 +108,10 @@ export function MainMenu({
         error={error}
         busy={busy}
         onSave={onRenameAccount}
-        onDismiss={() => setRenamingFrom(null)}
+        onDismiss={() => {
+          onClearError();
+          setRenamingFrom(null);
+        }}
       />
     ) : null;
 
@@ -147,7 +156,10 @@ export function MainMenu({
               className="button"
               type="button"
               aria-haspopup="dialog"
-              onClick={() => setRenamingFrom(account)}
+              onClick={() => {
+                onClearError();
+                setRenamingFrom(account);
+              }}
               disabled={busy}
             >
               Change name

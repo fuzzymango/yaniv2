@@ -285,6 +285,13 @@ export interface Session {
   /** Change the account's name, from the next room on. Signed in only. */
   renameAccount: (displayName: string) => void;
   /**
+   * Put the refusal on screen down, with nothing sent: the player has read it, and the
+   * question it answered is no longer being asked. The rename panel's way in and out —
+   * `cancelSignIn` already does this for the confirm step — so a refused name is not left
+   * at the foot of the menu after the panel that asked it has closed.
+   */
+  clearError: () => void;
+  /**
    * Sign out, from the main menu: both credentials forgotten, Google told not to sign
    * straight back in, and a guest from here on. No confirmation — no room is on screen,
    * and signing back in is one tap.
@@ -1026,6 +1033,10 @@ export function createSession(
           settle(result.error);
         }),
       );
+    },
+
+    clearError: () => {
+      if (snapshot.error !== null) publish({ error: null });
     },
 
     cancelSignIn: () => {
