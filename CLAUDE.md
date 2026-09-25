@@ -513,6 +513,16 @@ still undone in it, and hand size 6 would snap back to 5 a moment after the host
 That draft stays in the component, as does whether the modal is open: a form half-filled in is
 no use outside the screen holding it.
 
+### The main menu signs a player in, and asks nobody else
+
+The one screen where identity is asked about (#174): signed out, Google's button tops the form
+and a guest is told nothing else; signed in, "Playing as" and Change name replace the name
+field and Sign out sits in the corner, **on this screen only** — it forgets the seat too. The
+name panel is one `NameDialog` for a first sign-in (`Modal`'s `dismissible={false}`, with a
+"Not now") and a rename; while it is open it shows `error` and the menu none. Google's script
+is fetched when the signed-out form mounts and a failure draws **nothing** (`google.ts`,
+docs/adr/0020) — sign-in is an option, never a wall.
+
 ### The client's session core
 
 The browser client's logic lives in `client/src/session.ts`, a plain module outside React that

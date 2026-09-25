@@ -2948,6 +2948,32 @@ describe("an account", () => {
     }
   });
 
+  /*
+   * The rename panel closes on exactly this — the standing it was opened over being
+   * replaced — so it is pinned here rather than left an accident of `publish`: a panel
+   * answered by a refusal has to stay up to say so, and one answered by the new name has
+   * to go, even when the new name is the old one.
+   */
+  it("replaces the standing a rename was asked over only when the rename lands", async () => {
+    const server = await startServer(7);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      const asked = session.getSnapshot().account;
+
+      session.renameAccount("   ");
+      assert.equal(session.getSnapshot().error?.code, "INVALID_NAME");
+      assert.equal(session.getSnapshot().account, asked, "refused: the same standing");
+
+      session.renameAccount("Ada");
+      const renamed = await settled(session, "renameAccount's ack");
+      assert.equal(renamed.error, null);
+      assert.notEqual(renamed.account, asked, "landed, if to the very same name: a new one");
+      assert.deepEqual(renamed.account, asked);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("seats a signed-in player under their account's name, asking them for none", async () => {
     const server = await startServer(7);
     try {

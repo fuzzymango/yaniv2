@@ -93,6 +93,81 @@ body {
   text-align: center;
 }
 
+/*
+ * Google's button, drawn by Google's script into this slot (docs/adr/0020). Empty until the
+ * script lands and empty for good where it cannot, and an empty slot is out of the form's
+ * flow altogether — otherwise the form's gap would leave a hole where a button would have
+ * been, which is the one thing a player on a network that blocks Google must not be shown.
+ */
+.menu__google {
+  display: flex;
+  justify-content: center;
+}
+
+.menu__google:empty {
+  display: none;
+}
+
+/*
+ * Who a signed-in player is playing as, where the name field would be: the same height as
+ * the field it replaces, so the doors below it are exactly where they always are.
+ */
+.menu__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  min-height: var(--tap);
+}
+
+.menu__playing-as {
+  margin: 0;
+  color: var(--ink-dim);
+  /* A twenty-character name with no spaces in it still has to fit a phone. */
+  overflow-wrap: anywhere;
+}
+
+.menu__name {
+  color: var(--ink);
+  font-size: 1.15rem;
+}
+
+/*
+ * Sign out, in the corner of the menu and on no other screen (#174 §2). Small and dim, like
+ * the in-match corner icons, because it is there to be found rather than noticed — but in
+ * words, there being no icon for "sign out" that reads as nothing else. Pinned rather than
+ * placed in the column, so the menu below it stays centred exactly as a guest's is.
+ */
+.menu {
+  position: relative;
+}
+
+.menu__sign-out {
+  position: absolute;
+  top: max(0.5rem, env(safe-area-inset-top));
+  right: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0 0.75rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.menu__sign-out:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.menu__sign-out:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -668,6 +743,13 @@ body {
 
 .modal__choice > .button {
   flex: 1;
+}
+
+/* A field and its answers, asked in a panel: spaced as the panel's own children are. */
+.modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 /* --- cards, drawn rather than loaded --- */

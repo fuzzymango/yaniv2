@@ -271,16 +271,22 @@ applies nothing.
 
 Sign-in is Google's (`docs/adr/0020`), through an OAuth **Web** client whose ID is committed as
 `GOOGLE_CLIENT_ID` in `shared/src/config.ts` — public by design, and read by both the button and
-the server's audience check. No environment variable. Its Authorized JavaScript origins list the
-production host and `http://localhost:5173` / `http://localhost:3000`, so a new hostname is an
-edit in the Google Cloud console; accounts are keyed on Google's `sub` and survive it.
+the server's audience check. No environment variable. Setting one up, in the Google Cloud
+console: an OAuth consent screen asking for `openid email profile` and nothing else, **published**
+(Testing caps the app at 100 users; with only those scopes publishing needs no verification);
+then a Web client ID whose Authorized JavaScript origins list the production host and
+`http://localhost:5173` / `http://localhost:3000`, and its ID pasted into `config.ts`. A new
+hostname is an edit to that list — accounts are keyed on Google's `sub` and survive it — and a
+missing origin shows up as a button that renders but refuses, with `The given origin is not
+allowed` in the browser console. The browser fetches Google's script only when the main menu
+draws a signed-out form; where it cannot, there is simply no button and the game plays on.
 
 ## Not yet built
 
 Persistence for rooms (they are in-memory, so a restart or redeploy drops games in progress;
 accounts are not, and live in Postgres), and any policy for a seat whose player never comes
 back. A match plays end to end in the browser now:
-create or join, set the room up, deal, take turns, watch a run of bot turns a move at a time,
+sign in with Google or don't, create or join, set the room up, deal, take turns, watch a run of bot turns a move at a time,
 call Yaniv, and finish on the standings with another match one tap away. Reconnect is whole — a
 drop leaves the room and the seat alone, and the page presents the seat's token and picks up
 where it left off, whether the socket came back or the whole tab did. What is missing is what
