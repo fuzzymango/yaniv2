@@ -19,9 +19,12 @@ export function createDeck(): Card[] {
   return cards;
 }
 
-/** Fisher-Yates. Returns a new array; the input is not mutated. */
-export function shuffle(cards: readonly Card[], rng: Rng): Card[] {
-  const out = cards.slice();
+/**
+ * Fisher-Yates. Returns a new array; the input is not mutated. Generic because the deck
+ * is not the only thing drawn at random: `startGame` shuffles the roster with it too.
+ */
+export function shuffle<T>(items: readonly T[], rng: Rng): T[] {
+  const out = items.slice();
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
     const a = out[i]!;

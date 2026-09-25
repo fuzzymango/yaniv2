@@ -1376,8 +1376,11 @@ describe("startGame", () => {
 describe("playing a match", () => {
   let table: Harness;
 
+  // A seed whose deal opens on the host and never knocks them out while bots play on,
+  // which is what every test below is written against. Re-chosen when the seating became
+  // a draw of its own (docs/rules.md §2), that draw moving every seed's deal along.
   before(async () => {
-    table = await startServer(4242, MAX_PLAYERS - 1, { thinkTimeMs: 0 }, SHORT_MATCH);
+    table = await startServer(29, MAX_PLAYERS - 1, { thinkTimeMs: 0 }, SHORT_MATCH);
   });
   after(async () => {
     await table.close();
@@ -1416,11 +1419,13 @@ describe("playing a match", () => {
 
     await watcher.until((v) => v.currentTurnPlayerId === me, "the turn to come back");
 
-    // One broadcast per turn taken — the player's, then each bot's, in seating order.
+    // One broadcast per turn taken — the player's, then each bot's, in seating order,
+    // counted round the table from wherever the deal seated the player (docs/rules.md §2).
     // A single collapsed update would show only the last of these.
+    const mine = view.turnOrder.indexOf(me);
     assert.deepEqual(
       watcher.seen.map((v) => v.currentTurnPlayerId),
-      [...view.turnOrder.slice(1), me],
+      [...view.turnOrder.slice(mine + 1), ...view.turnOrder.slice(0, mine), me],
     );
 
     // How long the chain takes is not this test's subject: this server is built with
@@ -2363,8 +2368,11 @@ describe("slapping down", () => {
      * whose humans are all out has nobody left who may deal the next round
      * (docs/adr/0012) — and the fishing below would stall there, on a rule this suite is
      * not about.
+     *
+     * And no bots: the fishing needs Grace to play directly after Ada, which a table of
+     * two is whatever the seating the deal draws (docs/rules.md §2).
      */
-    table = await startServer(20250811, undefined, undefined, LONG_MATCH);
+    table = await startServer(20250811, 0, undefined, LONG_MATCH);
   });
   after(async () => {
     await table.close();
@@ -2574,10 +2582,10 @@ describe("slapping down", () => {
    * The race, resolved by nothing more than the order the two events arrive in
    * (ADR-0005). Losing it looks exactly like never having had a window.
    *
-   * Either refusal counts, and the pair is the whole set: the seat after Grace's is a bot
-   * playing on a zero pause, so it may have called Yaniv and scored the round out from
-   * under the slap before it landed. That is the same news to Ada — the window is spent
-   * and her hand is untouched, which is what the assertions below actually turn on.
+   * Either refusal counts, and the pair is the whole set: the round may have been scored
+   * out from under the slap before it landed. That is the same news to Ada — the window
+   * is spent and her hand is untouched, which is what the assertions below actually turn
+   * on.
    */
   it("turns away a slap the next player's turn got in ahead of", async () => {
     const { ada, grace, adaView, graceView } = await playToAnOpenWindow();
@@ -2639,26 +2647,27 @@ describe("slapping down", () => {
    * The serializer is unit tested for this; here it is the wire that is under test.
    * An open window says its holder drew a rank they had just discarded, so it must
    * never appear in anyone else's payload, in any shape.
+   *
+   * Grace's own windows are hers to be told about — at a table of two she opens them too,
+   * fishing — so what is checked on her side is her view of the position Ada's window is
+   * open in, and that no opponent entry ever carries the flag at all.
    */
   it("never tells the rest of the table that a window is open", async () => {
-    const { ada, grace } = await playToAnOpenWindow();
+    const { ada, grace, adaView, graceView } = await playToAnOpenWindow();
 
+    assert.ok(slapdownOpen(adaView), "Ada really was told about her own window");
+    assert.equal(slapdownOpen(graceView), false, "Grace was told about Ada's window");
     assert.ok(
-      ada.heard.some((v) => slapdownOpen(v)),
-      "Ada really was told about her own window",
+      !JSON.stringify(graceView).includes('"slapdownEligible":true'),
+      "Ada's open window leaked into Grace's payload",
     );
-    for (const view of grace.heard) {
-      assert.equal(slapdownOpen(view), false, "Grace was told about a window");
+    for (const view of [...ada.heard, ...grace.heard]) {
       for (const opponent of view.opponents) {
         assert.ok(
           !("slapdownEligible" in opponent),
           "an opponent arrived carrying an eligibility flag",
         );
       }
-      assert.ok(
-        !JSON.stringify(view).includes('"slapdownEligible":true'),
-        "an open window leaked into Grace's payload",
-      );
     }
   });
 
@@ -2715,6 +2724,15 @@ describe("bot think time", () => {
     expectOk(await ask(client, "startGame"));
     const view = await watcher.until((v) => v.phase === "playing", "the deal");
     return { close: harness.close, clock, client, watcher, me: playerId, view };
+  }
+
+  /**
+   * The seat `n` places behind the human in turn order. Counted from the human rather than
+   * from the front, the seating being drawn at the deal (docs/rules.md §2).
+   */
+  function behind(t: Table, n: number): string {
+    const order = t.view.turnOrder;
+    return order[(order.indexOf(t.me) + n) % order.length]!;
   }
 
   /**
@@ -2792,7 +2810,7 @@ describe("bot think time", () => {
         1,
         "the bot moved in the same tick as the turn that handed it over",
       );
-      assert.equal(handedOver.currentTurnPlayerId, t.view.turnOrder[1]);
+      assert.equal(handedOver.currentTurnPlayerId, behind(t, 1));
     } finally {
       await t.close();
     }
@@ -2809,7 +2827,7 @@ describe("bot think time", () => {
 
       assert.equal(
         played.currentTurnPlayerId,
-        t.view.turnOrder[2],
+        behind(t, 2),
         "the first bot played and handed on to the second",
       );
     } finally {
@@ -2835,7 +2853,7 @@ describe("bot think time", () => {
 
       assert.deepEqual(
         seats,
-        [...t.view.turnOrder.slice(2), t.me],
+        [2, 3, 4, 5, 6].map((n) => behind(t, n)),
         "each bot in turn, and the turn back to the human",
       );
       assert.equal(t.clock.pending(), 0, "nothing is left thinking behind the human");
@@ -3018,8 +3036,14 @@ describe("bot think time", () => {
 describe("resumeSeat", () => {
   let table: Harness;
 
+  /*
+   * One bot, so the human the tables below are played by cannot be knocked out while play
+   * goes on without them — which would leave nobody able to deal the next round
+   * (docs/adr/0012) and `playTo` stalled short of `gameEnd`. With a bot, the first
+   * elimination is the match's end, whatever the seed deals.
+   */
   before(async () => {
-    table = await startServer(4242);
+    table = await startServer(4242, 1);
   });
   after(async () => {
     await table.close();
