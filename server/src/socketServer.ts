@@ -41,16 +41,15 @@ import { createRoomSweeper, unattended } from "./roomSweep.ts";
 import { createRoomTimers } from "./roomTimers.ts";
 import type { Rng } from "./rng.ts";
 import { serializeStateForPlayer } from "./serialize.ts";
-import type { ActionResult, GameState } from "./state.ts";
-import type { Player } from "./state.ts";
+import type { ActionResult, GameState, Player } from "./state.ts";
 import { getPlayer } from "./state.ts";
 
 /**
  * Which seat a connection holds. Set once, when the connection creates, joins or resumes a
  * seat in a room, and read by every in-game handler thereafter — a client-supplied player
  * id is never trusted, or a socket could act as any player simply by saying so.
- * `resumeSeat` is no exception: what it trusts is the token presented alongside the id,
- * not the id.
+ * `resumeSeat` is no exception: what it trusts is the credential behind the id — the token
+ * for a guest's seat, the bound account for an account's — never the id.
  *
  * Stored as one optional object rather than two optional fields so a half-bound
  * connection (a room without a player, or the reverse) is unrepresentable. Called `seat`
@@ -387,6 +386,10 @@ export function createSocketServer(
      * matter; a seat it held is this connection's to claim, by its account.
      */
     function bindAccount(account: AccountView, sessionToken: string): void {
+      // Every bind lands after an await on the store. A connection that went in the
+      // meantime — the old tab of a reload, answered last — binds nothing, or it would put
+      // down the live tab that has taken its place, and nothing reconnects that one.
+      if (!socket.connected) return;
       socket.data.account = {
         accountId: account.id,
         displayName: account.displayName,
@@ -471,8 +474,9 @@ export function createSocketServer(
     }
 
     /**
-     * Whether this connection may take back `player`'s seat: the whole of the claim rule,
-     * and its shape is the point (docs/adr/0022). An account seat is its account's — the
+     * Whether this connection may take back `player`'s seat by `resumeSeat`: the claim
+     * rule, and its shape is the point (docs/adr/0022). `joinRoom`'s hand-back is the same
+     * rule's account half, asked by `RoomManager` of the seats in one room. An account seat is its account's — the
      * token, issued for a uniform seat and a uniform ack, is not consulted, so a token left
      * in a shared browser after signing out claims nothing. A guest seat is its token's,
      * exactly as before an account existed, whoever is signed in on the connection: signing
@@ -574,7 +578,7 @@ export function createSocketServer(
      * been given up and a seat that is somebody else's share a single code, or a room code
      * would become a way of fishing for the seats behind it — and for which are accounts'.
      *
-     * That last case is checked here rather than left to the client forgetting its
+     * A seat given up is checked here rather than left to the client forgetting its
      * credential: a roster is append-only from the first deal, so a departed seat and its
      * token now outlive the player, and a stale tab holding one would otherwise rebind to
      * a seat its owner gave up and be handed every broadcast after it. Leaving is final,

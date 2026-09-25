@@ -196,10 +196,11 @@ describe("the account a seat was taken under", () => {
   it("is null on every bot's seat — a bot is nobody's", () => {
     const rooms = manager();
     const { roomCode } = unwrap(rooms.createRoom("Ada", "account-ada"));
-    unwrap(rooms.apply(roomCode, (state) => ok(rooms.seatBots({
-      ...state,
-      settings: { ...state.settings, botCount: 2 },
-    }))));
+    unwrap(
+      rooms.apply(roomCode, (state) =>
+        ok(rooms.seatBots({ ...state, settings: { ...state.settings, botCount: 2 } })),
+      ),
+    );
 
     assert.deepEqual(
       rooms.getState(roomCode)!.players.filter((p) => p.isBot).map((p) => p.accountId),

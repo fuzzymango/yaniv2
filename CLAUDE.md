@@ -265,10 +265,10 @@ object rather than two optional fields, so a half-bound connection is unrepresen
 (docs/adr/0022): "session" already meant the main menu's session core, and the session token
 made it three.
 
-**`socket.data.account = { accountId, displayName, sessionToken }` sits beside it, independent**: an account
-binds at the main menu before any room and survives leaving one. Five acked events drive it —
-`signIn`, `createAccount`, `resumeSession`, `signOut`, `renameAccount` (docs/adr/0021) — no
-HTTP surface and no `handshake.auth`. Each handler is a flow from `auth/flows.ts` and a binding,
+**`socket.data.account = { accountId, displayName, sessionToken }` sits beside it,
+independent**: an account binds at the main menu before any room and survives leaving one. Five
+acked events drive it — `signIn`, `createAccount`, `resumeSession`, `signOut`, `renameAccount`
+(docs/adr/0021) — no HTTP surface and no `handshake.auth`. Each handler is a flow from `auth/flows.ts` and a binding,
 holding no auth logic; all five are accepted seated or not, and **binding an account over
 another replaces it** without error, an account binding orphaning nobody. **Newer wins at
 bind**: binding an account puts down any other connection bound to it. The session token
@@ -292,9 +292,9 @@ one place, the ack of the event that seated them.
 **`Player.accountId: string | null` is who took the seat**, fixed at seating like the token
 (docs/adr/0022): a signed-in `createRoom`/`joinRoom` seats under the account's display name,
 the payload's name ignored, and signing in while seated binds the connection, never the seat.
-**A seat is claimed back by whoever took it** — `mayClaim` in `socketServer.ts`, one
-expression: an account seat by the connection's account, its token never consulted; a guest
-seat by its token. `joinRoom` by an account already seated there hands that seat back. It is
+**A seat is claimed back by whoever took it** — `mayClaim` in `socketServer.ts`, a departed
+guard and one ternary: an account seat by the connection's account, its token never consulted;
+a guest seat by its token. `joinRoom` by an account already seated there hands that seat back. It is
 on both views and is the only account fact any view carries.
 
 ### Room lifecycle
@@ -326,8 +326,8 @@ starts the room's grace period (docs/adr/0015). Whoever dropped comes back throu
 **`resumeSeat({ roomCode, playerId, resumeToken })`**: seat rebound, room rejoined, the
 position answered in the ack and the room published to behind it. A wrong token, an unknown
 player, a seat given up and somebody else's seat share `INVALID_RESUME_TOKEN`, or a room code
-would be a way of fishing for the seats behind it. One live connection per seat: a resume disconnects whatever
-socket still held it.
+would be a way of fishing for the seats behind it. One live connection per seat: a resume
+disconnects whatever socket still held it.
 
 ### The host owns the lobby, and leaving costs nobody else anything
 

@@ -34,7 +34,7 @@ import { io as connectClient, type Socket as ClientSocket } from "socket.io-clie
 import { decideTurn } from "../src/bot.ts";
 import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
-import { createMemoryProfileStore } from "../src/profiles.ts";
+import { createMemoryProfileStore, type ProfileStore } from "../src/profiles.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import type { SocketServerOptions } from "../src/socketServer.ts";
@@ -100,12 +100,15 @@ const LONG_MATCH: Partial<RoomSettings> = { maxScore: MAX_SCORE_LIMITS.max };
  * left rather than when the first goes over (docs/rules.md §7), so at the default limit a
  * full table has to be knocked out one seat at a time — a great many rounds over a real
  * socket, for no coverage the same match at a lower limit does not give.
+ *
+ * `profiles` is the in-memory store unless a suite needs one that answers when it says.
  */
 async function startServer(
   seed?: number,
   botCount = MAX_PLAYERS - 1,
   timing: SocketServerOptions = { thinkTimeMs: 0 },
   settings: Partial<RoomSettings> = {},
+  profiles: ProfileStore = createMemoryProfileStore(),
 ): Promise<Harness> {
   const httpServer = createServer();
   // Every seat this server issues holds a marked token, so a leak test can grep a payload
@@ -124,7 +127,7 @@ async function startServer(
   // The in-memory store, which is what the repo's tests run against (docs/adr/0019); a
   // fake Google; and marked session tokens, for the reason the resume tokens are marked.
   const google = fakeVerifier();
-  const io = createSocketServer(httpServer, rooms, createMemoryProfileStore(), {
+  const io = createSocketServer(httpServer, rooms, profiles, {
     verifier: google,
     newSessionToken: markedSessionTokens(),
     ...timing,
@@ -1005,6 +1008,47 @@ describe("a seat claimed by whoever took it", () => {
 
       expectOk(await ask(client, "resumeSession", account.sessionToken));
       expectOk(await ask(client, "renameAccount", "Still here"));
+    });
+
+    /**
+     * A reload races its own dead socket: the old tab's `resumeSession` may still be with
+     * the store when the new tab's is answered, and a store may answer out of order. The
+     * old request resolving last must bind nothing — otherwise it would put down the live
+     * tab, which socket.io-client does not reconnect, and strand the player.
+     */
+    it("binds nothing for a connection that went while the store was answering", async () => {
+      const memory = createMemoryProfileStore();
+      let held: Promise<void> | null = null;
+      let answer = () => {};
+      const slow = await startServer(undefined, MAX_PLAYERS - 1, { thinkTimeMs: 0 }, {}, {
+        ...memory,
+        findSession: async (tokenHash) => {
+          if (held) await held;
+          return memory.findSession(tokenHash);
+        },
+      });
+      try {
+        const account = await signUp(await slow.connect(), "Ada", slow);
+
+        held = new Promise((resolve) => (answer = resolve));
+        const dead = await slow.connect();
+        dead.emit("resumeSession", account.sessionToken, () => {});
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        dead.disconnect();
+        const pending = held;
+        held = null;
+
+        const live = await slow.connect();
+        expectOk(await ask(live, "resumeSession", account.sessionToken));
+        answer();
+        await pending;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        assert.ok(live.connected, "the live tab was not put down");
+        expectOk(await ask(live, "renameAccount", "Still here"));
+      } finally {
+        await slow.close();
+      }
     });
 
     it("hands the seat over too, which the newer connection then sits back down at", async () => {
