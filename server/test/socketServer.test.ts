@@ -773,8 +773,9 @@ describe("session tokens on the wire", () => {
 /**
  * A seat is bound to one identity for life and claimed back by that one (docs/adr/0022): a
  * guest seat by its resume token, exactly as before, and an account seat by its account,
- * the token issued and never consulted. The whole check is
- * `player.accountId ? account === player.accountId : token === player.resumeToken`.
+ * the token issued and never consulted. The rule's cases are `roomManager.test.ts`'s
+ * (`claimSeat`); what is left here proves the wiring — that the claimant is built from the
+ * connection's account binding and the payload's token, and a refusal reaches the wire.
  */
 describe("a seat claimed by whoever took it", () => {
   interface Seating {
@@ -887,68 +888,12 @@ describe("a seat claimed by whoever took it", () => {
       assert.equal(view.you.accountId, seat.account.account.id);
     });
 
-    it("refuses an account seat to its own token, presented by a guest", async () => {
-      const seat = await accountSeat();
-      seat.client.disconnect();
-
-      const guest = await server.connect();
-      assert.equal(expectError(await resume(guest, seat)).code, "INVALID_RESUME_TOKEN");
-    });
-
-    it("refuses an account seat to another account, token and all", async () => {
-      const seat = await accountSeat();
-      seat.client.disconnect();
-
-      const other = await server.connect();
-      await signUp(other, "Mallory");
-      assert.equal(expectError(await resume(other, seat)).code, "INVALID_RESUME_TOKEN");
-    });
-
-    /** The cost ADR-0022 accepts: a signed-out reload cannot claim what the account took. */
-    it("refuses an account seat to a connection whose account signed out", async () => {
-      const seat = await accountSeat();
-      seat.client.disconnect();
-
-      const returning = await signedInAs(seat.account.sessionToken);
-      expectOk(await ask(returning, "signOut"));
-      assert.equal(expectError(await resume(returning, seat)).code, "INVALID_RESUME_TOKEN");
-    });
-
     it("hands a guest seat back to its token, exactly as before", async () => {
       const seat = await guestSeat();
       seat.client.disconnect();
 
       const returning = await server.connect();
       assert.equal(expectOk(await resume(returning, seat)).view.you.id, seat.playerId);
-    });
-
-    /**
-     * Signing in while seated as a guest binds the connection, not the seat — so the seat
-     * is still its token's, and a reload that has since signed in gets it back by that.
-     */
-    it("hands a guest seat back to its token whoever is signed in on the connection", async () => {
-      const seat = await guestSeat();
-      await signUp(seat.client, "Grace");
-      seat.client.disconnect();
-
-      const returning = await server.connect();
-      await signUp(returning, "Somebody");
-      const { view } = expectOk(await resume(returning, seat));
-
-      assert.equal(view.you.id, seat.playerId);
-      assert.equal(view.you.accountId, null, "still a guest seat");
-    });
-
-    it("refuses a guest seat to a signed-in connection with the wrong token", async () => {
-      const seat = await guestSeat();
-      seat.client.disconnect();
-
-      const returning = await server.connect();
-      await signUp(returning, "Grace");
-      assert.equal(
-        expectError(await resume(returning, { ...seat, resumeToken: "not-the-token" })).code,
-        "INVALID_RESUME_TOKEN",
-      );
     });
 
     /**

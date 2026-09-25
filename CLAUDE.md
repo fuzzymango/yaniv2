@@ -294,10 +294,14 @@ one place, the ack of the event that seated them.
 **`Player.accountId: string | null` is who took the seat**, fixed at seating like the token
 (docs/adr/0022): a signed-in `createRoom`/`joinRoom` seats under the account's display name,
 the payload's name ignored, and signing in while seated binds the connection, never the seat.
-**A seat is claimed back by whoever took it** — `mayClaim` in `socketServer.ts`, a departed
-guard and one ternary: an account seat by the connection's account, its token never consulted;
-a guest seat by its token. `joinRoom` by an account already seated there hands that seat back. It is
-on both views and is the only account fact any view carries.
+**A seat is claimed back by whoever took it** — `claims` in `roomManager.ts`, a departed
+guard and one ternary over the seat and a `Claimant` (account or none, token or none): an
+account seat by its account, its token never consulted; a guest seat by its token. It is the
+one statement of the rule: `resumeSeat` asks it through `claimSeat`, and `joinRoom` presents
+the account with no token, so an account already seated there is handed that seat back and a
+guest never is. The socket layer only builds the claimant from the connection's account
+binding, never the payload. `accountId` is on both views and is the only account fact any
+view carries.
 
 ### Room lifecycle
 

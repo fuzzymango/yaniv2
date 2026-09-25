@@ -36,13 +36,13 @@ import {
 } from "./game.ts";
 import type { AccountId, ProfileStore } from "./profiles.ts";
 import { err, ok, type Result } from "./result.ts";
-import type { RoomManager } from "./roomManager.ts";
+import type { Claimant, RoomManager } from "./roomManager.ts";
 import { createRoomSweeper, unattended } from "./roomSweep.ts";
 import { createRoomTimers } from "./roomTimers.ts";
 import type { Rng } from "./rng.ts";
 import { serializeStateForPlayer } from "./serialize.ts";
 import { statsEarned } from "./stats.ts";
-import type { ActionResult, GameState, Player } from "./state.ts";
+import type { ActionResult, GameState } from "./state.ts";
 import { getPlayer } from "./state.ts";
 
 /**
@@ -510,21 +510,13 @@ export function createSocketServer(
     }
 
     /**
-     * Whether this connection may take back `player`'s seat by `resumeSeat`: the claim
-     * rule, and its shape is the point (docs/adr/0022). `joinRoom`'s hand-back is the same
-     * rule's account half, asked by `RoomManager` of the seats in one room. An account seat is its account's — the
-     * token, issued for a uniform seat and a uniform ack, is not consulted, so a token left
-     * in a shared browser after signing out claims nothing. A guest seat is its token's,
-     * exactly as before an account existed, whoever is signed in on the connection: signing
-     * in while seated as a guest bound the connection, never the seat.
-     *
-     * A seat given up is nobody's: leaving is final, and the server is what says so.
+     * Who this connection presents itself as to a seat that already exists: the account
+     * bound to it — never one named in a payload — and whatever token it holds. Whether
+     * that is enough is `RoomManager`'s to judge (`claims`, docs/adr/0022); this only says
+     * who is asking.
      */
-    function mayClaim(player: Player, resumeToken: string): boolean {
-      if (player.departed) return false;
-      return player.accountId !== null
-        ? socket.data.account?.accountId === player.accountId
-        : resumeToken === player.resumeToken;
+    function claimant(resumeToken: string | null): Claimant {
+      return { accountId: socket.data.account?.accountId ?? null, resumeToken };
     }
 
     socket.on("createRoom", async (playerName, ack) => {
@@ -606,19 +598,13 @@ export function createSocketServer(
      * Take back a seat that already exists. The credential is the whole of the check:
      * a player id is public — it names opponents in every view — so presenting one
      * proves nothing, and what says this connection is entitled to the seat behind it is
-     * the token for a guest's seat and the bound account for an account's (`mayClaim`).
+     * the token for a guest's seat and the bound account for an account's. That judgement,
+     * and which refusals share a code, is `RoomManager.claimSeat`'s; this handler binds.
      *
-     * A room that has gone is said so plainly, since `joinRoom` already answers that
-     * question for any code and there is nothing left to withhold. What is inside one is
-     * a different matter: a wrong token, a player the room never held, a seat that has
-     * been given up and a seat that is somebody else's share a single code, or a room code
-     * would become a way of fishing for the seats behind it — and for which are accounts'.
-     *
-     * A seat given up is checked here rather than left to the client forgetting its
-     * credential: a roster is append-only from the first deal, so a departed seat and its
-     * token now outlive the player, and a stale tab holding one would otherwise rebind to
-     * a seat its owner gave up and be handed every broadcast after it. Leaving is final,
-     * and the server is what says so.
+     * A seat given up is refused by the server rather than left to the client forgetting
+     * its credential: a roster is append-only from the first deal, so a departed seat and
+     * its token outlive the player, and a stale tab holding one would otherwise rebind to
+     * a seat its owner gave up and be handed every broadcast after it.
      *
      * The position goes back in the ack, and the room is published to behind it: a seat
      * that was away is being sat back down at, which is news to everyone looking at that
@@ -633,17 +619,12 @@ export function createSocketServer(
       }
 
       const { roomCode, playerId, resumeToken } = request;
-      const state = rooms.getState(roomCode);
-      if (!state) {
-        ack(err("ROOM_NOT_FOUND", `No room with code ${roomCode}`));
+      const claimed = rooms.claimSeat(roomCode, playerId, claimant(resumeToken));
+      if (!claimed.ok) {
+        ack({ ok: false, error: claimed.error });
         return;
       }
-
-      const player = getPlayer(state, playerId);
-      if (!player || !mayClaim(player, resumeToken)) {
-        ack(err("INVALID_RESUME_TOKEN", "That seat cannot be resumed"));
-        return;
-      }
+      const state = claimed.value;
 
       socket.data.seat = { playerId, roomCode };
       await socket.join(roomCode);

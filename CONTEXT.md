@@ -550,6 +550,12 @@ answers `INVALID_RESUME_TOKEN`. Distinct from joining, which admits somebody new
 that an account joining a room it already holds a seat in is handed that seat back. A seat
 holds one live connection, so a resume puts down whatever socket was still holding it.
 
+**Claim** — presenting an identity for a seat that already exists: resuming it, or an account
+joining a room it already sits in. Both ways in are judged by one rule — a seat given up is
+nobody's, an account seat is its account's, a guest seat is its token's — and a claim either
+hands the seat back or is refused. _Avoid_: reclaim, rebind — a claim is what is judged; binding
+the connection is what follows one that succeeds.
+
 ## Play again
 
 Starts a fresh match in the same room, for the same seated players (minus anyone who has
