@@ -531,10 +531,10 @@ identity. Nine fields, each answering a different question: `view` (null *is* th
 **one-shots**, `flight` and `announcement`. **No credential is on it**: the Google ID token a
 first sign-in resends is held privately, and the session token sits in a second injected store
 beside the seat's (`tokens.ts`). A cold boot resumes the **account, then the seat**, `resuming`
-up across both. **`busy` locks on emit
-and settles two ways** — on the ack for entering, leaving, the five account events and anything
-producing a new position, on a strictly newer position for a move — so a control is never released over a position still
-showing the mover's own turn. **The client never enforces a rule the server owns**: what is
+up across both. **`busy` locks on emit and settles two ways** — on the ack for entering,
+leaving, the five account events and anything producing a new position, on a strictly newer
+position for a move — so a control is never released over a position still showing the
+mover's own turn. **The client never enforces a rule the server owns**: what is
 legal about the cards is all it applies ahead of the server (ADR-0002), and everything else it
 offers is sent and refused.
 

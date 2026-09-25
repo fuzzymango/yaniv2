@@ -57,9 +57,9 @@ export type YanivClientSocket = Socket<ServerToClientEvents, ClientToServerEvent
  * CONTEXT.md). Storing them as one thing is the same reasoning that makes the socket
  * layer's session one optional object — a half-remembered seat is unrepresentable.
  *
- * Injected rather than reached for, exactly as the socket is: storage is the one global
- * anything below `main.tsx` would otherwise want, and nothing below it is allowed to hold
- * one — which is what keeps this module testable with no browser anywhere in it. The real
+ * Injected rather than reached for, exactly as the socket is: storage is one of the
+ * globals anything below `main.tsx` would otherwise want (Google's script is the other),
+ * and nothing below it is allowed to hold one — which is what keeps this module testable with no browser anywhere in it. The real
  * one is `seatStore` in `tokens.ts`, handed over in `main.tsx`; a session given none simply
  * holds its seat for as long as the page is open.
  */
@@ -435,7 +435,7 @@ const SESSION_LAPSED = "You've been signed out. Sign in again to pick up where y
 
 export function createSession(
   socket: YanivClientSocket,
-  { seat: tokens = NO_STORE, account: accounts = NO_ACCOUNT, google = NO_GOOGLE }:
+  { seat: tokens = NO_STORE, account: sessionTokens = NO_ACCOUNT, google = NO_GOOGLE }:
     SessionOptions = {},
 ): Session {
   let snapshot: SessionSnapshot = {
@@ -591,7 +591,7 @@ export function createSession(
    * socket. The server's binding does not: an account is bound to a *connection*, so every
    * connection that comes back presents this again before it claims anything.
    */
-  let sessionToken: string | null = accounts.get();
+  let sessionToken: string | null = sessionTokens.get();
 
   /**
    * The Google ID token of a sign-in waiting on its name, and nothing otherwise. Held here
@@ -601,12 +601,16 @@ export function createSession(
    */
   let idToken: string | null = null;
 
-  /** Signed in: the account on the snapshot, the session kept both ways. */
-  const signedIn = (next: AccountView, issued: string | null = null): AccountStanding => {
+  /**
+   * Signed in: what goes on the snapshot for it, and — as the name's verb says — the
+   * bookkeeping behind it done on the way: the ID token let go of, and a newly issued
+   * session kept both ways.
+   */
+  const signInAs = (next: AccountView, issued: string | null = null): AccountStanding => {
     idToken = null;
     if (issued !== null) {
       sessionToken = issued;
-      accounts.set(issued);
+      sessionTokens.set(issued);
     }
     return { status: "signedIn", account: next };
   };
@@ -615,7 +619,7 @@ export function createSession(
   const forgetAccount = (): void => {
     sessionToken = null;
     idToken = null;
-    accounts.clear();
+    sessionTokens.clear();
   };
 
   /**
@@ -655,7 +659,7 @@ export function createSession(
 
     socket.emit("resumeSession", presenting, (result) => {
       if (result.ok) {
-        publish({ account: signedIn(result.value.account) });
+        publish({ account: signInAs(result.value.account) });
         claimSeat(null);
         return;
       }
@@ -675,8 +679,7 @@ export function createSession(
   const claimSeat = (news: string | null): void => {
     const claiming = seat;
     if (claiming === null) {
-      leaveTable(news ?? (lostARoom ? UNAVAILABLE : null));
-      lostARoom = false;
+      landOnMenu(news);
       return;
     }
 
@@ -714,7 +717,8 @@ export function createSession(
    * because nothing ends one that way any more (docs/adr/0012): a room ends when its last
    * seat leaves, and that seat is the one leaving. What is left of that case is a seat
    * that cannot be claimed back when the connection returns, which `claimSeat` answers
-   * with `UNAVAILABLE`.
+   * with `UNAVAILABLE` — or with `SESSION_LAPSED`, where the account it was claimed as
+   * had been refused first.
    */
 
   /**
@@ -728,6 +732,16 @@ export function createSession(
    * costs nothing and is worth saying nothing about.
    */
   let lostARoom = false;
+
+  /**
+   * Where a returning connection with no seat to claim ends up: the main menu, carrying
+   * whatever news it came back with, or — failing any — told of a table it never learned
+   * the credential for. The one place `lostARoom` is spent.
+   */
+  const landOnMenu = (news: string | null): void => {
+    leaveTable(news ?? (lostARoom ? UNAVAILABLE : null), true);
+    lostARoom = false;
+  };
 
   /**
    * The socket has gone. Every control on the screen is now dead, whatever it looks like
@@ -759,7 +773,7 @@ export function createSession(
    * Retries fire this once each, and only the first is news.
    *
    * A claim comes down with it exactly as it does on a drop — a page that came up on a
-   * stored seat and found no server has asked nobody anything, and leaving `resuming` up
+   * stored account or seat and found no server has asked nobody anything, and leaving `resuming` up
    * would be a claim in flight over a socket that has never reached a server.
    */
   socket.on("connect_error", () => {
@@ -770,13 +784,15 @@ export function createSession(
   /**
    * The socket is back — with a new identity, since a connection is not what the server
    * knows a player by, and the seat it left behind is still there to be claimed. So the
-   * first thing a returning connection does is ask for it, leaving the position on the
-   * screen exactly where it was: nothing about the table has changed, and replacing it
+   * first thing a returning connection does is ask for it — after the account, when there
+   * is one, the server's account binding having died with the old socket (`reclaim`) —
+   * leaving the position on the screen exactly where it was: nothing about the table has changed, and replacing it
    * with the main menu for the length of a round trip would be throwing away the very
    * thing being asked for.
    *
    * The main menu is the fallback and not the rule now: it is where a connection with no
-   * seat to claim lands, told why if it had a table it never learned the name of. That
+   * seat to claim lands (`landOnMenu`), told why if it had a table it never learned the
+   * name of, or if the account it came back as was refused. That
    * branch is a race too narrow for the suite to provoke deliberately — it needs the socket
    * to go inside the gap between the lobby broadcast and the ack behind it — and it is kept
    * because the alternative is putting a player back on the menu with nothing said at all.
@@ -789,13 +805,8 @@ export function createSession(
     const returning = !snapshot.connected;
     if (!returning && !snapshot.resuming) return;
 
-    if (seat !== null || sessionToken !== null) {
-      reclaim(true);
-      return;
-    }
-
-    leaveTable(lostARoom ? UNAVAILABLE : null, true);
-    lostARoom = false;
+    if (seat !== null || sessionToken !== null) reclaim(true);
+    else landOnMenu(null);
   });
 
   /**
@@ -979,7 +990,7 @@ export function createSession(
           }
           const answer = result.value;
           if (answer.status === "signedIn") {
-            publish({ account: signedIn(answer.account, answer.sessionToken), busy: false });
+            publish({ account: signInAs(answer.account, answer.sessionToken), busy: false });
             return;
           }
           // Held for `createAccount` to resend, and only once Google has vouched for it.
@@ -1002,7 +1013,7 @@ export function createSession(
         socket.emit("createAccount", presenting, name, (result) => {
           if (result.ok) {
             const { account, sessionToken: issued } = result.value;
-            publish({ account: signedIn(account, issued), busy: false });
+            publish({ account: signInAs(account, issued), busy: false });
             return;
           }
           // A refused name leaves the step open, the token still good for a better one. A
@@ -1031,7 +1042,7 @@ export function createSession(
       accountEvent(() =>
         socket.emit("renameAccount", name, (result) => {
           if (result.ok) {
-            publish({ account: signedIn(result.value.account), error: null, busy: false });
+            publish({ account: signInAs(result.value.account), error: null, busy: false });
             return;
           }
           // The server holds no account for this connection, whatever the screen says: the
@@ -1057,9 +1068,15 @@ export function createSession(
      * a notice for nothing on the next boot. Forgotten before the emit — the local half
      * cannot fail, and a reload in the meantime must not sign back in — and a guest on the
      * snapshot from the same moment, the socket having nothing to say that could change it.
+     *
+     * Not over a socket that is down, either: the emit would wait for the next connection,
+     * which arrives bound to no account — the session already forgotten here, so nothing
+     * resumes it — and the server would have no session left to end. The row would outlive
+     * the sign-out by its thirty days. The disconnected screen covers the menu meanwhile,
+     * so this is a tap nobody can make; the guard is what makes that a fact.
      */
     signOut: () => {
-      if (snapshot.view !== null) return;
+      if (snapshot.view !== null || !socket.connected) return;
       accountEvent(() => {
         forget();
         forgetAccount();

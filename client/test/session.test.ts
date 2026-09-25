@@ -3023,6 +3023,33 @@ describe("an account", () => {
     }
   });
 
+  it("does not sign out over a connection that is down", async () => {
+    const server = await startServer(7);
+    try {
+      const account = fakeAccount();
+      const { google, disabled } = fakeGoogle();
+      const session = await signUp(
+        server,
+        { sub: "google-ada", name: "Ada" },
+        { account: account.store, google },
+      );
+      server.drop(session);
+      await waitForSnapshot(session, "the drop", (s) => !s.connected);
+
+      // Sent now, it would reach the next connection bound to no account, and the server
+      // would have no session left to end: the row would outlive the sign-out by a month.
+      session.signOut();
+
+      const after = session.getSnapshot();
+      assert.equal(after.busy, false, "nothing was sent into the dead socket");
+      assert.equal(after.account.status, "signedIn");
+      assert.ok(account.stored(), "and nothing forgotten that the server still holds");
+      assert.equal(disabled(), 0);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("stays signed in when the connection drops and comes back", async () => {
     const server = await startServer(7);
     try {

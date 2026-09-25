@@ -35,7 +35,8 @@ identity. Nine fields, and each answers a different question:
   per-seat `connected`). See "A session that loses its socket" below.
 - **`resuming`** — an account or a seat is being claimed back and the answer has not landed.
   Always rides with `busy`, and says what `busy` cannot: a null view is a table (or an account)
-  still being asked for rather than the main menu. See "Claiming a seat back" below.
+  still being asked for rather than the main menu. See "Claiming a seat back" and "Claiming an
+  account and a seat back" below.
 - **`selection`** — the cards tapped for the next turn, by id, in tap order. Here rather than in a
   component because it has to survive views arriving underneath it: `retainSelection` on every
   broadcast of a position still being played drops whatever has left the hand, which is also what
@@ -51,10 +52,10 @@ identity. Nine fields, and each answers a different question:
   one-shot in the same place, asking `announcement.ts` — which keys on the **scorecard growing**,
   never on a round result standing. See "Call announcement" in `CONTEXT.md` and docs/adr/0018.
 
-**`busy` locks on emit, and settles two different ways.** Entering or leaving a room, and all
-five account events, settle on the **ack** — the account events producing no position at all, so
-there is no newer broadcast to wait for: entry has been broadcast before it is acked, and a departing
-connection is published to no longer. So do dealing the next round, dealing another match,
+**`busy` locks on emit, and settles two different ways.** Entering or leaving a room settles
+on the **ack**: entry has been broadcast before it is acked, and a departing connection is
+published to no longer. All five account events settle on the ack too, producing no position at
+all, so there is no newer broadcast to wait for. So do dealing the next round, dealing another match,
 and editing the room's settings, which produce a position rather than moving within one —
 and, in the settings case, none at all when refused, since a rejected edit is broadcast to
 nobody. A **move settles on a strictly newer position** — a turn, the Yaniv call that replaces
@@ -94,8 +95,11 @@ itself. The CLI needs those nudges only because its frames scroll apart.
 **The client never enforces a rule the server owns.** Showing the start control to the host
 alone is a courtesy, so a guest is not hunting for a button that was never theirs; the rule is
 `NOT_HOST` and the server says it. The deal is the same — drawn for a viewer still in the match,
-enforced by `NOT_IN_MATCH`. Refusing an unusable name — for a room, or for an account — is the one exception,
-the rule being `shared`'s (ADR-0002).
+enforced by `NOT_IN_MATCH`. Refusing an unusable name — for a room, or for an account — is the
+one exception, the rule being `shared`'s (ADR-0002). What the client declines to *send* for its
+own sake is another thing: sign-out off the menu or over a dead socket, and the account events
+from a standing that has nothing to send (no name to confirm, no account to rename) — see
+"Accounts" below.
 
 ## Claiming a seat back
 
@@ -113,9 +117,9 @@ forgotten in exactly two cases: the player's own `exitToMenu`, and a claim the s
 **A dropped connection is pointedly not one of them.**
 
 A claim goes out on session creation (a stored seat, i.e. a cold boot) and on every
-reconnect, and **nothing is emitted into a socket that is down**: socket.io would buffer it,
+reconnect — behind the account's, where there is one (see "Claiming an account and a seat back") — and **nothing is emitted into a socket that is down**: socket.io would buffer it,
 the `connect` handler sends one anyway, and the second is answered `ALREADY_IN_ROOM` — a
-refusal indistinguishable from a seat that has gone. So `claimSeat` publishes `resuming` and
+refusal indistinguishable from a seat that has gone. So `reclaim` publishes `resuming` and
 emits only if `socket.connected`; `resuming` and `connected` go up in one publish, or a
 screen would read the moment between them as the main menu. A refused claim clears the
 credential and lands on `view: null` with one `notice` — the same sentence a room that has
@@ -140,8 +144,10 @@ ignores a signed-in payload's name anyway (docs/adr/0022).
 **Sign-out is the main menu's.** It sends nothing from a table (#174 §2): it forgets **both**
 keys (docs/adr/0020), and at a table the seat is the one being sat in. Both are cleared before
 the emit and Google's `disableAutoSelect()` is called — injected as `GoogleSignIn`, `google.ts`
-being the one file that knows `window.google` — so a reload mid-flight cannot sign back in. A
-`renameAccount` refused `INVALID_SESSION` lands where a lapsed session does, below.
+being the one file that knows `window.google` — so a reload mid-flight cannot sign back in. It is
+not sent over a dead socket: the next connection would arrive bound to no account and the
+server would have no session to end. A `renameAccount` refused `INVALID_SESSION` lands where a
+lapsed session does, below.
 
 ## Claiming an account and a seat back
 
@@ -166,8 +172,8 @@ announcing a lost connection for the first moment of every load would be crying 
 straight back down.** `disconnect` drops the watermark and releases `busy` — nothing is in flight
 over a socket that is not there, a claim included — but leaves the view alone, that screen being
 over it anyway and very likely the position still there on return. The *reconnect* claims the seat
-rather than clearing anything: `connect` sends `resumeSeat` with the credential the session holds,
-and the position comes back in the ack. The main menu is the fallback for a returning connection
+rather than clearing anything: `connect` sends `resumeSession` if the page is signed in, then
+`resumeSeat` with the credential the session holds, and the position comes back in the ack. The main menu is the fallback for a returning connection
 with no seat to claim; a drop at the menu costs nothing and says nothing.
 
 **A connection that never arrived is the same screen.** `connect_error` is treated the way
