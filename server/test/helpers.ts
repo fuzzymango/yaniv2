@@ -87,6 +87,8 @@ export interface StateOptions {
     outInRound?: number | null;
     /** They gave their seat up. Implies `outInRound` — set both to pin a left seat down. */
     departed?: boolean;
+    /** The account that took the seat. Omitted means a guest's (or a bot's). */
+    accountId?: string | null;
   }>;
   /** playerId -> card ids. */
   hands?: Record<string, string[]>;
@@ -121,6 +123,7 @@ export function makeState(options: StateOptions = {}): GameState {
     // Derived from the id rather than random, so a leak test can name the exact string
     // it expects never to see. `RESUME_TOKEN_MARK` is what identifies one on the wire.
     resumeToken: `${RESUME_TOKEN_MARK}${p.id}`,
+    accountId: p.accountId ?? null,
   }));
   // Only the seats still in the match are dealt to and take turns — the roster keeps
   // whoever has gone out, in the place they were sitting. docs/rules.md §7.

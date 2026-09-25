@@ -499,18 +499,21 @@ describe("signing in", () => {
     assert.deepEqual(expectOk(await ask(client, "renameAccount", " Countess ")), {
       account: renamed,
     });
-    assert.deepEqual(expectOk(await resumeFresh(created.sessionToken)), {
+
+    // The next visit, which takes the account over from this one (newer wins at bind).
+    const next = await server.connect();
+    assert.deepEqual(expectOk(await ask(next, "resumeSession", created.sessionToken)), {
       account: renamed,
     });
 
-    assert.equal(expectOk(await ask(client, "signOut")), null);
+    assert.equal(expectOk(await ask(next, "signOut")), null);
     assert.equal(
       expectError(await resumeFresh(created.sessionToken)).code,
       "INVALID_SESSION",
       "a signed-out session resumes nobody",
     );
     assert.equal(
-      expectError(await ask(client, "renameAccount", "Ada")).code,
+      expectError(await ask(next, "renameAccount", "Ada")).code,
       "INVALID_SESSION",
       "and the connection is no longer anybody's",
     );
@@ -718,15 +721,17 @@ describe("session tokens on the wire", () => {
     await graceViews.until((v) => v.phase === "playing", "grace's deal");
     await recorded("ada", ada, "renameAccount", "Countess");
 
-    // A second tab: resumed, then signed in afresh with a session of its own.
+    // A second tab: resumed — taking the account, and so the seat, over from the first —
+    // then signed in afresh with a session of its own, and sat back down at the table.
     const tab = await connect("ada's second tab");
     expectOk(await recorded("tab", tab, "resumeSession", created.sessionToken));
     const again = expectOk(await recorded<SignInResult>("tab", tab, "signIn", "id-token-sweep"));
     assert.equal(again.status, "signedIn");
     if (again.status !== "signedIn") return;
+    expectOk(await recorded("tab", tab, "joinRoom", roomCode, "Ada"));
 
-    await recorded("ada", ada, "signOut");
-    await recorded("ada", ada, "exitToMenu");
+    await recorded("tab", tab, "signOut");
+    await recorded("tab", tab, "exitToMenu");
     await graceViews.until((v) => v.opponents.some((o) => o.departed), "ada gone");
 
     for (const [token, issuedBy] of [
@@ -744,6 +749,338 @@ describe("session tokens on the wire", () => {
       2,
       "no other session token reached any payload",
     );
+  });
+});
+
+/**
+ * A seat is bound to one identity for life and claimed back by that one (docs/adr/0022): a
+ * guest seat by its resume token, exactly as before, and an account seat by its account,
+ * the token issued and never consulted. The whole check is
+ * `player.accountId ? account === player.accountId : token === player.resumeToken`.
+ */
+describe("a seat claimed by whoever took it", () => {
+  interface Seating {
+    roomCode: string;
+    playerId: string;
+    resumeToken: string;
+  }
+
+  /** A signed-in connection with a room of its own, and everything needed to come back. */
+  async function accountSeat(name = "Ada") {
+    const client = await server.connect();
+    const account = await signUp(client, name);
+    const seat = expectOk(await ask<Seating>(client, "createRoom", "Typed"));
+    return { client, account, ...seat };
+  }
+
+  async function guestSeat(name = "Grace") {
+    const client = await server.connect();
+    const seat = expectOk(await ask<Seating>(client, "createRoom", name));
+    return { client, ...seat };
+  }
+
+  /** Picked field by field, so a fixture spread into one sends nothing but the claim. */
+  function resume(client: ClientSocket, { roomCode, playerId, resumeToken }: ResumeRequest) {
+    return ask<{ view: PlayerGameView }>(client, "resumeSeat", {
+      roomCode,
+      playerId,
+      resumeToken,
+    });
+  }
+
+  /** A fresh connection, signed into `sessionToken`'s account — a reload, or a second tab. */
+  async function signedInAs(sessionToken: string): Promise<ClientSocket> {
+    const client = await server.connect();
+    expectOk(await ask(client, "resumeSession", sessionToken));
+    return client;
+  }
+
+  describe("seating a signed-in player", () => {
+    it("takes the name from the account and ignores the one in the payload", async () => {
+      const host = await server.connect();
+      const hostViews = watch(host);
+      await signUp(host, "Ada");
+      const { roomCode } = expectOk(await ask<Seating>(host, "createRoom", "Typed"));
+
+      const joiner = await server.connect();
+      await signUp(joiner, "Grace");
+      expectOk(await ask(joiner, "joinRoom", roomCode, "Also typed"));
+
+      const lobby = await hostViews.until((v) => v.opponents.length === 1, "the join");
+      assert.equal(lobby.you.name, "Ada");
+      assert.equal(lobby.opponents[0]!.name, "Grace");
+    });
+
+    it("takes the name the account was last renamed to", async () => {
+      const client = await server.connect();
+      const views = watch(client);
+      await signUp(client, "Ada");
+      expectOk(await ask(client, "renameAccount", "Countess"));
+
+      expectOk(await ask(client, "createRoom", "Ada"));
+
+      const lobby = await views.until((v) => v.phase === "lobby", "the lobby");
+      assert.equal(lobby.you.name, "Countess");
+    });
+
+    /**
+     * Positive, on both views, so an over-zealous redaction is caught at the wire and not
+     * by the stats screen that will one day need it. A guest's is null, and so is a bot's.
+     */
+    it("puts the account on the wire at every seat, the viewer's own included", async () => {
+      const host = await server.connect();
+      const hostViews = watch(host);
+      const ada = await signUp(host, "Ada");
+      const { roomCode } = expectOk(await ask<Seating>(host, "createRoom", "Ada"));
+
+      const guest = await server.connect();
+      const guestViews = watch(guest);
+      const grace = expectOk(await ask<Seating>(guest, "joinRoom", roomCode, "Grace"));
+      expectOk(await ask(host, "startGame"));
+
+      const hostView = await hostViews.until((v) => v.phase === "playing", "the deal");
+      assert.equal(hostView.you.accountId, ada.account.id);
+      assert.equal(hostView.opponents.find((o) => o.id === grace.playerId)!.accountId, null);
+      assert.ok(hostView.opponents.length > 1, "bots were seated too");
+      for (const opponent of hostView.opponents) {
+        if (opponent.id !== grace.playerId) assert.equal(opponent.accountId, null, "a bot's");
+      }
+
+      const guestView = await guestViews.until((v) => v.phase === "playing", "the deal");
+      assert.equal(guestView.you.accountId, null);
+      assert.equal(
+        guestView.opponents.find((o) => o.name === "Ada")!.accountId,
+        ada.account.id,
+      );
+    });
+  });
+
+  describe("resumeSeat", () => {
+    it("hands an account seat back to its account, the token not consulted", async () => {
+      const seat = await accountSeat();
+      seat.client.disconnect();
+
+      const returning = await signedInAs(seat.account.sessionToken);
+      const { view } = expectOk(
+        await resume(returning, { ...seat, resumeToken: "not-the-token" }),
+      );
+
+      assert.equal(view.you.id, seat.playerId);
+      assert.equal(view.you.accountId, seat.account.account.id);
+    });
+
+    it("refuses an account seat to its own token, presented by a guest", async () => {
+      const seat = await accountSeat();
+      seat.client.disconnect();
+
+      const guest = await server.connect();
+      assert.equal(expectError(await resume(guest, seat)).code, "INVALID_RESUME_TOKEN");
+    });
+
+    it("refuses an account seat to another account, token and all", async () => {
+      const seat = await accountSeat();
+      seat.client.disconnect();
+
+      const other = await server.connect();
+      await signUp(other, "Mallory");
+      assert.equal(expectError(await resume(other, seat)).code, "INVALID_RESUME_TOKEN");
+    });
+
+    /** The cost ADR-0022 accepts: a signed-out reload cannot claim what the account took. */
+    it("refuses an account seat to a connection whose account signed out", async () => {
+      const seat = await accountSeat();
+      seat.client.disconnect();
+
+      const returning = await signedInAs(seat.account.sessionToken);
+      expectOk(await ask(returning, "signOut"));
+      assert.equal(expectError(await resume(returning, seat)).code, "INVALID_RESUME_TOKEN");
+    });
+
+    it("hands a guest seat back to its token, exactly as before", async () => {
+      const seat = await guestSeat();
+      seat.client.disconnect();
+
+      const returning = await server.connect();
+      assert.equal(expectOk(await resume(returning, seat)).view.you.id, seat.playerId);
+    });
+
+    /**
+     * Signing in while seated as a guest binds the connection, not the seat — so the seat
+     * is still its token's, and a reload that has since signed in gets it back by that.
+     */
+    it("hands a guest seat back to its token whoever is signed in on the connection", async () => {
+      const seat = await guestSeat();
+      await signUp(seat.client, "Grace");
+      seat.client.disconnect();
+
+      const returning = await server.connect();
+      await signUp(returning, "Somebody");
+      const { view } = expectOk(await resume(returning, seat));
+
+      assert.equal(view.you.id, seat.playerId);
+      assert.equal(view.you.accountId, null, "still a guest seat");
+    });
+
+    it("refuses a guest seat to a signed-in connection with the wrong token", async () => {
+      const seat = await guestSeat();
+      seat.client.disconnect();
+
+      const returning = await server.connect();
+      await signUp(returning, "Grace");
+      assert.equal(
+        expectError(await resume(returning, { ...seat, resumeToken: "not-the-token" })).code,
+        "INVALID_RESUME_TOKEN",
+      );
+    });
+
+    /**
+     * Any other answer to any of these would say "that seat exists, and belongs to an
+     * account", which is the fishing the shared answer exists to prevent.
+     */
+    it("answers every failed claim the same way, whatever was wrong", async () => {
+      const seat = await accountSeat();
+      const guest = await guestSeat();
+      const claimant = await server.connect();
+
+      const refusals = [
+        await resume(claimant, { ...guest, resumeToken: "not-the-token" }),
+        await resume(claimant, { ...guest, playerId: "nobody" }),
+        await resume(claimant, seat),
+      ].map(expectError);
+
+      assert.deepEqual(refusals, [refusals[0], refusals[0], refusals[0]]);
+      assert.equal(refusals[0]!.code, "INVALID_RESUME_TOKEN");
+    });
+  });
+
+  /**
+   * An account is live on one connection at a time, and the newer one wins: a tab left
+   * open somewhere else must not lock its player out.
+   */
+  describe("newer wins at bind", () => {
+    for (const how of ["resumeSession", "signIn"] as const) {
+      it(`puts down the older connection when a newer one binds the account by ${how}`, async () => {
+        const older = await server.connect();
+        const account = await signUp(older);
+        const dropped = nextEvent<string>(older, "disconnect");
+
+        const newer = await server.connect();
+        expectOk(
+          how === "resumeSession"
+            ? await ask(newer, "resumeSession", account.sessionToken)
+            : await ask(newer, "signIn", account.idToken),
+        );
+
+        await dropped;
+        assert.ok(newer.connected, "the newer connection is the one kept");
+      });
+    }
+
+    it("puts down the older connection when a newer one creates the account", async () => {
+      const older = await server.connect();
+      server.google.vouchFor("id-token-twice", { sub: "sub-twice", name: "Ada" });
+      expectOk(await ask(older, "createAccount", "id-token-twice", "Ada"));
+      const dropped = nextEvent<string>(older, "disconnect");
+
+      // The same credential finishing the name step a second time signs it in.
+      const newer = await server.connect();
+      expectOk(await ask(newer, "createAccount", "id-token-twice", "Ada"));
+
+      await dropped;
+    });
+
+    it("leaves a connection signed into another account alone", async () => {
+      const ada = await server.connect();
+      await signUp(ada, "Ada");
+      const grace = await server.connect();
+      await signUp(grace, "Grace");
+
+      // Asked of Ada's connection, and answered: it was not put down.
+      expectOk(await ask(ada, "renameAccount", "Still here"));
+    });
+
+    it("leaves the connection itself alone when it signs in again", async () => {
+      const client = await server.connect();
+      const account = await signUp(client);
+
+      expectOk(await ask(client, "resumeSession", account.sessionToken));
+      expectOk(await ask(client, "renameAccount", "Still here"));
+    });
+
+    it("hands the seat over too, which the newer connection then sits back down at", async () => {
+      const seat = await accountSeat();
+      const dropped = nextEvent<string>(seat.client, "disconnect");
+
+      const tab = await signedInAs(seat.account.sessionToken);
+      await dropped;
+
+      assert.equal(expectOk(await resume(tab, seat)).view.you.id, seat.playerId);
+    });
+  });
+
+  /**
+   * Joining a room the account already holds a seat in is claiming that seat — the
+   * account *is* its credential — so it resumes rather than sitting the player down twice.
+   */
+  describe("joining a room the account already sits in", () => {
+    it("returns the seat it holds, mid-match, rather than adding one", async () => {
+      const seat = await accountSeat();
+      const guest = await server.connect();
+      const guestViews = watch(guest);
+      expectOk(await ask(guest, "joinRoom", seat.roomCode, "Grace"));
+      expectOk(await ask(seat.client, "startGame"));
+      const dealt = await guestViews.until((v) => v.phase === "playing", "the deal");
+
+      const tab = await signedInAs(seat.account.sessionToken);
+      const tabViews = watch(tab);
+      const joined = expectOk(await ask<Seating>(tab, "joinRoom", seat.roomCode, "Other"));
+
+      assert.equal(joined.playerId, seat.playerId);
+      assert.equal(joined.resumeToken, seat.resumeToken, "the seat's own, uniformly acked");
+      const view = await tabViews.until((v) => v.phase === "playing", "the seat's position");
+      assert.equal(view.you.id, seat.playerId);
+      assert.equal(view.you.name, "Ada");
+      assert.deepEqual(view.seating, dealt.seating, "nobody was added to the table");
+    });
+
+    /**
+     * One live connection per seat, whichever door the claim came in by. Signed out while
+     * seated, the older connection is bound to no account, so newer-wins never saw it.
+     */
+    it("puts down a connection still holding the seat", async () => {
+      const seat = await accountSeat();
+      expectOk(await ask(seat.client, "signOut"));
+      const dropped = nextEvent<string>(seat.client, "disconnect");
+
+      const returning = await server.connect();
+      expectOk(await ask(returning, "signIn", seat.account.idToken));
+      const joined = expectOk(await ask<Seating>(returning, "joinRoom", seat.roomCode, "Ada"));
+
+      assert.equal(joined.playerId, seat.playerId);
+      await dropped;
+    });
+
+    it("announces no arrival — nobody arrived", async () => {
+      const seat = await accountSeat();
+      const guest = await server.connect();
+      const guestViews = watch(guest);
+      expectOk(await ask(guest, "joinRoom", seat.roomCode, "Grace"));
+      await guestViews.until((v) => v.opponents.length === 1, "the lobby");
+
+      const announced: string[] = [];
+      guest.on("playerJoined", (name: string) => announced.push(name));
+      seat.client.disconnect();
+      const tab = await signedInAs(seat.account.sessionToken);
+      guestViews.reset();
+      expectOk(await ask(tab, "joinRoom", seat.roomCode, "Ada"));
+
+      const back = await guestViews.until(
+        (v) => v.opponents.length === 1 && v.opponents[0]!.connected,
+        "the seat back",
+      );
+      assert.equal(back.opponents[0]!.id, seat.playerId);
+      assert.deepEqual(announced, []);
+    });
   });
 });
 

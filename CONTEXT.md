@@ -495,10 +495,15 @@ and never the name, which is what lets a player choose any name they like.
 
 ## Resume token
 
-The secret that proves a connection is entitled to a **seat**. One per seat, issued from a
-CSPRNG the moment the seat is created (`createRoom`, `joinRoom`, bot seating) and fixed for
-the life of the room — never rotated, never reissued, so it names one seat for as long as
-that seat exists.
+The secret that proves a connection is entitled to a **guest** seat. Issued to every seat,
+consulted only for one no account took. A seat is claimed back by whoever took it: a guest
+with this, an account with itself
+([ADR-0022](docs/adr/0022-a-seat-is-claimed-by-whoever-took-it.md)).
+
+One per seat, issued from a CSPRNG the moment the seat is created (`createRoom`, `joinRoom`,
+bot seating) and fixed for the life of the room — never rotated, never reissued, so it names
+one seat for as long as that seat exists. An account seat carries one nothing reads, so that
+every seat and every seating ack is one shape.
 
 Deliberately *not* called a session: "session" means the client's session core
 (`client/src/session.ts`) and an account's session token — and once meant the socket's own
@@ -514,9 +519,11 @@ seated them.
 
 **Resume seat** is what they present it back over — `resumeSeat({ roomCode, playerId,
 resumeToken })` — binding a new connection to a seat that already exists, in any phase, and
-answering with the position that seat stands in. Distinct from joining, which admits
-somebody new. A seat holds one live connection, so a resume puts down whatever socket was
-still holding it.
+answering with the position that seat stands in. For an account seat the token is ignored
+and the connection's account is what is checked; every wrong claim, whatever was wrong,
+answers `INVALID_RESUME_TOKEN`. Distinct from joining, which admits somebody new — except
+that an account joining a room it already holds a seat in is handed that seat back. A seat
+holds one live connection, so a resume puts down whatever socket was still holding it.
 
 ## Play again
 

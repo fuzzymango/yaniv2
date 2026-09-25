@@ -69,17 +69,24 @@ function chooseDiscard(hand: readonly Card[]): Card[] {
   });
 }
 
+/** What a seat is fixed to at its creation: its credential, and the account that took it. */
+interface Issued {
+  resumeToken: string;
+  accountId: string | null;
+}
+
 /**
- * A resume token is issued once, at the seat's creation, and is never rotated. Checked
- * on every state a match passes through rather than only at the end, so a transition
- * that reissued one and a later one that put it back would still be caught.
+ * A resume token is issued once, at the seat's creation, and is never rotated; the
+ * account a seat was taken under is written then too, and never changed (docs/adr/0022).
+ * Checked on every state a match passes through rather than only at the end, so a
+ * transition that rewrote either and a later one that put it back would still be caught.
  */
-function assertTokensHeld(state: GameState, issued: Map<string, string>): void {
+function assertSeatsFixed(state: GameState, issued: Map<string, Issued>): void {
   for (const player of state.players) {
-    assert.equal(
-      player.resumeToken,
+    assert.deepEqual(
+      { resumeToken: player.resumeToken, accountId: player.accountId },
       issued.get(player.id),
-      `${player.name}'s resume token was regenerated`,
+      `${player.name}'s seat was reissued`,
     );
   }
 }
@@ -95,11 +102,14 @@ function playMatch(seed: number): { final: GameState; turns: number } {
     newRoomRng: () => mulberry32(seed + 1),
   });
 
-  const { roomCode } = unwrap(rooms.createRoom("Ada"));
-  unwrap(rooms.joinRoom(roomCode, "Grace"));
-  unwrap(rooms.joinRoom(roomCode, "Alan"));
+  // One account seat among the guests, so a transition dropping `accountId` has one to drop.
+  const { roomCode } = unwrap(rooms.createRoom("Ada", "account-ada"));
+  unwrap(rooms.joinRoom(roomCode, "Grace", null));
+  unwrap(rooms.joinRoom(roomCode, "Alan", null));
   const issued = new Map(
-    rooms.getState(roomCode)!.players.map((p) => [p.id, p.resumeToken]),
+    rooms
+      .getState(roomCode)!
+      .players.map((p) => [p.id, { resumeToken: p.resumeToken, accountId: p.accountId }]),
   );
   unwrap(rooms.apply(roomCode, (s, rng) => startGame(s, s.hostId, rng)));
 
@@ -108,7 +118,7 @@ function playMatch(seed: number): { final: GameState; turns: number } {
 
   for (let step = 0; step < 20000; step++) {
     const state = rooms.getState(roomCode)!;
-    assertTokensHeld(state, issued);
+    assertSeatsFixed(state, issued);
 
     if (state.phase === "gameEnd") return { final: state, turns };
     if (state.phase === "roundEnd") {
@@ -193,8 +203,8 @@ describe("full match simulation", () => {
       newPlayerId: () => `p${++playerCounter}`,
       newRoomRng: () => mulberry32(556),
     });
-    const { roomCode } = unwrap(rooms.createRoom("Ada"));
-    unwrap(rooms.joinRoom(roomCode, "Grace"));
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    unwrap(rooms.joinRoom(roomCode, "Grace", null));
     unwrap(rooms.apply(roomCode, (s, rng) => startGame(s, s.hostId, rng)));
 
     for (let step = 0; step < 40; step++) {

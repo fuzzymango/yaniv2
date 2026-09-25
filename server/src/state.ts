@@ -24,6 +24,18 @@ export interface Player {
    */
   resumeToken: string;
   /**
+   * The account that took this seat, or `null` for a guest's — and for a bot's, a bot being
+   * nobody. Written when the seat is created and never changed, which is why `updatePlayer`
+   * cannot patch it either (docs/adr/0022): signing in while seated binds the connection,
+   * not the seat, so a guest seat never becomes an account seat.
+   *
+   * It decides what claims the seat back. An account seat is its account's, and the token
+   * above — still issued, so every seat and every seating ack is one shape — is never
+   * consulted for it; a guest seat is its token's. Public, unlike the token: it is on every
+   * view, the handle a later stats screen taps on, and nothing else about an account is.
+   */
+  accountId: string | null;
+  /**
    * Whether the server plays this seat itself. Required rather than optional so a seat
    * can never be ambiguously controlled — every construction has to say which it is.
    *
@@ -350,14 +362,14 @@ export function getPlayer(state: GameState, playerId: string): Player | undefine
 }
 
 /**
- * Returns a new players array with one player's fields patched. Neither the id nor the
- * resume token is patchable: both are issued once, at the seat's creation, and a
- * transition that could rewrite either would be a seat quietly becoming a different one.
+ * Returns a new players array with one player's fields patched. Not the id, the resume
+ * token or the account: all three are fixed at the seat's creation, and a transition that
+ * could rewrite one would be a seat quietly becoming a different one.
  */
 export function updatePlayer(
   players: Player[],
   playerId: string,
-  patch: Partial<Omit<Player, "id" | "resumeToken">>,
+  patch: Partial<Omit<Player, "id" | "resumeToken" | "accountId">>,
 ): Player[] {
   return players.map((p) => (p.id === playerId ? { ...p, ...patch } : p));
 }

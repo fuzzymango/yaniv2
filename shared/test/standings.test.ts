@@ -30,6 +30,7 @@ function finishedMatch(seated: Seat[]): PlayerGameView {
     outInRound: p.outInRound ?? null,
     departed: p.departed ?? false,
     connected: true,
+    accountId: null,
   });
 
   return {

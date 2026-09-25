@@ -77,16 +77,17 @@ export class RoomManager {
   }
 
   /**
-   * A fresh seat, credentialed. The one place a `Player` is built, so an id or a resume
-   * token cannot be left off one of the three ways a seat comes into existence — the
-   * same reason both fields are required on `Player` in the first place.
+   * A fresh seat, credentialed. The one place a `Player` is built, so an id, a resume
+   * token or the account behind it cannot be left off one of the three ways a seat comes
+   * into existence — the same reason all three are required on `Player` in the first place.
    */
-  private newSeat(name: string, isBot: boolean): Player {
+  private newSeat(name: string, isBot: boolean, accountId: string | null): Player {
     return {
       id: this.newPlayerId(),
       name,
       score: 0,
       isBot,
+      accountId,
       // A fresh seat is in the match and has given nothing up. Written out rather than
       // defaulted anywhere, on the same grounds as `isBot`: a seat whose standing has to
       // be inferred is a seat somebody has to remember to fill in.
@@ -114,9 +115,15 @@ export class RoomManager {
    *
    * The token is handed back from here rather than dug out of `state` by the caller,
    * so the one place it is issued is also the one place it is given away.
+   *
+   * `accountId` is who took the seat, `null` for a guest, and **required** rather than
+   * defaulted on ADR-0013's grounds: a call site that forgot it would seat every signed-in
+   * player as a guest, and nothing would say so. The name is whatever the caller settled on
+   * — for an account, its own display name, which the transport knows and this does not.
    */
   createRoom(
     hostName: string,
+    accountId: string | null,
   ): Result<{
     roomCode: string;
     playerId: string;
@@ -129,7 +136,7 @@ export class RoomManager {
     }
 
     const roomCode = this.generateRoomCode();
-    const host = this.newSeat(name, false);
+    const host = this.newSeat(name, false, accountId);
 
     const state: GameStateLobby = {
       roomCode,
@@ -163,12 +170,36 @@ export class RoomManager {
     });
   }
 
+  /**
+   * Seat a player in an existing room — or, for an account that already holds a seat
+   * here, hand that seat back rather than seating it twice (docs/adr/0022).
+   *
+   * The account *is* that seat's credential, so joining again is claiming it, and it is
+   * answered before any refusal of a *new* seat: a match under way or a full table is no
+   * reason to keep a player out of the seat they are sitting in. `resumed` says which
+   * happened, for the transport's announcement; nothing is changed by a resumption. Only a
+   * seat still somebody's counts — one given up stays given up, as it does to `resumeSeat`.
+   */
   joinRoom(
     roomCode: string,
     playerName: string,
-  ): Result<{ playerId: string; resumeToken: string; state: GameState }> {
+    accountId: string | null,
+  ): Result<{ playerId: string; resumeToken: string; state: GameState; resumed: boolean }> {
     const room = this.rooms.get(roomCode);
     if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
+
+    const held =
+      accountId === null
+        ? undefined
+        : room.state.players.find((p) => p.accountId === accountId && !p.departed);
+    if (held) {
+      return ok({
+        playerId: held.id,
+        resumeToken: held.resumeToken,
+        state: room.state,
+        resumed: true,
+      });
+    }
 
     const name = normalizeDisplayName(playerName);
     if (name === null) {
@@ -181,12 +212,13 @@ export class RoomManager {
       return err("ROOM_FULL", `Room is full (${MAX_PLAYERS} players)`);
     }
 
-    const player = this.newSeat(name, false);
+    const player = this.newSeat(name, false, accountId);
     room.state = { ...room.state, players: [...room.state.players, player] };
     return ok({
       playerId: player.id,
       resumeToken: player.resumeToken,
       state: room.state,
+      resumed: false,
     });
   }
 
@@ -222,7 +254,7 @@ export class RoomManager {
       // bots cannot end up sharing a name. Safe to index directly: a table holds at most
       // MAX_PLAYERS seats and its creator is human, so BOT_NAMES has a name for each.
       const taken = players.filter((p) => p.isBot).length;
-      players.push(this.newSeat(BOT_NAMES[taken]!, true));
+      players.push(this.newSeat(BOT_NAMES[taken]!, true, null));
       seated++;
     }
     return { ...state, players };

@@ -42,6 +42,8 @@ export interface SeatView extends MatchStanding {
   id: string;
   name: string;
   score: number;
+  /** The account that took this seat, or null for a guest's. See `OpponentView.accountId`. */
+  accountId: string | null;
 }
 
 /** The viewing player, while they are still in the match. Always includes their own hand. */
@@ -93,6 +95,13 @@ export interface OpponentView extends MatchStanding {
   id: string;
   name: string;
   score: number;
+  /**
+   * The account that took this seat, fixed at seating, or null for a guest's or a bot's
+   * (docs/adr/0022). The handle a later stats view taps on, and the only thing about an
+   * account any view carries — no stat, and no name but the seat's own `name`. Nothing
+   * draws it in V0.
+   */
+  accountId: string | null;
   handSize: number;
   /**
    * Whether this seat is *watching* the match rather than playing it: out of it, not gone,

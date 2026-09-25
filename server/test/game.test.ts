@@ -13,7 +13,15 @@ import {
 } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import type { StateOptions } from "./helpers.ts";
-import { allCardIds, card, expectErr, ids, makeState, unwrap } from "./helpers.ts";
+import {
+  RESUME_TOKEN_MARK,
+  allCardIds,
+  card,
+  expectErr,
+  ids,
+  makeState,
+  unwrap,
+} from "./helpers.ts";
 
 const rng = () => mulberry32(1234);
 
@@ -2206,15 +2214,21 @@ describe("playAgain", () => {
   /**
    * The one transition that rebuilds every `Player` object rather than patching one, so
    * the one most able to drop a field on the way past. A seat carried into another match
-   * is the same seat, and its resume token is what says so.
+   * is the same seat, and its resume token and the account that took it are what say so.
    */
-  it("carries every seat's resume token into the new match", () => {
-    const finished = finishedMatch();
+  it("carries every seat's resume token and account into the new match", () => {
+    const finished = finishedMatch([
+      { id: "p1", score: 10, accountId: "account-p1" },
+      { id: "p2", score: 95 },
+    ]);
     const again = unwrap(playAgain(finished, "p1", rng()));
 
     assert.deepEqual(
-      again.players.map((p) => p.resumeToken),
-      finished.players.map((p) => p.resumeToken),
+      again.players.map((p) => [p.resumeToken, p.accountId]),
+      [
+        [`${RESUME_TOKEN_MARK}p1`, "account-p1"],
+        [`${RESUME_TOKEN_MARK}p2`, null],
+      ],
     );
   });
 
