@@ -29,7 +29,9 @@ import {
   RESUME_TOKEN_MARK,
   expectErr,
   markedResumeTokens,
+  fishingDiscard,
   playingSelf,
+  seatBehind,
   slapdownOpen,
   testClock,
   unwrap,
@@ -571,31 +573,21 @@ describe("bot think time", () => {
     return { h, ada, deal: viewOf(h, ada) };
   }
 
-  /** Everything the human has been handed since they had seen `from` views. */
-  const receivedSince = (h: Harness, ada: Seated, from: number) =>
-    h.port.received(ada.roomCode, ada.playerId).slice(from);
-  const receivedSoFar = (h: Harness, ada: Seated) => receivedSince(h, ada, 0).length;
+  /** How many views the human has been handed so far. */
+  const seenCount = (h: Harness, ada: Seated) =>
+    h.port.received(ada.roomCode, ada.playerId).length;
+  /** The views the human has been handed after the first `count`. */
+  const receivedAfter = (h: Harness, ada: Seated, count: number) =>
+    h.port.received(ada.roomCode, ada.playerId).slice(count);
 
   /** Let the one bot thinking play, and answer the position it produced. */
   function think(h: Harness, ada: Seated): PlayerGameView {
-    const before = receivedSoFar(h, ada);
+    const before = seenCount(h, ada);
     assert.deepEqual(h.clock.delays(), [BOT_THINK_MS], "one bot thinking, for the interval");
     h.clock.tick();
-    const played = receivedSince(h, ada, before);
+    const played = receivedAfter(h, ada, before);
     assert.equal(played.length, 1, "the beat played one move, delivered on its own");
     return played[0]!;
-  }
-
-  /**
-   * A card worth discarding to fish for a window: one whose rank the player holds only
-   * once, since every copy still in hand is a copy that cannot come back off the deck.
-   */
-  function fishingDiscard(view: PlayerGameView): string {
-    const hand = playingSelf(view).hand;
-    const lonely = hand.find(
-      (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
-    );
-    return (lonely ?? hand[0]!).id;
   }
 
   /** The human's turn, taken by shedding one card and drawing blind. */
@@ -606,20 +598,16 @@ describe("bot think time", () => {
     );
   }
 
-  /** The seat `n` places behind the human in turn order, wrapping round the table. */
-  const behind = (deal: PlayerGameView, ada: Seated, n: number) =>
-    deal.turnOrder[(deal.turnOrder.indexOf(ada.playerId) + n) % deal.turnOrder.length]!;
-
   it("leaves a bot's turn unplayed in the tick that handed it over", () => {
     const { h, ada, deal } = sitDown(4242);
     assert.equal(deal.currentTurnPlayerId, ada.playerId, "the host takes the first turn");
-    const before = receivedSoFar(h, ada);
+    const before = seenCount(h, ada);
 
     takeATurn(h, ada, deal);
 
-    const delivered = receivedSince(h, ada, before);
+    const delivered = receivedAfter(h, ada, before);
     assert.equal(delivered.length, 1, "the bot moved in the tick that handed it the turn");
-    assert.equal(delivered[0]!.currentTurnPlayerId, behind(deal, ada, 1));
+    assert.equal(delivered[0]!.currentTurnPlayerId, seatBehind(deal, ada.playerId, 1));
     assert.deepEqual(h.clock.delays(), [BOT_THINK_MS], "and it is thinking about its turn");
   });
 
@@ -631,7 +619,7 @@ describe("bot think time", () => {
 
     assert.equal(
       played.currentTurnPlayerId,
-      behind(deal, ada, 2),
+      seatBehind(deal, ada.playerId, 2),
       "the first bot played and handed on to the second",
     );
   });
@@ -648,7 +636,7 @@ describe("bot think time", () => {
 
     assert.deepEqual(
       seats,
-      [2, 3, 4, 5, 6].map((n) => behind(deal, ada, n)),
+      [2, 3, 4, 5, 6].map((n) => seatBehind(deal, ada.playerId, n)),
       "each bot in turn, and the turn back to the human",
     );
     assert.equal(h.clock.pending(), 0, "nothing is left thinking behind the human");
@@ -667,11 +655,10 @@ describe("bot think time", () => {
       assert.equal(deal.lastMove, null, "the opening bot has not moved");
       assert.deepEqual(h.clock.delays(), [BOT_THINK_MS], "it is thinking about it");
 
-      const opener = deal.turnOrder.indexOf(deal.currentTurnPlayerId!);
       const opened = think(h, ada);
       assert.equal(
         opened.currentTurnPlayerId,
-        deal.turnOrder[(opener + 1) % deal.turnOrder.length],
+        seatBehind(deal, deal.currentTurnPlayerId!, 1),
         "the opening bot played, once it had thought about it, and handed on",
       );
       return;
@@ -696,6 +683,8 @@ describe("bot think time", () => {
           apply(h, ada.roomCode, (state, rng) => startNextRound(state, ada.playerId, rng));
           continue;
         }
+        // A limit no run of rounds reaches, so the match never ends under the fishing.
+        assert.equal(at.phase, "playing", `the fishing stopped in ${at.phase}`);
         assert.equal(at.currentTurnPlayerId, ada.playerId, "the table stopped on a bot");
 
         takeATurn(h, ada, at);
@@ -732,11 +721,11 @@ describe("bot think time", () => {
     it("neither hurries the pending turn nor schedules a second", () => {
       const { h, ada } = sitDown(20250811);
       const open = fishForAWindow(h, ada);
-      const before = receivedSoFar(h, ada);
+      const before = seenCount(h, ada);
 
       slap(h, ada);
 
-      assert.equal(receivedSince(h, ada, before).length, 1, "only the slap itself was published");
+      assert.equal(receivedAfter(h, ada, before).length, 1, "only the slap itself was published");
       // `think` asserts the one timer, and one move out of its beat.
       const played = think(h, ada);
       assert.equal(

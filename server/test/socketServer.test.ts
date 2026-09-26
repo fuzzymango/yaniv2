@@ -48,9 +48,11 @@ import { fakeVerifier, type FakeVerifier } from "./auth/verifier.ts";
 import {
   RESUME_TOKEN_MARK,
   SESSION_TOKEN_MARK,
+  fishingDiscard,
   markedResumeTokens,
   markedSessionTokens,
   playingSelf,
+  seatBehind,
   slapdownOpen,
   testClock,
   type TestClock,
@@ -267,16 +269,6 @@ function assertNoResumeToken(view: PlayerGameView, where: string): void {
     !JSON.stringify(view).includes(RESUME_TOKEN_MARK),
     `a resume token reached ${where}`,
   );
-}
-
-/**
- * The seat `n` places behind `playerId` in turn order, wrapping round the table. Counted
- * from the player rather than from the front, the seating being drawn at the deal
- * (docs/rules.md §2).
- */
-function seatBehind(view: PlayerGameView, playerId: string, n: number): string {
-  const order = view.turnOrder;
-  return order[(order.indexOf(playerId) + n) % order.length]!;
 }
 
 /** Unwrap a rejection, failing the test if the call unexpectedly succeeded. */
@@ -2327,19 +2319,6 @@ describe("slapping down", () => {
   /** Sign `client` up as `name` where the test asked for accounts, and say under what. */
   const accountFor = async (client: ClientSocket, name: string, signedIn: boolean) =>
     signedIn ? (await signUp(client, name, table)).account.id : null;
-
-  /**
-   * A card worth discarding to fish for a window: one whose rank the player holds only
-   * once, since every copy still in hand is a copy that cannot come back off the deck.
-   * Jokers are skipped outright — a drawn joker never opens a window.
-   */
-  function fishingDiscard(view: PlayerGameView): string {
-    const hand = playingSelf(view).hand;
-    const lonely = hand.find(
-      (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
-    );
-    return (lonely ?? hand[0]!).id;
-  }
 
   interface OpenWindow {
     ada: Seat;
