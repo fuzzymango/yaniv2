@@ -92,10 +92,10 @@ const round = (
 const table = { you: "You-ish", rival: "Rival" };
 
 describe("roundOutcome", () => {
-  it("names the caller and says the call stood", () => {
+  it("names the caller, and says no more of a call that stood", () => {
     assert.equal(
       roundOutcome(round("rival", null, table), "you"),
-      "Rival called Yaniv — it stood.",
+      "Rival called Yaniv",
     );
   });
 
@@ -109,7 +109,7 @@ describe("roundOutcome", () => {
   it("addresses the viewer rather than reading their own name back at them", () => {
     assert.equal(
       roundOutcome(round("you", null, table), "you"),
-      "You called Yaniv — it stood.",
+      "You called Yaniv",
     );
   });
 
@@ -130,7 +130,7 @@ describe("roundOutcome", () => {
   it("still reads as a sentence when the round has no record of the player", () => {
     // A raw player id is a wire token, not somebody's name, and must never reach a screen.
     const said = roundOutcome(round("ghost", null, table), "you");
-    assert.equal(said, "Somebody called Yaniv — it stood.");
+    assert.equal(said, "Somebody called Yaniv");
     assert.ok(!said.includes("ghost"));
   });
 
@@ -139,7 +139,7 @@ describe("roundOutcome", () => {
     // player who has left is in no roster to be looked up in.
     assert.equal(
       roundOutcome(round("gone", null, { ...table, gone: "Departed" }), "you"),
-      "Departed called Yaniv — it stood.",
+      "Departed called Yaniv",
     );
   });
 });
