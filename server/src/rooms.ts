@@ -19,10 +19,11 @@
  * cross that: every one is built here, through the serializer, so a `GameState` never
  * reaches the transport and the security boundary sits inside this module.
  *
- * The one importer of `RoomManager` outside this file and the tests is `scripts/play.ts`,
- * on purpose: a bots-only table with nobody connected is one this module treats as dead —
- * never auto-dealt, swept after a minute — and bending that for a script would put a
- * policy exception into shipped code.
+ * Nothing outside this file and the tests drives `RoomManager` but `scripts/play.ts` —
+ * `index.ts` only constructs one, and `createSocketServer` only composes this from it — and
+ * that on purpose: a bots-only table with nobody connected is one this module treats as
+ * dead, never auto-dealt and swept after a minute, and bending that for a script would put
+ * a policy exception into shipped code.
  */
 
 import type { PlayerGameView } from "@yaniv/shared";
@@ -233,7 +234,7 @@ export function createRooms(
 
     // The deal it may schedule is followed like any other new position: published, and the
     // seat it opened on played if it is a bot's — which, here, it always is.
-    autoDeal.consider(roomCode, connected, () => follow(roomCode));
+    autoDeal.consider(roomCode, connected, () => afterNewPosition(roomCode));
     roomSweep.consider(roomCode, connected, () => sweep(roomCode));
   }
 
@@ -253,7 +254,7 @@ export function createRooms(
   }
 
   /** What follows a new position, once it is stored: publication, then the bots. */
-  function follow(roomCode: string): void {
+  function afterNewPosition(roomCode: string): void {
     publish(roomCode);
     runBotTurns(roomCode);
   }
@@ -319,7 +320,7 @@ export function createRooms(
       const result = manager.apply(roomCode, transition);
       if (!result.ok) return result;
       accepted();
-      follow(roomCode);
+      afterNewPosition(roomCode);
       return ok(null);
     },
 
@@ -333,7 +334,7 @@ export function createRooms(
       const departure: Departure = { name, ended: abandoned(result.value) };
       accepted(departure);
       if (departure.ended) destroy(roomCode);
-      else follow(roomCode);
+      else afterNewPosition(roomCode);
       return ok(departure);
     },
 
