@@ -36,12 +36,14 @@
  * playing out of turn is offered, sent, and answered with `NOT_YOUR_TURN`.
  *
  * Nothing about the *game* is stateful here. The selection lives in the session core,
- * because it has to survive views arriving underneath it. The one piece of state on this
- * screen is the flight (`useCardFlight`), which is a picture of a move already played and
- * decides nothing — see `CardsInFlight.tsx`.
+ * because it has to survive views arriving underneath it. The state on this screen is the
+ * flight (`useCardFlight`), which is a picture of a move already played and decides nothing
+ * — see `CardsInFlight.tsx` — and the deal hold, which is how long a scored round is
+ * presented before its button goes live (issue #205) and decides nothing about the game.
  */
 
 import type { CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import type {
   GameError,
   OpponentView,
@@ -67,7 +69,7 @@ import { roundOutcome, scoreLabel } from "../score.ts";
 import type { Zone } from "../seating.ts";
 import { ZONES, byRelativeSeat, seatZones } from "../seating.ts";
 import { seatStatus } from "../status.ts";
-import { SHAKE_MS } from "../timing.ts";
+import { DEAL_HOLD_MS, SHAKE_MS } from "../timing.ts";
 import type { DrawSource } from "../turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "../turn.ts";
 
@@ -258,6 +260,33 @@ export function Table({
    */
   const pileLanding = view.lastDiscard.some((card) => landing.get(card.id) === "pile");
 
+  /**
+   * Whether the deal is still being held back — `DEAL_HOLD_MS` from the moment the button
+   * first appears for a scored round, and then live on its own (issue #205). What it stops
+   * is a second tap on Yaniv!, or a thumb already on its way to that slot, dealing the round
+   * away before the table has seen it. The browser choosing how long to present a round, and
+   * **not a rule**: the server takes a deal at any moment of `roundEnd`.
+   *
+   * Keyed on how many rounds have been scored, so a republication of the same round — a seat
+   * dropping, leaving, resuming — changes none of the effect's inputs and restarts nothing,
+   * while the next scored round is a count this screen has not held for yet. A reload or a
+   * resumed seat mounts the table afresh (a dropped socket unmounts it, `App.tsx`), so the
+   * first position it is handed is held too — which is why this is not `bannerAt`'s question,
+   * that one staying silent with no earlier position on the screen to compare against.
+   *
+   * Component state and one timer, the jolt's shape: the session core's `busy` means an
+   * emitted action has not settled, and a clock there would be a clock nothing else needs.
+   */
+  const dealOffered = !live && !over && yours !== null;
+  const roundsScored = view.scorecard.length;
+  const [heldThrough, setHeldThrough] = useState<number | null>(null);
+  const dealHeld = dealOffered && heldThrough !== roundsScored;
+  useEffect(() => {
+    if (!dealHeld) return;
+    const timer = window.setTimeout(() => setHeldThrough(roundsScored), DEAL_HOLD_MS);
+    return () => window.clearTimeout(timer);
+  }, [dealHeld, roundsScored]);
+
   const zones = seatZones([...view.opponents].sort(byRelativeSeat(view)));
 
   const seated = [view.you, ...view.opponents];
@@ -384,12 +413,7 @@ export function Table({
             said: "Slapdown! Tap the pile to send the card you just drew straight back",
             tone: "turn--slap",
           }
-        : yourTurn
-          ? {
-              said: "Your turn — tap cards, then the deck or a face-up card",
-              tone: "turn--yours",
-            }
-          : { said: `${nameOf(view.currentTurnPlayerId)} is playing`, tone: "" };
+        : { said: `${nameOf(view.currentTurnPlayerId)} is playing`, tone: yourTurn ? "turn--yours" : "" };
 
   return (
     <>
@@ -603,14 +627,14 @@ export function Table({
           >
             Yaniv!
           </button>
-        ) : yours !== null ? (
+        ) : dealOffered ? (
           <button
             className="button button--primary deal"
             type="button"
-            disabled={busy}
+            disabled={busy || dealHeld}
             onClick={onNextRound}
           >
-            Deal the next round
+            Deal next round
           </button>
         ) : (
           // Its own class rather than `notice`, which carries news that has just arrived.

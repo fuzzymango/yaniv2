@@ -496,7 +496,9 @@ is over, the standings answering it over the very bar the button would sit in.
 **And the call that ended the round is announced over the seat that made it** (#124, #156,
 docs/adr/0018): `YANIV` in yellow, `ASSAF` in red a beat later, both faded out together. A one-shot
 like the flight, keyed on the scorecard growing so no republish replays it, on a second timing root
-deliberately not the flight's, in the two colours the scorecard now speaks. Every decision behind
+deliberately not the flight's, in the two colours the scorecard now speaks. **The deal that
+replaces the call is held disabled for three seconds** (`DEAL_HOLD_MS`, #205), a third timing root
+keyed on the scorecard's length — the browser presenting a round, not a rule. Every decision behind
 the geometry, the flight, the banner, the bar and the dim is in **`docs/client-table.md`** and the
 ADRs; the code is `fan.ts`, `score.ts`, `seating.ts`, `table/`.
 

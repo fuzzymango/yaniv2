@@ -46,9 +46,9 @@ export function scoreLabel(score: number, delta: number, milestoneReduction = 0)
 /**
  * How the round ended, as the one sentence that replaces whose turn it is.
  *
- * The call and the verdict together, because neither means anything without the other: a
- * call that was Assafed cost the caller 30 and won somebody else the round (docs/rules.md
- * §6).
+ * The call, and the Assaf where there was one: a call that was Assafed cost the caller 30
+ * and won somebody else the round (docs/rules.md §6), which the sentence cannot leave out. A
+ * call that stood needs no verdict — the call alone says it.
  *
  * Takes the viewer, because a sentence about them says so — "You called Yaniv", not their
  * own name back at them — and that is the only thing here that depends on whose screen it
@@ -60,7 +60,6 @@ export function roundOutcome(result: RoundResultView, youId: string): string {
   const subject = (id: string) => (id === youId ? "You" : named(id));
   const object = (id: string) => (id === youId ? "you" : named(id));
 
-  const verdict =
-    result.assaferId === null ? "it stood." : `Assafed by ${object(result.assaferId)}.`;
-  return `${subject(result.callerId)} called Yaniv — ${verdict}`;
+  const verdict = result.assaferId === null ? "" : ` — Assafed by ${object(result.assaferId)}.`;
+  return `${subject(result.callerId)} called Yaniv${verdict}`;
 }
