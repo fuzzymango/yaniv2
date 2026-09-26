@@ -367,8 +367,12 @@ describe("runSession", () => {
             guestPrompts += 1;
             // Only the host may begin: the server, not the harness, says so.
             if (guestPrompts === 1) return "start";
+            if (guestPrompts > 2) return null;
             await waitUntil("the match to be dealt", () => guestView?.phase === "playing");
-            return null;
+            // Given up rather than abandoned: the seating is drawn at the deal
+            // (docs/rules.md §2), so the turn may reach this seat before the host's, and
+            // only a seat that has left is passed over (§7).
+            return "menu";
           },
           output: (text) => guestScreen.push(text),
         },
@@ -508,6 +512,9 @@ describe("runSession", () => {
               guestPrompts += 1;
               // Typed the way it was heard, not the way it was generated.
               if (guestPrompts === 1) return `join ${roomCode.toLowerCase()}`;
+              // Out of the room before quitting, so no seat the host's turn could wait
+              // behind is left at the table — its seating being drawn at the deal.
+              if (guestPrompts === 2) return "menu";
               return null;
             },
             output: (text) => guestScreen.push(text),
@@ -1038,11 +1045,12 @@ describe("runSession", () => {
      * It takes two humans here, because this server is built with bot think time off:
      * the bot behind a seat plays as soon as the event loop lets it, so a window in front
      * of one is shut before the frame announcing it has been read. Grace sits directly
-     * behind Ada — the roster is seated in join order — and is scripted to hold off while
-     * Ada's window is open, which is the position the rule exists for.
+     * behind Ada — at a table of two, so whatever seating the deal draws (docs/rules.md
+     * §2) — and is scripted to hold off while Ada's window is open, which is the position
+     * the rule exists for.
      */
     it("puts the drawn card back down from a prompt of its own", { timeout: 30_000 }, async () => {
-      const server = await startServer(7);
+      const server = await startServer(7, 0);
       const adaScreen: string[] = [];
       /** Every position Ada was sent, in order — what the wire actually said. */
       const adaHeard: PlayerGameView[] = [];
@@ -1098,7 +1106,9 @@ describe("runSession", () => {
             /**
              * Grace plays only her own turns, and only once Ada's window has shut. The
              * race is real — whichever event the server takes first wins it — so a test
-             * about the slap landing has to be the one that does not race.
+             * about the slap landing has to be the one that does not race. Ada having
+             * heard the move that handed Grace the turn comes first: the two sockets are
+             * told separately, and a view of Ada's from before it has no window to see.
              */
             ask: async () => {
               await until(() => {
@@ -1107,6 +1117,7 @@ describe("runSession", () => {
                 return (
                   view.phase === "playing" &&
                   view.currentTurnPlayerId === view.you.id &&
+                  adaView!.currentTurnPlayerId === view.you.id &&
                   !slapdownOpen(adaView!)
                 );
               });

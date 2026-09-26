@@ -36,10 +36,13 @@ multi-deck support is ever added, ids must gain a copy suffix or become UUIDs.
 - Each player is dealt **5 cards**.
 - After dealing, one card is turned face up from the draw pile to start the discard.
   That card is available to be picked up by the first player.
-- Turn order is join order, and covers the players still in the match: a player who goes
-  out (§7) drops out of it, and everyone left keeps their relative order. Where a player
-  sits at the table is a separate thing and does not change — a seat stays where it was for
-  the life of the room, whether or not its player is still in the match.
+- The **seating** — where each player sits at the table — is drawn **uniformly at random**
+  over every seat, host and bots included, when the match is first dealt. It is fixed from
+  then on for the life of the room: a seat stays where it was whether or not its player is
+  still in the match, and a rematch (Play again) is dealt at the same table, nobody moving.
+- Turn order follows the seating round the table, and covers the players still in the
+  match: a player who goes out (§7) drops out of it, and everyone left keeps their relative
+  order.
 - The player who opens round 1 is chosen **uniformly at random** from the seated
   players (see [ADR-0001](adr/0001-random-starting-player.md)). In every later round,
   the player who *won* the previous round starts (see §6).

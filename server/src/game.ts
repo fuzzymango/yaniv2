@@ -90,6 +90,13 @@ function randomOpener(state: GameState, rng: Rng): string {
  * The host starts the match from the lobby, but does not necessarily take the first
  * turn: the opening player is chosen uniformly at random from the seated players —
  * see ADR-0001.
+ *
+ * It also draws the seating (docs/rules.md §2): the whole roster, host and bots included,
+ * is put in a uniformly random order, and that order is the table for the life of the
+ * room — `playAgain` deals from the roster as it stands. The roster is what is shuffled
+ * rather than turn order alone, because turn order is derived from it: play goes round the
+ * table rather than jumping about it. Drawn after every refusal, so a refused start
+ * reorders nothing, and before the opener, which stays its own draw over the whole table.
  */
 export function startGame(
   state: GameState,
@@ -114,7 +121,8 @@ export function startGame(
       `Need at least ${MIN_PLAYERS} players to start`,
     );
   }
-  return ok(dealRound(state, randomOpener(state, rng), rng));
+  const drawn: GameState = { ...state, players: shuffle(state.players, rng) };
+  return ok(dealRound(drawn, randomOpener(drawn, rng), rng));
 }
 
 /**

@@ -169,10 +169,11 @@ describe("resume tokens", () => {
     unwrap(rooms.joinRoom(roomCode, "Grace", null));
     unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
 
-    assert.deepEqual(
-      rooms.getState(roomCode)!.players.map((p) => p.resumeToken),
-      ["token-1", "token-2"],
+    // Keyed by name, not read in roster order: the deal draws the seating (docs/rules.md §2).
+    const tokens = Object.fromEntries(
+      rooms.getState(roomCode)!.players.map((p) => [p.name, p.resumeToken]),
     );
+    assert.deepEqual(tokens, { Ada: "token-1", Grace: "token-2" });
   });
 });
 

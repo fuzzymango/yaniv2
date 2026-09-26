@@ -384,11 +384,10 @@ async function twoHumanMatch(server: Harness): Promise<[Session, Session]> {
  *
  * Reaching a callable hand is a race: five bots are shedding as fast as this seat is and
  * each of them calls the instant it is legal, so on most deals a bot ends the round first.
- * This one is a deal where the human seat gets there — in two turns, which also keeps the
- * suite quick. Nothing else about it is special, and `playUntilCallable` says so out loud
- * if it ever stops being true.
+ * This one is a deal where the human seat gets there. Nothing else about it is special, and
+ * `playUntilCallable` says so out loud if it ever stops being true.
  */
-const HUMAN_CALLS_FIRST = 27;
+const HUMAN_CALLS_FIRST = 15;
 
 /** Worth taking face up rather than gambling on the deck, for the driver below. */
 const CHEAP_PICKUP = 3;
@@ -549,7 +548,7 @@ async function playToMatchEnd(sessions: Session[]): Promise<SessionSnapshot> {
 
 describe("the session core", () => {
   it("creates a room and shows its code", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await server.openSession();
       session.createRoom("Ada");
@@ -565,7 +564,7 @@ describe("the session core", () => {
   });
 
   it("joins a room whose code was typed in lowercase", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, roomCode] = await hostARoom(server, "Ada");
 
@@ -595,7 +594,7 @@ describe("the session core", () => {
   });
 
   it("leaves a player on the main menu when the code is wrong", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await server.openSession();
       session.joinRoom("ZZZZ", "Ada");
@@ -616,7 +615,7 @@ describe("the session core", () => {
   });
 
   it("says so when the room is full", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [, roomCode] = await hostARoom(server, "Ada");
 
@@ -639,7 +638,7 @@ describe("the session core", () => {
   });
 
   it("refuses an unusable name without asking the server", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await server.openSession();
 
@@ -667,7 +666,7 @@ describe("the session core", () => {
   });
 
   it("asks for one room however many times the control is tapped", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await server.openSession();
       // A phone on a slow connection double-taps far more readily than a keyboard
@@ -689,7 +688,7 @@ describe("the session core", () => {
   });
 
   it("refuses to join under an empty name too", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [, roomCode] = await hostARoom(server, "Ada");
 
@@ -705,7 +704,7 @@ describe("the session core", () => {
   });
 
   it("fills every empty seat with a bot when the host starts", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host] = await hostARoom(server, "Ada");
       host.startGame();
@@ -735,7 +734,7 @@ describe("the session core", () => {
   });
 
   it("seats only as many bots as the room asks for", async () => {
-    const server = await startServer(7, 2);
+    const server = await startServer(26, 2);
     try {
       const [host] = await hostARoom(server, "Ada");
       host.startGame();
@@ -753,7 +752,7 @@ describe("the session core", () => {
   });
 
   it("refuses a start with nobody to play against", async () => {
-    const server = await startServer(7, 0);
+    const server = await startServer(26, 0);
     try {
       const [host] = await hostARoom(server, "Ada");
       host.startGame();
@@ -767,7 +766,7 @@ describe("the session core", () => {
   });
 
   it("refuses a guest's start and leaves the lobby where it was", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
 
@@ -788,7 +787,7 @@ describe("the session core", () => {
   });
 
   it("frees only their own seat when a guest exits to the menu", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
       await waitForSnapshot(host, "the table to fill", (s) => s.view?.opponents.length === 1);
@@ -821,7 +820,7 @@ describe("the session core", () => {
    * plays on for whoever remains, and the role goes with the roster that arrives behind it.
    */
   it("hands the lobby on when the host exits, leaving the room standing", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
       await waitForSnapshot(host, "the table to fill", (s) => s.view?.opponents.length === 1);
@@ -847,7 +846,7 @@ describe("the session core", () => {
   });
 
   it("does not blame a guest for an action the closing room refused", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
 
@@ -873,7 +872,7 @@ describe("the session core", () => {
   });
 
   it("lets a player who has left straight into another room", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [, guest] = await hostAndGuest(server);
 
@@ -898,7 +897,7 @@ describe("the session core", () => {
    * sit them back down at it on the next page load.
    */
   it("forgets the seat of a player who leaves", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const tokens = fakeTokens();
       const host = await server.openSession({ seat: tokens.store });
@@ -922,7 +921,7 @@ describe("the session core", () => {
    * and the round carries on for whoever stayed, one seat shorter.
    */
   it("leaves a room mid-round, and the round plays on without them", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await twoHumanMatch(server);
       const guestId = guest.getSnapshot().view!.you.id;
@@ -953,7 +952,7 @@ describe("the session core", () => {
 
   /** The credential goes with the seat mid-round too: leaving means something (#147). */
   it("forgets the seat of a player who leaves mid-round", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const tokens = fakeTokens();
       const host = await server.openSession({ seat: tokens.store });
@@ -991,7 +990,7 @@ describe("the room's settings", () => {
   };
 
   it("carries the host's edit to every screen in the lobby", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
 
@@ -1025,7 +1024,7 @@ describe("the room's settings", () => {
   });
 
   it("deals the hand size the host asked for", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
 
@@ -1049,7 +1048,7 @@ describe("the room's settings", () => {
   });
 
   it("refuses a guest's edit and releases the controls on the refusal alone", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
 
@@ -1072,7 +1071,7 @@ describe("the room's settings", () => {
   });
 
   it("refuses the host's own edit once the match has started", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
       host.startGame();
@@ -1101,7 +1100,7 @@ describe("the room's settings", () => {
 
 describe("taking a turn", () => {
   it("discards the selection and draws the deck in one action", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const chosen = playingSelf(host.getSnapshot().view!).hand[0]!;
@@ -1135,7 +1134,7 @@ describe("taking a turn", () => {
   });
 
   it("takes an end of the discard when that is what was tapped", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const before = host.getSnapshot().view!;
@@ -1156,7 +1155,7 @@ describe("taking a turn", () => {
   });
 
   it("gives the controls back when a turn is refused", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [, waiting] = await twoHumanMatch(server);
       const chosen = playingSelf(waiting.getSnapshot().view!).hand[0]!;
@@ -1181,7 +1180,7 @@ describe("taking a turn", () => {
   });
 
   it("sends one turn however many times the deck is tapped", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const chosen = playingSelf(host.getSnapshot().view!).hand[0]!;
@@ -1205,7 +1204,7 @@ describe("taking a turn", () => {
   });
 
   it("keeps a selection across a view that leaves the hand alone", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [mover, waiting] = await twoHumanMatch(server);
       const chosen = playingSelf(waiting.getSnapshot().view!).hand[0]!;
@@ -1229,7 +1228,7 @@ describe("taking a turn", () => {
   });
 
   it("never sends a turn the rules do not permit", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const hand = playingSelf(host.getSnapshot().view!).hand;
@@ -1262,11 +1261,11 @@ describe("taking a turn", () => {
  * Slapping down (docs/rules.md §9): the one action taken while the turn belongs to
  * somebody else.
  *
- * Every test here needs two humans. `startGame` seats bots behind the two of them, and
- * this suite's server is built with bot think time off — so a bot plays as soon as the
- * event loop lets it, and a window opened in front of one is shut before the broadcast
- * announcing it has been drawn. The guest sitting directly behind the host is what holds
- * one open long enough to tap.
+ * Every test here needs two humans. This suite's server is built with bot think time off —
+ * so a bot plays as soon as the event loop lets it, and a window opened in front of one is
+ * shut before the broadcast announcing it has been drawn. The guest sitting directly behind
+ * the host is what holds one open long enough to tap, and with the seating drawn at the
+ * deal (docs/rules.md §2) only a table of the two of them promises that.
  */
 describe("slapping down", () => {
   /**
@@ -1287,9 +1286,9 @@ describe("slapping down", () => {
    * Sit two humans down and play until the host draws a card they may slap down,
    * stopping exactly there: the window open, the turn with the guest, nothing else moved.
    *
-   * Only the host's windows count. The roster is seated in join order, so the guest is
-   * behind the host and a bot is behind the guest — and with think time off, a window of
-   * the guest's own is shut as soon as that bot gets a turn of the event loop.
+   * Only the host's windows count, and the server this is played on seats no bots: the
+   * seating is drawn at the deal (docs/rules.md §2), and a table of two is the one where
+   * the guest is behind the host whatever the draw.
    */
   async function playToAnOpenWindow(server: Harness): Promise<[Session, Session]> {
     const [host, guest] = await hostAndGuest(server);
@@ -1349,7 +1348,7 @@ describe("slapping down", () => {
   }
 
   it("tells the player whose window it is, and nobody else", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26, 0);
     try {
       const [host, guest] = await playToAnOpenWindow(server);
 
@@ -1358,7 +1357,16 @@ describe("slapping down", () => {
         true,
         "the window is on the position the screen reads",
       );
-      const seenByGuest = guest.getSnapshot().view!;
+      // The guest's view of that same position, which is the one with the turn on them:
+      // the one before it is their own move's, and may hold a window of their own.
+      const guestId = guest.getSnapshot().view!.you.id;
+      const seenByGuest = (
+        await waitForSnapshot(
+          guest,
+          "the guest to see the host's move",
+          (s) => s.view?.phase === "playing" && s.view.currentTurnPlayerId === guestId,
+        )
+      ).view!;
       assert.equal(slapdownOpen(seenByGuest), false);
       assert.ok(
         !JSON.stringify(seenByGuest).includes('"slapdownEligible":true'),
@@ -1370,7 +1378,7 @@ describe("slapping down", () => {
   });
 
   it("puts the drawn card back down without taking a turn", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26, 0);
     try {
       const [host] = await playToAnOpenWindow(server);
       const before = host.getSnapshot().view!;
@@ -1403,7 +1411,7 @@ describe("slapping down", () => {
   });
 
   it("sends one slap however many times the pile is tapped", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26, 0);
     try {
       const [host] = await playToAnOpenWindow(server);
       const before = host.getSnapshot().view!;
@@ -1426,7 +1434,7 @@ describe("slapping down", () => {
    * outcome — a card lighter, or told why not — and never half of each.
    */
   it("resolves a race with the next player one way or the other", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26, 0);
     try {
       const [host, guest] = await playToAnOpenWindow(server);
       const before = host.getSnapshot().view!;
@@ -1464,7 +1472,7 @@ describe("slapping down", () => {
   });
 
   it("never sends a slap when there is no window", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
 
@@ -1498,7 +1506,7 @@ describe("the move to animate", () => {
   }
 
   it("carries the move a position was reached by", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const chosen = playingSelf(host.getSnapshot().view!).hand[0]!;
@@ -1531,7 +1539,7 @@ describe("the move to animate", () => {
   });
 
   it("keeps a bot's deck draw as hidden as the server left it", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const flights = flightsShownTo(host);
@@ -1566,7 +1574,7 @@ describe("the move to animate", () => {
   });
 
   it("has nothing to animate when the seat is claimed back", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
 
@@ -1590,7 +1598,7 @@ describe("the move to animate", () => {
   });
 
   it("does not carry a move into the next thing published", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
 
@@ -1687,7 +1695,7 @@ describe("the call to announce", () => {
   });
 
   it("announces exactly the rounds a match scored, in the order they were scored", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const heard = callsHeardBy(host);
@@ -1843,7 +1851,7 @@ describe("watching the bots play", () => {
   }
 
   it("draws every position the server sends, as it arrives", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const ours = host.getSnapshot().view!;
@@ -1888,7 +1896,7 @@ describe("watching the bots play", () => {
   });
 
   it("puts a player's own move on the screen without waiting on anything", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const ours = host.getSnapshot().view!;
@@ -2029,7 +2037,7 @@ describe("calling Yaniv", () => {
 
 describe("a finished match", () => {
   it("stops on a position that says who won", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const over = await playToMatchEnd([host]);
@@ -2049,7 +2057,7 @@ describe("a finished match", () => {
   });
 
   it("deals another match for the same table when the host asks", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const over = await playToMatchEnd([host]);
@@ -2083,7 +2091,7 @@ describe("a finished match", () => {
    * offered is the screen's business; whether a match is dealt is the server's.
    */
   it("deals another match when the player who did not make the room asks", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
       host.startGame();
@@ -2111,7 +2119,7 @@ describe("a finished match", () => {
   });
 
   it("still names a player who left after the match ended", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
       host.startGame();
@@ -2142,7 +2150,7 @@ describe("a finished match", () => {
   });
 
   it("leaves the room from the standings without dropping the connection", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       await playToMatchEnd([host]);
@@ -2173,7 +2181,7 @@ describe("a finished match", () => {
  * seat that made the room may itself be knocked out of. Nothing else about it is special,
  * and `matchGoneOnWithout` says so out loud if it ever stops being true.
  */
-const HUMAN_GOES_OUT_FIRST = 1;
+const HUMAN_GOES_OUT_FIRST = 2;
 
 /**
  * A maximum score one scored round takes a seat past, with seats left under it.
@@ -2223,7 +2231,7 @@ async function matchGoneOnWithout(server: Harness): Promise<[Session, Session]> 
  */
 describe("when the match goes on without you", () => {
   it("drops a pending selection when the position arriving has taken its owner out", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server, OUT_IN_ONE_ROUND);
 
@@ -2382,7 +2390,7 @@ describe("when the match goes on without you", () => {
  */
 describe("when the connection goes", () => {
   it("says so when the connection drops", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       assert.equal(host.getSnapshot().connected, true, "the table was being played on");
@@ -2397,7 +2405,7 @@ describe("when the connection goes", () => {
   });
 
   it("does not leave the controls locked when a move's connection drops", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const view = host.getSnapshot().view!;
@@ -2417,7 +2425,7 @@ describe("when the connection goes", () => {
   });
 
   it("sits back down at the same table when the connection comes back", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const table = host.getSnapshot().view!;
@@ -2460,7 +2468,7 @@ describe("when the connection goes", () => {
    * returning connection uses.
    */
   it("returns to the main menu, saying why, when the seat cannot be had back", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const tokens = fakeTokens();
       tokens.store.set({
@@ -2542,7 +2550,7 @@ describe("when the connection goes", () => {
   });
 
   it("shows an error the server sends unprompted", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const host = await soloMatch(server);
       const pushed: GameError = { code: "WRONG_PHASE", message: "Something went wrong" };
@@ -2558,7 +2566,7 @@ describe("when the connection goes", () => {
   });
 
   it("does not push an error at a player with no room to be in", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const menu = await server.openSession();
 
@@ -2574,7 +2582,7 @@ describe("when the connection goes", () => {
   });
 
   it("claims a stored seat back on a cold boot, before the main menu", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const tokens = fakeTokens();
       const first = await server.openSession({ seat: tokens.store });
@@ -2607,7 +2615,7 @@ describe("when the connection goes", () => {
   });
 
   it("forgets a seat it is refused, and says the game has gone", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const tokens = fakeTokens();
       const first = await server.openSession({ seat: tokens.store });
@@ -2633,7 +2641,7 @@ describe("when the connection goes", () => {
   });
 
   it("forgets the seat when the player gives it up", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const tokens = fakeTokens();
       const session = await server.openSession({ seat: tokens.store });
@@ -2664,7 +2672,7 @@ describe("when the connection goes", () => {
    * and it is given up when the seat is.
    */
   it("remembers the room as the server spells it, and forgets it on the way out", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const [, roomCode] = await hostARoom(server, "Ada");
       const tokens = fakeTokens();
@@ -2738,7 +2746,7 @@ async function signUp(
 
 describe("an account", () => {
   it("starts every session a guest", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await server.openSession();
       assert.deepEqual(session.getSnapshot().account, { status: "guest" });
@@ -2748,7 +2756,7 @@ describe("an account", () => {
   });
 
   it("asks a new player to confirm the name Google suggested, then signs them in", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const account = fakeAccount();
       const idToken = `${ID_TOKEN_MARK}ada`;
@@ -2776,7 +2784,7 @@ describe("an account", () => {
   });
 
   it("signs a returning player straight in, with no name to confirm", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       await signUp(server, { sub: "google-ada", name: "Ada" });
 
@@ -2793,7 +2801,7 @@ describe("an account", () => {
   });
 
   it("never puts either credential on the snapshot", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const account = fakeAccount();
       const idToken = `${ID_TOKEN_MARK}ada`;
@@ -2828,7 +2836,7 @@ describe("an account", () => {
   });
 
   it("releases the controls on each account event's own answer", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const idToken = `${ID_TOKEN_MARK}ada`;
       server.vouchFor(idToken, { sub: "google-ada", name: "Ada" });
@@ -2858,7 +2866,7 @@ describe("an account", () => {
   });
 
   it("sends one sign-in however many times it is asked for", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const idToken = `${ID_TOKEN_MARK}ada`;
       server.vouchFor(idToken, { sub: "google-ada", name: "Ada" });
@@ -2876,7 +2884,7 @@ describe("an account", () => {
   });
 
   it("says so when Google did not vouch for the token, and stays a guest", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await server.openSession();
 
@@ -2891,7 +2899,7 @@ describe("an account", () => {
   });
 
   it("drops a first sign-in the player backs out of, holding nothing from it", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const account = fakeAccount();
       const idToken = `${ID_TOKEN_MARK}ada`;
@@ -2915,7 +2923,7 @@ describe("an account", () => {
   });
 
   it("refuses an unusable account name without asking the server", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const idToken = `${ID_TOKEN_MARK}ada`;
       server.vouchFor(idToken, { sub: "google-ada", name: "Ada" });
@@ -2955,7 +2963,7 @@ describe("an account", () => {
    * to go, even when the new name is the old one.
    */
   it("replaces the standing a rename was asked over only when the rename lands", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await signUp(server, { sub: "google-ada", name: "Ada" });
       const asked = session.getSnapshot().account;
@@ -2980,7 +2988,7 @@ describe("an account", () => {
    * answer about a name — so neither is carried across the panel's edge.
    */
   it("lets go of a refusal once it has been read, and of nothing else", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await signUp(server, { sub: "google-ada", name: "Ada" });
       const standing = session.getSnapshot().account;
@@ -2999,7 +3007,7 @@ describe("an account", () => {
   });
 
   it("seats a signed-in player under their account's name, asking them for none", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await signUp(server, { sub: "google-ada", name: "Ada" });
       session.renameAccount("Countess");
@@ -3022,7 +3030,7 @@ describe("an account", () => {
   });
 
   it("signs out: forgets both credentials, tells Google, and plays on as a guest", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const account = fakeAccount();
       const tokens = fakeTokens();
@@ -3056,7 +3064,7 @@ describe("an account", () => {
   });
 
   it("is not offered at a table, where it would forget the seat being sat in", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const tokens = fakeTokens();
       const session = await signUp(server, { sub: "google-ada", name: "Ada" }, { seat: tokens.store });
@@ -3074,7 +3082,7 @@ describe("an account", () => {
   });
 
   it("does not sign out over a connection that is down", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const account = fakeAccount();
       const { google, disabled } = fakeGoogle();
@@ -3101,7 +3109,7 @@ describe("an account", () => {
   });
 
   it("stays signed in when the connection drops and comes back", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const session = await signUp(server, { sub: "google-ada", name: "Ada" });
 
@@ -3131,7 +3139,7 @@ describe("a cold boot with an account", () => {
   const readsAsMainMenu = (s: SessionSnapshot) => s.view === null && !s.resuming;
 
   it("resumes the session, then the seat, never showing the main menu between them", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const account = fakeAccount();
       const tokens = fakeTokens();
@@ -3166,7 +3174,7 @@ describe("a cold boot with an account", () => {
   });
 
   it("resumes an account with no seat, coming up signed in rather than as a guest", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const account = fakeAccount();
       const first = await signUp(server, { sub: "google-ada", name: "Ada" }, { account: account.store });
@@ -3190,7 +3198,7 @@ describe("a cold boot with an account", () => {
   });
 
   it("lands a lapsed session on the main menu as a guest, told once", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const account = fakeAccount();
       const tokens = fakeTokens();
@@ -3233,7 +3241,7 @@ describe("a cold boot with an account", () => {
   });
 
   it("still claims a guest seat behind a session it is refused", async () => {
-    const server = await startServer(7);
+    const server = await startServer(26);
     try {
       const tokens = fakeTokens();
       const guest = await server.openSession({ seat: tokens.store });

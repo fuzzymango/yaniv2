@@ -72,6 +72,10 @@ bot count or somebody joins. The moment the match starts the settings lock for t
 the room — `Play again` deals another match with the same ones — and move behind the small
 icon in the top corner of every in-match screen, which opens them read-only for everybody.
 
+Where everybody sits is drawn at random when the first match is dealt, host and bots alike,
+and kept for every match played in the room after it; play goes round the table in that
+order (`docs/rules.md` §2). The lobby lists the room in the order people arrived.
+
 Everyone else sits round the table, their hand fanned face down at their seat — one card
 per card they are actually holding, so a hand shrinking is something you watch rather than
 a number you notice — with their name, count and score on a label beside it, and that label

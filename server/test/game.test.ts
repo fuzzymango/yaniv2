@@ -12,6 +12,7 @@ import {
   updateSettings,
 } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
+import { RoomManager } from "../src/roomManager.ts";
 import type { StateOptions } from "./helpers.ts";
 import {
   RESUME_TOKEN_MARK,
@@ -110,6 +111,110 @@ describe("startGame", () => {
     });
     const state = unwrap(startGame(withBots, "p1", rng()));
     assert.equal(state.phase, "playing");
+  });
+});
+
+/**
+ * docs/rules.md §2: the seating is drawn uniformly at random over every seat when the
+ * match is first dealt, and turn order follows it round the table. `seatBots` appends
+ * bots after every human, so without the draw they would always sit in a block.
+ */
+describe("startGame — drawing the seating", () => {
+  /**
+   * Two humans in join order, host first, and the two bots `seatBots` appends after them —
+   * the table the socket handler hands `startGame`. Bot ids are counted rather than random,
+   * so two calls build the same lobby.
+   */
+  const humansThenBots = () => {
+    let bots = 0;
+    const rooms = new RoomManager({ newPlayerId: () => `bot${++bots}` });
+    return rooms.seatBots(
+      makeState({
+        phase: "lobby",
+        roundNumber: 0,
+        players: [{ id: "host" }, { id: "guest" }],
+        settings: { botCount: 2 },
+      }),
+    );
+  };
+
+  const seatingFor = (lobby: ReturnType<typeof makeState>, seed: number) =>
+    unwrap(startGame(lobby, lobby.hostId, mulberry32(seed))).players.map((p) => p.id);
+
+  it("can come out as every one of a four-seat table's 24 orders, host and bots included", () => {
+    const seatings = new Set<string>();
+    for (let seed = 0; seed < 1000; seed++) {
+      seatings.add(seatingFor(humansThenBots(), seed).join(","));
+    }
+    assert.equal(seatings.size, 24, `only these came out: ${[...seatings].join(" | ")}`);
+  });
+
+  it("draws an all-human table too, not only one with bots to spread out", () => {
+    const lobby = () =>
+      makeState({
+        phase: "lobby",
+        roundNumber: 0,
+        players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      });
+    const departures = Array.from({ length: 50 }, (_, seed) => seatingFor(lobby(), seed))
+      .filter((seating) => seating.join(",") !== "p1,p2,p3");
+    assert.ok(departures.length > 0, "every seed kept join order");
+  });
+
+  it("gives the same seating for the same seed", () => {
+    for (const seed of [0, 7, 1234]) {
+      assert.deepEqual(seatingFor(humansThenBots(), seed), seatingFor(humansThenBots(), seed));
+    }
+  });
+
+  /** The roster is what is drawn, so play goes round the table rather than about it. */
+  it("deals the first round's turn order in the drawn seating's order", () => {
+    for (let seed = 0; seed < 50; seed++) {
+      const lobby = humansThenBots();
+      const state = unwrap(startGame(lobby, lobby.hostId, mulberry32(seed)));
+      assert.equal(state.phase, "playing");
+      assert.deepEqual(state.round.turnOrder, state.players.map((p) => p.id));
+    }
+  });
+
+  /** ADR-0001: two draws answering two questions, so the opener is not the first seat. */
+  it("still draws the opener from the whole table, not whoever landed first", () => {
+    const openers = new Set<string>();
+    let openedByFirstSeat = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      const lobby = humansThenBots();
+      const state = unwrap(startGame(lobby, lobby.hostId, mulberry32(seed)));
+      assert.equal(state.phase, "playing");
+      openers.add(state.round.currentTurnPlayerId);
+      if (state.round.currentTurnPlayerId === state.players[0]!.id) openedByFirstSeat++;
+    }
+    assert.equal(openers.size, 4, `only these opened: ${[...openers]}`);
+    assert.ok(openedByFirstSeat < 200, "the first seat in the roster opened every match");
+  });
+
+  /**
+   * A refusal is a `Result`, so nothing reaches the room's `apply` — but only if the draw
+   * builds a new roster rather than shuffling the one it was handed in place on the way
+   * past, which every refusal and the start itself are checked for here.
+   */
+  it("returns every refusal, and leaves the roster it was handed as it was", () => {
+    const lobby = humansThenBots();
+    const alone = makeState({ phase: "lobby", roundNumber: 0, players: [{ id: "host" }] });
+    const dealt = unwrap(startGame(humansThenBots(), "host", rng()));
+    const refusals = [
+      [lobby, "guest", "NOT_HOST"],
+      [alone, "host", "NOT_ENOUGH_PLAYERS"],
+      [dealt, "host", "WRONG_PHASE"],
+    ] as const;
+
+    for (const [state, requester, code] of refusals) {
+      const before = JSON.stringify(state);
+      expectErr(startGame(state, requester, rng()), code);
+      assert.equal(JSON.stringify(state), before, `${code} reordered the roster`);
+    }
+    const before = JSON.stringify(lobby);
+    unwrap(startGame(lobby, lobby.hostId, rng()));
+    assert.equal(JSON.stringify(lobby), before, "the start reordered the lobby it was handed");
   });
 });
 
@@ -2324,6 +2429,43 @@ describe("playAgain", () => {
     assert.deepEqual(again.round.turnOrder, ["p1", "p3"], "the departed seat is not dealt");
     assert.equal(again.players.find((p) => p.id === "p2")!.outInRound, 0);
     assert.equal(again.players.find((p) => p.id === "p2")!.departed, true);
+  });
+
+  /**
+   * docs/rules.md §2: the seating is drawn once per room, at the first deal, so a rematch
+   * is dealt at the same table — a given-up seat in its place — while who opens it is
+   * drawn again (ADR-0001). The roster here is deliberately not in join order, as a drawn
+   * one would not be, so a redraw could not pass for keeping it.
+   */
+  it("keeps the table's seating, a departed seat in its place, and draws the opener again", () => {
+    const played = finishedMatch();
+    const [p1, p2] = played.players;
+    const finished = unwrap(
+      removePlayer(
+        {
+          ...played,
+          players: [
+            { ...p1!, id: "p3", name: "Third" },
+            p1!,
+            { ...p1!, id: "p4", name: "Fourth" },
+            p2!,
+          ],
+        },
+        "p4",
+      ),
+    );
+    const seating = finished.players.map((p) => p.id);
+    assert.deepEqual(seating, ["p3", "p1", "p4", "p2"]);
+
+    const openers = new Set<string>();
+    for (let seed = 0; seed < 100; seed++) {
+      const again = unwrap(playAgain(finished, "p1", mulberry32(seed)));
+      assert.equal(again.phase, "playing");
+      assert.deepEqual(again.players.map((p) => p.id), seating);
+      assert.deepEqual(again.round.turnOrder, ["p3", "p1", "p2"]);
+      openers.add(again.round.currentTurnPlayerId);
+    }
+    assert.deepEqual([...openers].sort(), ["p1", "p2", "p3"]);
   });
 
   /**

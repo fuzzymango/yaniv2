@@ -396,10 +396,11 @@ always distinct:
 - **Turn order** is the sequence play moves in — who acts after whom, within a round. It
   holds only the players still in the match, so a player going out comes out of it and the
   rest keep their relative order (`docs/rules.md` §2, §7). It is a fact about the round.
-- **Seating** is where a player is drawn at the table: their position in the roster, which
-  a room only ever appends to once it has dealt. It is fixed for the life of the room, so
-  a seat holds its place whether its player is out, gone, or still playing, and the table
-  does not rearrange itself around whoever is left.
+- **Seating** is where a player is drawn at the table: their position in the roster, whose
+  order is drawn at random at the first deal and which a room only ever appends to after
+  it. It is fixed for the life of the room, so a seat holds its place whether its player
+  is out, gone, or still playing, and the table does not rearrange itself around whoever
+  is left.
 
 Which is why a client seats off the roster and not off turn order: a table redrawn from
 turn order would shuffle every remaining player one place along each time somebody was
