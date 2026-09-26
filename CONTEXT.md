@@ -483,7 +483,7 @@ less than the host asked for, the same way an empty seat has always just gone to
 
 ## Account, guest and display name
 
-**Account** — an identity that outlives every room: a display name and one counter, keyed by
+**Account** — an identity that outlives every room: a display name and its **stats**, keyed by
 its own id and never by anything Google issued. A connection binds one at the main menu,
 before any room; a seat records the one that took it, for life. Newer wins: an account is
 live on one connection at a time.
@@ -491,10 +491,27 @@ live on one connection at a time.
 **Guest** — a human with no account. Their seat's identity is its resume token; their calls
 are counted nowhere. Bots are not guests.
 
-**Yaniv call** — the act of ending a round by calling, and what an account's one counter
+**Yaniv call** — the act of ending a round by calling, and what the Yaniv-calls stat
 counts: every accepted call, whether it stood or was Assafed. **Assaf** qualifies the round's
 outcome and says nothing about whether a call happened
 ([ADR-0023](docs/adr/0023-the-yaniv-call-write.md)).
+
+**Assafer** — the one player an Assafed round names (`docs/rules.md` §6): lowest hand at or
+under the caller's, ties to turn order. Never plural: a player who was also at or under the
+caller but lost that tie-break did not Assaf, and no stat says they did. So every Assaf has
+exactly one Assafer and one caller Assafed.
+
+**Game completed** — a match an account played to its end *from its own seat*: it was
+**eliminated** from it, or **won** it. Leaving is neither, so a match walked out of is not
+completed, and neither is one still being played when its room was swept. **Game won** — a
+completed match the account was the winner of. A loss is not a stat of its own: it is a
+completed game not won.
+
+**Stats** — an account's six counters: **Yaniv calls**, **calls Assafed** (of those, the ones
+that were Assafed), **Assafs** (rounds it was the Assafer), **games completed**, **games won**
+and **slapdowns**. Only what a counter can't be worked out from is kept: a call that stood is
+a Yaniv call not Assafed, and a loss is a game completed and not won. A stat belongs to an
+account, never to a seat, so a guest's play and a bot's count towards nothing.
 
 **Display name** — the name a player is known by at a table. A guest types one per room; an
 account carries its own, the same in every room, changed only by renaming the account.
