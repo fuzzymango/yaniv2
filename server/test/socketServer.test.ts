@@ -1128,6 +1128,9 @@ describe("updateSettings", () => {
     const guest = await server.connect();
     const guestViews = watch(guest);
     expectOk(await ask(guest, "joinRoom", roomCode, "Grace"));
+    // The guest's ack says nothing about the host's connection: wait for the arrival to
+    // reach the host too, or it could land after a test has reset what the host has seen.
+    await hostViews.until((v) => v.opponents.length === 1, "the guest's arrival");
 
     return { roomCode, host, hostViews, guest, guestViews };
   }
