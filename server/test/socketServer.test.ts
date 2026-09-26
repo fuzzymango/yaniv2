@@ -311,6 +311,10 @@ describe("createRoom", () => {
     assert.ok(result.value.playerId.length > 0, "a player id was issued");
   });
 
+  /**
+   * Also the wiring proof that a seated arrival is published to: seating publishes nothing,
+   * so this lobby reaches the host only because the adapter reports the bind to `Rooms`.
+   */
   it("publishes the room's settings with the lobby, before any round is dealt", async () => {
     const client = await server.connect();
     const lobby = nextEvent<PlayerGameView>(client, "gameStateUpdate");

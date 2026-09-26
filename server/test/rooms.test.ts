@@ -103,12 +103,31 @@ function drop(h: Harness, { roomCode, playerId }: Seated): void {
   h.rooms.attendanceChanged(roomCode);
 }
 
-/** Open a room and connect its host, as `createRoom` over a socket does. */
-function host(h: Harness, name = "Ada", accountId: string | null = null): Seated {
-  const { roomCode, playerId } = unwrap(h.rooms.createRoom(name, accountId));
-  const seated = { roomCode, playerId };
-  arrive(h, seated);
-  return seated;
+/**
+ * Open a room and connect its host, as `createRoom` over a socket does. Answers the seat
+ * with the token it is claimed back by, for the tests about coming back to one.
+ */
+function host(
+  h: Harness,
+  name = "Ada",
+  accountId: string | null = null,
+): Seated & { resumeToken: string } {
+  const { roomCode, playerId, resumeToken } = unwrap(h.rooms.createRoom(name, accountId));
+  arrive(h, { roomCode, playerId });
+  return { roomCode, playerId, resumeToken };
+}
+
+/**
+ * A lone human knocked out by the first round seed 2 deals, three bots playing on — so the
+ * scored round it is left watching is one only the room can deal on (docs/adr/0014).
+ */
+function outAndWatching(): { h: Harness; ada: Seated; scored: PlayerGameView } {
+  const h = harness({ botCount: 3, maxScore: 20 }, { seed: 2 });
+  const ada = host(h);
+  start(h, ada);
+  const scored = playUntil(h, [ada], (v) => v.phase === "roundEnd");
+  assert.ok(scored.you.spectating, "the round put the human out");
+  return { h, ada, scored };
 }
 
 /** Seat and connect a second player, as `joinRoom` over a socket does. */
@@ -417,8 +436,7 @@ describe("leave", () => {
    */
   it("seats and hands back nobody once it has ended", () => {
     const h = harness();
-    const { roomCode, playerId, resumeToken } = unwrap(h.rooms.createRoom("Ada", null));
-    arrive(h, { roomCode, playerId });
+    const { roomCode, playerId, resumeToken } = host(h);
 
     unwrap(h.rooms.leave(roomCode, playerId, () => {}));
 
@@ -492,16 +510,9 @@ describe("ending a room", () => {
     assertNothingWaiting(h);
   });
 
-  /**
-   * The seed deals a round that puts the human out and leaves three bots playing on, so the
-   * room is holding a deal for its one spectator (docs/adr/0014) when they go.
-   */
+  /** The room is holding a deal for its one spectator (docs/adr/0014) when they go. */
   it("cancels a waiting deal when its last human leaves", () => {
-    const h = harness({ botCount: 3, maxScore: 20 }, { seed: 2 });
-    const ada = host(h);
-    start(h, ada);
-    playUntil(h, [ada], (v) => v.phase === "roundEnd");
-    assert.ok(viewOf(h, ada).you.spectating, "the round put the human out");
+    const { h, ada } = outAndWatching();
     assert.deepEqual(h.clock.delays(), [AUTO_DEAL_MS], "the deal is waiting");
 
     unwrap(h.rooms.leave(ada.roomCode, ada.playerId, () => {}));
@@ -775,19 +786,6 @@ describe("bot think time", () => {
  * as one that is, and the interval says which pause a timer is.
  */
 describe("auto-dealing a table only bots are still playing", () => {
-  /**
-   * A lone human knocked out by the first round the seed deals, three bots playing on — so
-   * the scored round it is left watching is one only the room can deal on.
-   */
-  function outAndWatching(): { h: Harness; ada: Seated; scored: PlayerGameView } {
-    const h = harness({ botCount: 3, maxScore: 20 }, { seed: 2 });
-    const ada = host(h);
-    start(h, ada);
-    const scored = playUntil(h, [ada], (v) => v.phase === "roundEnd");
-    assert.ok(scored.you.spectating, "the round put the human out");
-    return { h, ada, scored };
-  }
-
   it("deals the next round for a spectator once the pause has elapsed", () => {
     const { h, ada, scored } = outAndWatching();
     assert.deepEqual(h.clock.delays(), [AUTO_DEAL_MS], "the scored round waits to deal itself on");
@@ -890,29 +888,32 @@ describe("auto-dealing a table only bots are still playing", () => {
  * a join refused, no view to build — never by asking the manager.
  */
 describe("sweeping a room nobody is in", () => {
-  /** One human in a fresh room, holding the token their seat is claimed back by. */
-  function sitDown(botCount = 0): { h: Harness; ada: Seated; resumeToken: string } {
+  /** One human alone in a fresh room, bots seated at the deal if a test asks for them. */
+  function aloneInARoom(botCount = 0): { h: Harness; ada: Seated; resumeToken: string } {
     const h = harness({ botCount });
-    const { roomCode, playerId, resumeToken } = unwrap(h.rooms.createRoom("Ada", null));
-    const ada = { roomCode, playerId };
-    arrive(h, ada);
+    const { resumeToken, ...ada } = host(h);
     return { h, ada, resumeToken };
   }
 
-  function comeBack(h: Harness, ada: Seated, resumeToken: string): void {
+  /** The seat claimed back by its token, as `resumeSeat` claims it before it publishes. */
+  function claimBack(h: Harness, ada: Seated, resumeToken: string): void {
     unwrap(h.rooms.claimSeat(ada.roomCode, ada.playerId, { accountId: null, resumeToken }));
+  }
+
+  function comeBack(h: Harness, ada: Seated, resumeToken: string): void {
+    claimBack(h, ada, resumeToken);
     arrive(h, ada);
   }
 
   const sweepWaiting = (h: Harness) => h.clock.delays().includes(ROOM_SWEEP_MS);
 
   it("drops a room no human has been connected to for the grace period", () => {
-    const { h, ada } = sitDown();
+    const { h, ada } = aloneInARoom();
     assert.ok(!sweepWaiting(h), "a room with somebody in it is not counted down");
 
     drop(h, ada);
     assert.ok(sweepWaiting(h), "the grace period is running");
-    assert.ok(h.rooms.viewFor(ada.roomCode, ada.playerId), "and the drop itself cost nothing");
+    assert.ok(h.rooms.viewFor(ada.roomCode, ada.playerId), "the drop itself dropped the room");
 
     h.clock.tickAt(ROOM_SWEEP_MS);
 
@@ -922,7 +923,7 @@ describe("sweeping a room nobody is in", () => {
 
   /** A reload is a disconnect, and the connection coming back is the whole answer to one. */
   it("keeps a room whose connection comes back inside the grace period", () => {
-    const { h, ada, resumeToken } = sitDown();
+    const { h, ada, resumeToken } = aloneInARoom();
     drop(h, ada);
     assert.ok(sweepWaiting(h), "the grace period is running");
 
@@ -933,7 +934,7 @@ describe("sweeping a room nobody is in", () => {
   });
 
   it("gives a lone human against bots their match back after a reload", () => {
-    const { h, ada, resumeToken } = sitDown(2);
+    const { h, ada, resumeToken } = aloneInARoom(2);
     botThinking(h, ada);
     const before = viewOf(h, ada);
 
@@ -959,9 +960,11 @@ describe("sweeping a room nobody is in", () => {
    * with, or that return would have its room swept out from under it.
    */
   it("asks who is there again before dropping the room", () => {
-    const { h, ada } = sitDown();
+    const { h, ada, resumeToken } = aloneInARoom();
     drop(h, ada);
 
+    // Claimed and in the transport's room, with `attendanceChanged` still to come.
+    claimBack(h, ada, resumeToken);
     h.port.setConnected(ada.roomCode, [ada.playerId]);
     h.clock.tickAt(ROOM_SWEEP_MS);
 
