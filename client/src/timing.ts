@@ -141,4 +141,4 @@ export const announceLeaveAt = (count: number): number =>
  * Not derived from `ANNOUNCE_MS`, though it is bounded by it: a shorter announcement is no
  * reason to give a player less time to read the hands.
  */
-export const DEAL_HOLD_MS = 3000;
+export const DEAL_HOLD_MS = 2000;
