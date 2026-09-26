@@ -6,6 +6,7 @@ import {
   ANNOUNCE_EXIT_MS,
   ANNOUNCE_LEAD_MS,
   ANNOUNCE_MS,
+  DEAL_HOLD_MS,
   FLIGHT_MS,
   announceEnterAt,
   announceLeaveAt,
@@ -98,5 +99,26 @@ describe("the announcement chain", () => {
     const stood = announceLeaveAt(1) + ANNOUNCE_EXIT_MS;
     assert.ok(stood < assafed, "the reversal is the longer sequence, by its own beat");
     assert.ok(assafed < AUTO_DEAL_MS / 2, "and both are over long before the table moves on");
+  });
+});
+
+/*
+ * The third root, and nothing derived from it: how long the deal is held back once a round is
+ * scored (issue #205). Asserted only against its two neighbours — the announcement it must not
+ * cut off and the auto-deal it must not outlast — never as a number, since the value between
+ * them is a judgement.
+ */
+describe("the deal hold", () => {
+  it("outlasts the longest call announcement", () => {
+    // Nobody can deal over the call that ended the round: an Assafed round's banners are
+    // both gone before the button goes live.
+    const assafed = announceLeaveAt(2) + ANNOUNCE_EXIT_MS;
+    assert.ok(assafed < DEAL_HOLD_MS);
+  });
+
+  it("is shorter than the server's auto-deal delay", () => {
+    // A human in the browser is never held longer than a bots-only table waits for its
+    // spectator (ADR-0014).
+    assert.ok(DEAL_HOLD_MS < AUTO_DEAL_MS);
   });
 });

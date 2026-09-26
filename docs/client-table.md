@@ -421,3 +421,18 @@ about this table in particular:
   records, with `out` the loudest of them. What carries the round once the banner has faded is
   the line above the felt, which names both players in a sentence, and the scorecard — which
   now speaks the same two colours, yellow for the call and red for the Assaf.
+
+**And the deal waits until the round has been seen** (issues #204, #205). "Deal next round"
+takes the Yaniv call's slot, so a second tap on Yaniv!, or a thumb already on its way there,
+would deal the round away before anybody had read it. The button is drawn disabled —
+exactly as it is while `busy` — for `DEAL_HOLD_MS` (three seconds) from when it first appears
+for a scored round, then goes live on its own, with no countdown. That is a **third timing
+root**, derived from neither the flight's chain nor the announcement's and bounded by both
+neighbours: longer than an Assafed round's banners take to leave, shorter than the server's
+auto-deal delay. Keyed on the scorecard's length, so a republication of the same round
+restarts nothing and every new scored round, a reload and a resumed seat each get a hold of
+their own — which is why it does not ask `bannerAt`, silent where there was no position
+before. Component state and one timer in `Table.tsx`, the jolt's shape; the session core
+gets no clock, and `busy` keeps its one meaning. It is presentation and **not a rule**: the
+server deals at any moment of `roundEnd`, so a CLI player, another browser past its own
+hold, or the auto-deal can deal inside this one.

@@ -6,10 +6,11 @@
  * and the jolt behind it with that. A second constant tuned to look right beside the first
  * would be right only until somebody changed the first.
  *
- * **There are two roots, and that they are two is deliberate** (issue #156). A chain is the
- * parts of one thing, and a card crossing the table and a call being announced are not one
+ * **There are three roots, and that they are several is deliberate** (issue #156). A chain is
+ * the parts of one thing, and a card crossing the table and a call being announced are not one
  * thing — the reasoning is on `ANNOUNCE_MS` below and in docs/adr/0018, and it is the change
- * here most likely to be undone by somebody tidying.
+ * here most likely to be undone by somebody tidying. The third, the deal hold (issue #205),
+ * is a chain of one: a pause on a control rather than an animation.
  *
  * The chains and what each link answers for:
  *
@@ -21,6 +22,8 @@
  *   ANNOUNCE_LEAD_MS    how long YANIV is up alone before ASSAF answers it
  *   ANNOUNCE_ENTER_MS   a banner arriving
  *   ANNOUNCE_EXIT_MS    the pair leaving together
+ *
+ *   DEAL_HOLD_MS        how long a scored round is on screen before it can be dealt away
  *
  * Pure arithmetic and nothing else — no element, no clock, no preference — so the derivations
  * are asserted by a test with no DOM near it, which is the whole reason they live here rather
@@ -118,3 +121,24 @@ export const announceEnterAt = (index: number): number => index * ANNOUNCE_LEAD_
 
 export const announceLeaveAt = (count: number): number =>
   (count - 1) * ANNOUNCE_LEAD_MS + ANNOUNCE_MS;
+
+/**
+ * How long "Deal next round" is held disabled once it first appears for a scored round —
+ * **a third root, derived from neither chain above** (issue #205).
+ *
+ * The browser choosing how long to present a round, **not a rule**: the server accepts a deal
+ * at any moment of `roundEnd`, and a CLI player or the auto-deal may deal inside this hold.
+ * What it stops is a double tap on Yaniv!, or a thumb already on its way to that slot, dealing
+ * the round away before anybody has seen it.
+ *
+ * Bounded below by the longest call announcement — an Assafed round's banners fully gone,
+ * `announceLeaveAt(2) + ANNOUNCE_EXIT_MS` — so nobody deals over the call that ended the
+ * round; and above by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), so a human
+ * is never held longer than a bots-only table waits for its watcher. Where it sits between
+ * them is a judgement: the banners are gone by about 1.35s, which leaves a second and a half
+ * for the revealed hands and the scores.
+ *
+ * Not derived from `ANNOUNCE_MS`, though it is bounded by it: a shorter announcement is no
+ * reason to give a player less time to read the hands.
+ */
+export const DEAL_HOLD_MS = 3000;
