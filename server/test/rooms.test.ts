@@ -763,6 +763,217 @@ describe("bot think time", () => {
 });
 
 /**
+ * Dealing a scored round on when nobody left in the match can deal it (docs/adr/0014).
+ *
+ * A spectator whose match went on without them watches the bots that beat them play; only
+ * a player still in the match may deal the next round (docs/adr/0012), so the room deals it
+ * after a pause — at `roundEnd` and nowhere else, where every seat still in the match is a
+ * bot, and while somebody is watching. Each condition is a rule, so each has a table here
+ * that fails it alone and is left waiting on nothing but what a drop starts.
+ *
+ * The clock is the whole of it again: a deal that is not waiting is asserted as precisely
+ * as one that is, and the interval says which pause a timer is.
+ */
+describe("auto-dealing a table only bots are still playing", () => {
+  /**
+   * A lone human knocked out by the first round the seed deals, three bots playing on — so
+   * the scored round it is left watching is one only the room can deal on.
+   */
+  function outAndWatching(): { h: Harness; ada: Seated; scored: PlayerGameView } {
+    const h = harness({ botCount: 3, maxScore: 20 }, { seed: 2 });
+    const ada = host(h);
+    start(h, ada);
+    const scored = playUntil(h, [ada], (v) => v.phase === "roundEnd");
+    assert.ok(scored.you.spectating, "the round put the human out");
+    return { h, ada, scored };
+  }
+
+  it("deals the next round for a spectator once the pause has elapsed", () => {
+    const { h, ada, scored } = outAndWatching();
+    assert.deepEqual(h.clock.delays(), [AUTO_DEAL_MS], "the scored round waits to deal itself on");
+    const seen = h.port.received(ada.roomCode, ada.playerId).length;
+
+    h.clock.tickAt(AUTO_DEAL_MS);
+
+    const delivered = h.port.received(ada.roomCode, ada.playerId).slice(seen);
+    assert.equal(delivered.length, 1, "the deal was published, once");
+    const dealt = delivered[0]!;
+    assert.equal(dealt.phase, "playing", "the next round, dealt by nobody at the table");
+    assert.equal(dealt.roundNumber, scored.roundNumber + 1, "the round after the one it watched");
+    assert.ok(dealt.you.spectating, "and the spectator is still watching, not dealt in");
+    assert.deepEqual(
+      h.clock.delays(),
+      [BOT_THINK_MS],
+      "and followed like any other new position: the bot it opened on is thinking",
+    );
+  });
+
+  /**
+   * The standings are there to be read, and play again is offered to anybody still in the
+   * room (docs/adr/0012). The same spectator watches the bots play the match out, so the
+   * position differs from a dealable one by its phase alone.
+   */
+  it("leaves a finished match up", () => {
+    const { h, ada } = outAndWatching();
+
+    const finished = playUntil(h, [ada], (v) => v.phase === "gameEnd");
+
+    assert.ok(finished.you.spectating, "somebody is watching the bots that finished it");
+    assert.equal(h.clock.pending(), 0, "a finished match waits on nothing");
+  });
+
+  /**
+   * A human still in the match is who the round is waiting for, whether or not there is a
+   * connection behind them: a drop costs a seat nothing (docs/adr/0013), and dealing the
+   * next round out from under one is the one thing it must not cost.
+   */
+  it("waits on a human still in the match, dropped or not", () => {
+    // A limit no round of this reaches, so the human is scored rather than knocked out.
+    const h = harness({ botCount: 3, maxScore: MAX_SCORE_LIMITS.max });
+    const ada = host(h);
+    start(h, ada);
+    const scored = playUntil(h, [ada], (v) => v.phase === "roundEnd");
+    assert.ok(!scored.you.spectating, "the human is still in the match");
+    assert.equal(h.clock.pending(), 0, "the round is the human's to deal");
+
+    drop(h, ada);
+
+    // The room's own grace period is the only thing a drop starts (docs/adr/0015).
+    assert.deepEqual(h.clock.delays(), [ROOM_SWEEP_MS], "and still theirs once they have gone");
+  });
+
+  /**
+   * Somebody watching is not enough while somebody else is still playing: the round is
+   * theirs to deal, and the one knocked out is watching them, not the bots. Two humans, so
+   * the conditions come apart — one spectating, one in the match — which a lone human never
+   * can.
+   */
+  it("waits on a human still in the match while another watches", () => {
+    const h = harness({ botCount: 2, maxScore: 20 }, { seed: 2 });
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    start(h, ada);
+    playUntil(h, [ada, grace], (v) => v.phase === "roundEnd");
+    const watching = [ada, grace].filter((seat) => viewOf(h, seat).you.spectating);
+    assert.equal(watching.length, 1, "the round put exactly one of them out");
+
+    assert.equal(h.clock.pending(), 0, "the round is the other human's to deal");
+  });
+
+  it("calls the pause off when the spectator it was for goes, and on again when they return", () => {
+    const { h, ada } = outAndWatching();
+
+    drop(h, ada);
+    // A table with nobody watching plays to nobody: the deal is off, and what takes its
+    // place is the room's grace period. The two never run together — the deal wants a
+    // spectator there and the sweep wants nobody.
+    assert.deepEqual(h.clock.delays(), [ROOM_SWEEP_MS], "a table nobody watches is not dealt on");
+
+    arrive(h, ada);
+    assert.deepEqual(h.clock.delays(), [AUTO_DEAL_MS], "the spectator back is waiting again");
+  });
+
+  // The spectator *leaving* is ending a room: "cancels a waiting deal when its last human
+  // leaves", above.
+});
+
+/**
+ * Sweeping a room nobody is in any more (docs/adr/0015).
+ *
+ * A room ends when its last seat leaves, which says nothing about the exits players do not
+ * take: a tab closed, a phone backgrounded. Those rooms are given a minute and then dropped
+ * — a minute rather than nothing, because a reload is a disconnect and a seat is resumable
+ * precisely so a drop costs nothing (docs/adr/0013).
+ *
+ * A return is told to `Rooms` the way `resumeSeat` tells it: the seat claimed, then the
+ * connection counted in. The room having gone is observed as a client would find it —
+ * a join refused, no view to build — never by asking the manager.
+ */
+describe("sweeping a room nobody is in", () => {
+  /** One human in a fresh room, holding the token their seat is claimed back by. */
+  function sitDown(botCount = 0): { h: Harness; ada: Seated; resumeToken: string } {
+    const h = harness({ botCount });
+    const { roomCode, playerId, resumeToken } = unwrap(h.rooms.createRoom("Ada", null));
+    const ada = { roomCode, playerId };
+    arrive(h, ada);
+    return { h, ada, resumeToken };
+  }
+
+  function comeBack(h: Harness, ada: Seated, resumeToken: string): void {
+    unwrap(h.rooms.claimSeat(ada.roomCode, ada.playerId, { accountId: null, resumeToken }));
+    arrive(h, ada);
+  }
+
+  const sweepWaiting = (h: Harness) => h.clock.delays().includes(ROOM_SWEEP_MS);
+
+  it("drops a room no human has been connected to for the grace period", () => {
+    const { h, ada } = sitDown();
+    assert.ok(!sweepWaiting(h), "a room with somebody in it is not counted down");
+
+    drop(h, ada);
+    assert.ok(sweepWaiting(h), "the grace period is running");
+    assert.ok(h.rooms.viewFor(ada.roomCode, ada.playerId), "and the drop itself cost nothing");
+
+    h.clock.tickAt(ROOM_SWEEP_MS);
+
+    assert.equal(h.rooms.viewFor(ada.roomCode, ada.playerId), null, "the room is still there");
+    expectErr(h.rooms.joinRoom(ada.roomCode, "Alan", null), "ROOM_NOT_FOUND");
+  });
+
+  /** A reload is a disconnect, and the connection coming back is the whole answer to one. */
+  it("keeps a room whose connection comes back inside the grace period", () => {
+    const { h, ada, resumeToken } = sitDown();
+    drop(h, ada);
+    assert.ok(sweepWaiting(h), "the grace period is running");
+
+    comeBack(h, ada, resumeToken);
+
+    assert.equal(h.clock.pending(), 0, "nothing is counting the room down");
+    unwrap(h.rooms.joinRoom(ada.roomCode, "Alan", null));
+  });
+
+  it("gives a lone human against bots their match back after a reload", () => {
+    const { h, ada, resumeToken } = sitDown(2);
+    botThinking(h, ada);
+    const before = viewOf(h, ada);
+
+    drop(h, ada);
+    assert.ok(sweepWaiting(h), "the grace period is running");
+    comeBack(h, ada, resumeToken);
+
+    const view = viewOf(h, ada);
+    assert.equal(view.phase, "playing", "the same round, still being played");
+    assert.equal(view.roundNumber, before.roundNumber);
+    assert.deepEqual(
+      playingSelf(view).hand.map((c) => c.id),
+      playingSelf(before).hand.map((c) => c.id),
+      "and the same hand in front of them",
+    );
+    assert.ok(!sweepWaiting(h), "nothing is counting the room down");
+  });
+
+  /**
+   * A claim is seated before it is published, so a return landing in the grace period's
+   * last tick has a connection the transport knows of and `Rooms` has not yet been told
+   * about. The far end asks the port again rather than trusting the set the pause began
+   * with, or that return would have its room swept out from under it.
+   */
+  it("asks who is there again before dropping the room", () => {
+    const { h, ada } = sitDown();
+    drop(h, ada);
+
+    h.port.setConnected(ada.roomCode, [ada.playerId]);
+    h.clock.tickAt(ROOM_SWEEP_MS);
+
+    assert.ok(h.rooms.viewFor(ada.roomCode, ada.playerId), "the room was swept from under them");
+    unwrap(h.rooms.joinRoom(ada.roomCode, "Alan", null));
+  });
+
+  // What a swept room takes with it is ending a room's: "cancels a bot's pending turn when
+  // it is swept", above.
+});
+
+/**
  * The security boundary, now inside `Rooms` (docs/adr/0025): every view is built here, so
  * what the port is handed is the whole of what could leak. Asserted over every delivery of
  * whole rounds, with two humans at the table so a view built for the wrong seat would be a
