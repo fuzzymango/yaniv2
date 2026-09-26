@@ -422,8 +422,10 @@ scored, **the scorecard growing and never the phase leaving `playing`**, credits
 Yaniv call, plus, where the call was Assafed, a call Assafed to the caller and an Assaf to the
 one Assafer `docs/rules.md` §6 names; a seat eliminated, **out and not departed**, is credited a
 game completed, and the one winner of the phase becoming `gameEnd` a game completed and a game
-won — every credit through `accountToCredit` (null for a guest and for a bot, two nulls kept
-apart by a name), merged to one delta per account, and starts `recordStats` on it, **never
+won; and the round's log growing by a slapdown credits its maker one — **the log, not the last
+slapdown**, which a reshuffled card slapped twice would leave unchanged. Every credit goes
+through `accountToCredit` (null for a guest and for a bot, two nulls kept apart by a name),
+merged to one delta per account, and the observer starts `recordStats` on it, **never
 awaited**: a failure is logged naming the account and dropped, so a slow or dead database
 costs a counter and never the table (0023, which still holds but for where the write hangs).
 Nothing counts twice because each fact becomes true in exactly one accepted transition — an

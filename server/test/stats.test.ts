@@ -4,6 +4,7 @@ import {
   callYaniv,
   playAgain,
   removePlayer,
+  slapDown,
   startNextRound,
   takeTurn,
   updateSettings,
@@ -242,6 +243,82 @@ describe("statsEarned", () => {
         mulberry32(1),
       ),
     );
+
+    assert.deepEqual(statsEarned(before, after), new Map());
+  });
+
+  /**
+   * A pair of sevens just laid, and `slapper` holding the third they drew with it, its
+   * window open — the turn already handed on to whoever sits after them. Every hand is
+   * named, for the reason the bot's call above gives.
+   */
+  const slappable = (slapper: string, overrides: StateOptions = {}): GameState =>
+    table({
+      hands: {
+        ada: ["hearts-A", "hearts-2"],
+        grace: ["spades-K"],
+        bob: ["clubs-J"],
+        [slapper]: ["spades-7", "clubs-9"],
+      },
+      lastDiscard: ["hearts-7", "diamonds-7"],
+      currentTurnPlayerId: slapper === "ada" ? "grace" : "bob",
+      slapdown: { playerId: slapper, cardId: "spades-7" },
+      ...overrides,
+    });
+
+  it("credits an accepted slapdown with one slapdown to whoever made it", () => {
+    const before = slappable("ada");
+
+    assert.deepEqual(
+      statsEarned(before, unwrap(slapDown(before, "ada"))),
+      new Map([["acc-ada", { slapdowns: 1 }]]),
+    );
+  });
+
+  it("credits a guest's slapdown to nobody", () => {
+    const before = slappable("grace");
+
+    assert.deepEqual(statsEarned(before, unwrap(slapDown(before, "grace"))), new Map());
+  });
+
+  /**
+   * The fact is a *new* last slapdown, not the first of the round: Ada's second slapdown
+   * replaces one she already made, and is counted as its own.
+   */
+  it("credits a second slapdown in the same round as one more", () => {
+    const before = slappable("ada", { lastSlapdown: { playerId: "ada", cardId: "diamonds-9" } });
+
+    assert.deepEqual(
+      statsEarned(before, unwrap(slapDown(before, "ada"))),
+      new Map([["acc-ada", { slapdowns: 1 }]]),
+    );
+  });
+
+  /**
+   * The same card, by the same hand, twice in a round: buried, reshuffled back into the
+   * deck when it ran dry, drawn again and slapped again. The last slapdown reads the same
+   * before and after, so it is not what tells a new slapdown from an old one.
+   */
+  it("credits a slapdown of a card that came back round the reshuffle as one more", () => {
+    const before = slappable("ada", { lastSlapdown: { playerId: "ada", cardId: "spades-7" } });
+
+    assert.deepEqual(
+      statsEarned(before, unwrap(slapDown(before, "ada"))),
+      new Map([["acc-ada", { slapdowns: 1 }]]),
+    );
+  });
+
+  it("earns nothing for a later turn that carries the last slapdown forward unchanged", () => {
+    const before = unwrap(slapDown(slappable("ada"), "ada"));
+    const after = unwrap(
+      takeTurn(
+        before,
+        "grace",
+        { discardCardIds: ["spades-K"], draw: { source: "deck" } },
+        mulberry32(1),
+      ),
+    );
+    assert.deepEqual(after.round?.lastSlapdown, before.round?.lastSlapdown, "still Ada's slapdown");
 
     assert.deepEqual(statsEarned(before, after), new Map());
   });

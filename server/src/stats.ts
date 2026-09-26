@@ -59,6 +59,13 @@ export function accountToCredit(state: GameState, playerId: string): AccountId |
  * leave a completed game that was not also won. Leaving a finished match, and play again,
  * make neither fact true.
  *
+ * **A slapdown made** is the round's log growing by a slapdown, credited one slapdown to
+ * whoever made it — the first of the round, one replacing another, or the same card by the
+ * same hand come back round a reshuffle, which a comparison of last slapdowns would miss.
+ * A slap that lost the race was refused, so no transition was accepted to read it off, and
+ * a turn that carries the last slapdown forward grows the log by a turn and earns nothing.
+ * A deal starts a new log, never a longer one.
+ *
  * Nothing is counted twice because each fact becomes true in exactly one accepted
  * transition — a property of the engine, not of this function (docs/adr/0024).
  */
@@ -96,6 +103,15 @@ export function statsEarned(before: GameState, after: GameState): Map<AccountId,
   // Always one winner (docs/rules.md §7), so the first is the only.
   if (before.phase !== "gameEnd" && after.phase === "gameEnd" && after.winnerIds) {
     credit(after.winnerIds[0]!, { gamesCompleted: 1, gamesWon: 1 });
+  }
+
+  // Off the round's log, not the last slapdown: a buried card can be reshuffled, drawn and
+  // slapped down again by the same hand, leaving the last slapdown reading as it did.
+  const history = after.round?.moveHistory ?? [];
+  const grew = history.length > (before.round?.moveHistory.length ?? 0);
+  const newest = history.at(-1);
+  if (grew && newest?.kind === "slapdown") {
+    credit(newest.playerId, { slapdowns: 1 });
   }
 
   return earned;

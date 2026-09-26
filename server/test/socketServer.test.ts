@@ -2371,6 +2371,8 @@ describe("play again and exit to menu", () => {
  */
 describe("slapping down", () => {
   let table: Harness;
+  /** The accounts behind the table, so a test can read what a slapdown was credited. */
+  const profiles = createMemoryProfileStore();
 
   before(async () => {
     /*
@@ -2383,7 +2385,7 @@ describe("slapping down", () => {
      * And no bots: the fishing needs Grace to play directly after Ada, which a table of
      * two is whatever the seating the deal draws (docs/rules.md §2).
      */
-    table = await startServer(20250811, 0, undefined, LONG_MATCH);
+    table = await startServer(20250811, 0, undefined, LONG_MATCH, profiles);
   });
   after(async () => {
     await table.close();
@@ -2394,15 +2396,26 @@ describe("slapping down", () => {
     watcher: Watcher;
     id: string;
     name: string;
+    /** The account the seat was taken under, or `null` for a guest. */
+    accountId: string | null;
     /** Every view this seat was ever sent, never reset — what the wire actually said. */
     heard: PlayerGameView[];
   }
 
-  function seat(client: ClientSocket, id: string, name: string): Seat {
+  function seat(
+    client: ClientSocket,
+    id: string,
+    name: string,
+    accountId: string | null,
+  ): Seat {
     const heard: PlayerGameView[] = [];
     client.on("gameStateUpdate", (view: PlayerGameView) => heard.push(view));
-    return { client, watcher: watch(client), id, name, heard };
+    return { client, watcher: watch(client), id, name, accountId, heard };
   }
+
+  /** Sign `client` up as `name` where the test asked for accounts, and say under what. */
+  const accountFor = async (client: ClientSocket, name: string, signedIn: boolean) =>
+    signedIn ? (await signUp(client, name, table)).account.id : null;
 
   /**
    * A card worth discarding to fish for a window: one whose rank the player holds only
@@ -2427,21 +2440,24 @@ describe("slapping down", () => {
   }
 
   /**
-   * Sit Ada and Grace down and play until Ada draws a card she may slap down, leaving
-   * the table exactly there: her window open, the turn on Grace, nothing else moved.
+   * Sit Ada and Grace down — as guests, or both signed in — and play until Ada draws a
+   * card she may slap down, leaving the table exactly there: her window open, the turn on
+   * Grace, nothing else moved.
    */
-  async function playToAnOpenWindow(): Promise<OpenWindow> {
+  async function playToAnOpenWindow(signedIn = false): Promise<OpenWindow> {
     const adaClient = await table.connect();
+    const adaAccount = await accountFor(adaClient, "Ada", signedIn);
     const created = expectOk(
       await ask<{ roomCode: string; playerId: string }>(adaClient, "createRoom", "Ada"),
     );
-    const ada = seat(adaClient, created.playerId, "Ada");
+    const ada = seat(adaClient, created.playerId, "Ada", adaAccount);
 
     const graceClient = await table.connect();
+    const graceAccount = await accountFor(graceClient, "Grace", signedIn);
     const joined = expectOk(
       await ask<{ playerId: string }>(graceClient, "joinRoom", created.roomCode, "Grace"),
     );
-    const grace = seat(graceClient, joined.playerId, "Grace");
+    const grace = seat(graceClient, joined.playerId, "Grace", graceAccount);
 
     expectOk(await ask(ada.client, "startGame"));
 
@@ -2502,6 +2518,9 @@ describe("slapping down", () => {
     }
     assert.fail("no slapdown window ever opened");
   }
+
+  /** What `of`'s account has been credited in slapdowns so far. */
+  const slapdownsOf = async (of: Seat) => (await profiles.loadAccount(of.accountId!))!.slapdowns;
 
   /** Take Grace's turn, from the view she is holding. */
   const graceTakesHerTurn = (grace: Seat, graceView: PlayerGameView) =>
@@ -2683,6 +2702,33 @@ describe("slapping down", () => {
         );
       }
     }
+  });
+
+  /**
+   * The route a human's own move is credited by (docs/adr/0024): the slap is Ada's, acked
+   * to her, and her account reads it — Grace's, trying after it, loses the race and reads
+   * nothing, and Ada's own second try is no second slapdown.
+   */
+  it("counts an accepted slapdown on the slapper's account, a refused one on nobody's", async () => {
+    const { ada, grace } = await playToAnOpenWindow(true);
+
+    expectOk(await ask(ada.client, "slapDown"));
+    for (const late of [grace, ada]) {
+      const refused = expectError(await ask(late.client, "slapDown"));
+      assert.equal(refused.code, "SLAPDOWN_NOT_AVAILABLE", `${late.name}'s slap was refused`);
+    }
+
+    assert.equal(await slapdownsOf(ada), 1);
+    assert.equal(await slapdownsOf(grace), 0);
+  });
+
+  it("counts nothing for a slap the next player's turn got in ahead of", async () => {
+    const { ada, grace, graceView } = await playToAnOpenWindow(true);
+    expectOk(await graceTakesHerTurn(grace, graceView));
+
+    expectError(await ask(ada.client, "slapDown"));
+
+    assert.equal(await slapdownsOf(ada), 0);
   });
 
   it("rejects a slap from a connection that is not in a room", async () => {
