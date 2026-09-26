@@ -403,7 +403,11 @@ real `socket.io-client` connections rather than a stub, this layer's whole job *
 behaviour, and observes server-side facts through the socket rather than by asking
 `RoomManager`. `options` carries the clock every room timer is set on, the bot think time, the
 verifier, the session-token generator and the `log` a dropped stats write is reported to, all
-defaulted, so production construction is unchanged.
+defaulted, so production construction is unchanged. **What a room does over time is proved one
+seam down, with no socket**: `rooms.test.ts` builds `Rooms` over a recording port
+(`test/recordingPort.ts` — the test says who is connected, every delivery is kept), a hand-driven
+clock, a seeded manager and the memory store, and asserts only on what the port was handed, what
+the store was asked to record and what the calls returned.
 
 ### There are two ways to boot, and the command says which
 

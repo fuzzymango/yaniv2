@@ -89,6 +89,17 @@ is in `CLAUDE.md`.
   connected to is one `Rooms` never deals on and sweeps after a minute, by design, and bending
   that for a script would put a policy exception in shipped code (`docs/adr/0025`).
 
+## `server/test/`
+
+Not a source tree, and not tabulated file by file: one `node:test` suite per module, named after
+it, beside the shared fixtures in `helpers.ts`. What is listed here is what that rule does not
+say — a suite whose seam is not its file's name, and a helper that stands in for something shipped.
+
+| File | Contents |
+|---|---|
+| `rooms.test.ts` | `Rooms` driven through its interface with no socket (`docs/adr/0025`): composed as `createSocketServer` composes it, over the recording port, `helpers.ts`'s test clock, a seeded `RoomManager` and the memory store. Asserts only on what the port was handed, what the store was asked to record and what the calls returned — never the timer registry, the bot runner or the manager's map — and moves time only by ticking. Proves what is new at this seam: a refusal calls, delivers and schedules nothing; `accepted` runs before the first delivery; one connected set per publication; `leave` ending a room delivers nothing; ending a room either way cancels every timer; `viewFor`; and no hidden card id mid-round and no resume token in any phase reaches a delivery |
+| `recordingPort.ts` | `recordingPort` — a `RoomsPort` with no transport under it: `setConnected` is the test saying who is there, and every delivery is kept per room in order, read back whole (`deliveries`) or as one seat would have received it (`received`, only while connected, as the adapter sends). A test helper, `test/auth/verifier.ts`'s kind: nothing shipped has a use for it |
+
 ## `client/src/`
 
 A third client of the same contract, alongside the two harnesses. One exported component per

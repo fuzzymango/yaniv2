@@ -1,0 +1,582 @@
+/**
+ * A room's life, driven through `Rooms` with no socket under it (docs/adr/0025).
+ *
+ * `Rooms` is built here as the socket layer builds it, with a recording port in the
+ * adapter's place: the test says who is connected, and every delivery is kept. The clock
+ * is driven by hand, so time moves only when a test ticks it, and the room manager is
+ * seeded, so a failure reproduces from its seed. Stats go to the in-memory store.
+ *
+ * What a test here may look at is what `Rooms` is answerable for: what the port was
+ * handed, what the store was asked to record, and what the calls returned. It never reaches
+ * into the timer registry, the bot runner or the manager's map — a test that did would be
+ * testing how the room is built rather than what it does.
+ */
+
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { PlayerGameView, RoomSettings } from "@yaniv/shared";
+import { MAX_SCORE_LIMITS } from "@yaniv/shared";
+import { decideTurn } from "../src/bot.ts";
+import { BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
+import { createDeck } from "../src/deck.ts";
+import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
+import { createMemoryProfileStore, type ProfileStore, type StatsDelta } from "../src/profiles.ts";
+import type { Result } from "../src/result.ts";
+import { RoomManager } from "../src/roomManager.ts";
+import { createRooms, type Rooms, type RoomsPort, type Transition } from "../src/rooms.ts";
+import { mulberry32 } from "../src/rng.ts";
+import {
+  RESUME_TOKEN_MARK,
+  expectErr,
+  markedResumeTokens,
+  playingSelf,
+  testClock,
+  unwrap,
+  type TestClock,
+} from "./helpers.ts";
+import { recordingPort, type RecordingPort } from "./recordingPort.ts";
+
+/** `Rooms` and everything a test here observes it through. */
+interface Harness {
+  rooms: Rooms;
+  port: RecordingPort;
+  clock: TestClock;
+  profiles: ProfileStore;
+  /** Every stats write `Rooms` started, in the order it started them. */
+  written: { accountId: string; delta: StatsDelta }[];
+  /** Everything `Rooms` logged. */
+  logged: unknown[][];
+}
+
+/**
+ * Compose `Rooms` the way `createSocketServer` does, over a recording port.
+ *
+ * Bot think time is left at its default: nothing here waits it out, the clock holding every
+ * timer until a test ticks it, and a pause of the shipped length is one fewer thing that
+ * differs from the room a player sits down at. `settings` seeds every room, `botCount`
+ * among them — zero unless a test asks, as it is for a real room (docs/adr/0006).
+ */
+function harness(
+  seed = 7,
+  settings: Partial<RoomSettings> = {},
+  port: RecordingPort = recordingPort(),
+): Harness {
+  const clock = testClock();
+  const profiles = createMemoryProfileStore();
+  const written: Harness["written"] = [];
+  const logged: unknown[][] = [];
+  const manager = new RoomManager({
+    rng: mulberry32(seed),
+    newResumeToken: markedResumeTokens(),
+    newRoomRng: () => mulberry32(seed + 1),
+    defaultSettings: settings,
+  });
+  const rooms = createRooms(manager, port, {
+    clock,
+    recordStats: (accountId, delta) => {
+      written.push({ accountId, delta });
+      return profiles.recordStats(accountId, delta);
+    },
+    log: (...args) => logged.push(args),
+  });
+  return { rooms, port, clock, profiles, written, logged };
+}
+
+/** An account in the harness's store, for a seat stats can be credited to. */
+async function signedUp(h: Harness, name: string): Promise<string> {
+  const account = await h.profiles.createAccount(name, {
+    kind: "google",
+    identifier: `google-${name}`,
+    secret: null,
+  });
+  return account.id;
+}
+
+/** A seat, as a test holds on to it. */
+interface Seated {
+  roomCode: string;
+  playerId: string;
+}
+
+/**
+ * Who is connected moved, told to `Rooms` the way the adapter tells it: the port changed
+ * first, then `attendanceChanged`.
+ */
+function arrive(h: Harness, { roomCode, playerId }: Seated): void {
+  h.port.setConnected(roomCode, [...h.port.connected(roomCode), playerId]);
+  h.rooms.attendanceChanged(roomCode);
+}
+
+function drop(h: Harness, { roomCode, playerId }: Seated): void {
+  h.port.setConnected(
+    roomCode,
+    [...h.port.connected(roomCode)].filter((id) => id !== playerId),
+  );
+  h.rooms.attendanceChanged(roomCode);
+}
+
+/** Open a room and connect its host, as `createRoom` over a socket does. */
+function host(h: Harness, name = "Ada", accountId: string | null = null): Seated {
+  const { roomCode, playerId } = unwrap(h.rooms.createRoom(name, accountId));
+  const seated = { roomCode, playerId };
+  arrive(h, seated);
+  return seated;
+}
+
+/** Seat and connect a second player, as `joinRoom` over a socket does. */
+function join(h: Harness, roomCode: string, name: string): Seated {
+  const { playerId } = unwrap(h.rooms.joinRoom(roomCode, name, null));
+  const seated = { roomCode, playerId };
+  arrive(h, seated);
+  return seated;
+}
+
+/** Apply a transition that is expected to stand, with nothing to do once it has. */
+function apply(h: Harness, roomCode: string, transition: Transition): void {
+  unwrap(h.rooms.apply(roomCode, transition, () => {}));
+}
+
+/** The host deals the first round, bots seated inside the transition as the adapter does. */
+function start(h: Harness, { roomCode, playerId }: Seated): void {
+  apply(h, roomCode, (state, rng) => startGame(h.rooms.seatBots(state), playerId, rng));
+}
+
+/** The position one seat stands at now. */
+function viewOf(h: Harness, { roomCode, playerId }: Seated): PlayerGameView {
+  const view = h.rooms.viewFor(roomCode, playerId);
+  assert.ok(view, `room ${roomCode} is gone`);
+  return view;
+}
+
+/**
+ * Play on until `done` says so: each human by the bot's own judgement when the table needs
+ * them, and the server's own timers by ticking the clock when it does not. Answers the
+ * first human's position at the stop.
+ *
+ * A table that needs nobody and has nothing waiting has stopped, which is a failure of
+ * whatever the test is about rather than something to wait out.
+ */
+function playUntil(
+  h: Harness,
+  humans: Seated[],
+  done: (view: PlayerGameView) => boolean,
+): PlayerGameView {
+  for (let step = 0; step < 5000; step++) {
+    const view = viewOf(h, humans[0]!);
+    if (done(view)) return view;
+
+    const mover = humans.find((seat) => {
+      const own = viewOf(h, seat);
+      if (view.phase === "roundEnd") return !own.you.spectating;
+      return view.phase === "playing" && view.currentTurnPlayerId === seat.playerId;
+    });
+    if (mover && view.phase === "roundEnd") {
+      apply(h, mover.roomCode, (state, rng) => startNextRound(state, mover.playerId, rng));
+      continue;
+    }
+    if (mover) {
+      const decision = decideTurn(viewOf(h, mover));
+      apply(h, mover.roomCode, (state, rng) =>
+        decision.type === "yaniv"
+          ? callYaniv(state, mover.playerId)
+          : takeTurn(state, mover.playerId, decision.action, rng),
+      );
+      continue;
+    }
+
+    assert.ok(h.clock.pending() > 0, `the table stopped in ${view.phase}`);
+    h.clock.tick();
+  }
+  assert.fail("the table never reached the position under test");
+}
+
+describe("a refused transition", () => {
+  it("calls nothing, delivers nothing and schedules nothing", () => {
+    const h = harness(7, { botCount: 2 });
+    const ada = host(h);
+    start(h, ada);
+    const view = playUntil(h, [ada], (v) => v.currentTurnPlayerId === ada.playerId);
+    const delivered = h.port.deliveries(ada.roomCode).length;
+    assert.equal(h.clock.pending(), 0, "nothing was waiting on the clock to begin with");
+
+    let accepted = false;
+    const result: Result<null> = h.rooms.apply(
+      ada.roomCode,
+      (state, rng) =>
+        takeTurn(
+          state,
+          ada.playerId,
+          // No hand holds a card by this id, whatever was dealt.
+          { discardCardIds: ["not-a-card"], draw: { source: "deck" } },
+          rng,
+        ),
+      () => {
+        accepted = true;
+      },
+    );
+
+    expectErr(result, "CARD_NOT_IN_HAND");
+    assert.equal(accepted, false, "accepted was called for a refusal");
+    assert.equal(h.port.deliveries(ada.roomCode).length, delivered, "a refusal was published");
+    assert.equal(h.clock.pending(), 0, "a refusal scheduled something");
+    assert.deepEqual(viewOf(h, ada), view, "the position moved under a refusal");
+  });
+});
+
+/**
+ * `accepted` is where the adapter acks, so this order is what keeps a move acked before
+ * its broadcast — which `session.ts`'s busy lock and the CLI harness's watermark are both
+ * built on. It is `Rooms`' ordering, not something each caller remembers.
+ */
+describe("accepted", () => {
+  it("runs before the first delivery of the position it accepted", () => {
+    const h = harness();
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    const before = h.port.deliveries(ada.roomCode).length;
+
+    let deliveredAtAccept: number | null = null;
+    unwrap(
+      h.rooms.apply(
+        ada.roomCode,
+        (state, rng) => startGame(state, ada.playerId, rng),
+        () => {
+          deliveredAtAccept = h.port.deliveries(ada.roomCode).length;
+        },
+      ),
+    );
+
+    assert.equal(deliveredAtAccept, before, "the deal was delivered before it was accepted");
+    const [deal] = h.port.deliveries(ada.roomCode).slice(before);
+    assert.equal(deal?.get(grace.playerId)?.phase, "playing", "and the deal went out after");
+  });
+
+  it("runs before a departure's delivery too, handed the departure", () => {
+    const h = harness();
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    start(h, ada);
+    const before = h.port.deliveries(ada.roomCode).length;
+
+    let atAccept: { delivered: number; name: string; ended: boolean } | null = null;
+    const departure = unwrap(
+      h.rooms.leave(ada.roomCode, grace.playerId, ({ name, ended }) => {
+        atAccept = { delivered: h.port.deliveries(ada.roomCode).length, name, ended };
+      }),
+    );
+
+    assert.deepEqual(atAccept, { delivered: before, name: "Grace", ended: false });
+    assert.deepEqual(departure, { name: "Grace", ended: false });
+    assert.equal(h.port.deliveries(ada.roomCode).length, before + 1, "the room was told after");
+  });
+});
+
+/**
+ * docs/adr/0013: who is connected is asked of the transport once per publication, so every
+ * view of one position agrees about who was there. A transport whose answer moves between
+ * two asks — a socket dropping mid-publication — is exactly the case that tells one ask from
+ * several, so the port here moves on every one.
+ */
+describe("a publication", () => {
+  it("builds every view of one position from one connected set", () => {
+    const recording = recordingPort();
+    // Once a test names a seat here, the transport loses it on every other ask.
+    let flickering: string | null = null;
+    let asked = 0;
+    const h = harness(7, {}, {
+      ...recording,
+      connected: (roomCode) => {
+        const now = recording.connected(roomCode);
+        if (flickering === null || ++asked % 2 === 0) return now;
+        return new Set([...now].filter((id) => id !== flickering));
+      },
+    });
+    const ada = host(h);
+    join(h, ada.roomCode, "Grace");
+    const alan = join(h, ada.roomCode, "Alan");
+    const settled = h.port.deliveries(ada.roomCode).length;
+
+    flickering = alan.playerId;
+    start(h, ada);
+    h.rooms.attendanceChanged(ada.roomCode);
+    h.rooms.attendanceChanged(ada.roomCode);
+
+    const deliveries = h.port.deliveries(ada.roomCode).slice(settled);
+    assert.equal(deliveries.length, 3, "the deal and both republications went out");
+    for (const delivery of deliveries) {
+      const readings = [...delivery.values()].map((view) =>
+        Object.fromEntries(
+          [view.you, ...view.opponents].map((seat) => [seat.id, seat.connected]),
+        ),
+      );
+      for (const reading of readings) {
+        assert.deepEqual(reading, readings[0], "two views of one position disagreed");
+      }
+      const connected = Object.entries(readings[0] ?? {})
+        .filter(([, present]) => present)
+        .map(([id]) => id);
+      assert.deepEqual(
+        [...delivery.keys()].sort(),
+        connected.sort(),
+        "a view went to a seat its own set did not have connected, or missed one it did",
+      );
+    }
+  });
+});
+
+/**
+ * Deal a human in against bots and hand the turn to one, so the room has a bot thinking —
+ * a timer that, left behind by a room that has gone, would fire at its code.
+ */
+function botThinking(h: Harness, human: Seated): void {
+  start(h, human);
+  const view = viewOf(h, human);
+  if (view.currentTurnPlayerId === human.playerId) {
+    apply(h, human.roomCode, (state, rng) =>
+      takeTurn(
+        state,
+        human.playerId,
+        // A single card is always a legal discard, whatever was dealt.
+        { discardCardIds: [playingSelf(view).hand[0]!.id], draw: { source: "deck" } },
+        rng,
+      ),
+    );
+  }
+  assert.ok(h.clock.delays().includes(BOT_THINK_MS), "a bot is thinking about its turn");
+}
+
+/** Everything the clock is holding, run — and anything that schedules, run too. */
+function drain(h: Harness): void {
+  for (let n = 0; h.clock.pending() > 0; n++) {
+    assert.ok(n < 1000, "the clock never ran dry");
+    h.clock.tick();
+  }
+}
+
+describe("leave", () => {
+  it("answers ended and delivers nothing when the last human seat goes", () => {
+    const h = harness(7, { botCount: 2 });
+    const ada = host(h);
+    botThinking(h, ada);
+    const delivered = h.port.deliveries(ada.roomCode).length;
+
+    let told: unknown = null;
+    const departure = unwrap(
+      h.rooms.leave(ada.roomCode, ada.playerId, (d) => {
+        told = d;
+      }),
+    );
+
+    assert.deepEqual(departure, { name: "Ada", ended: true });
+    assert.deepEqual(told, departure, "accepted was handed what leave answered");
+    assert.equal(h.port.deliveries(ada.roomCode).length, delivered, "an ended room was published");
+    assert.equal(h.rooms.viewFor(ada.roomCode, ada.playerId), null, "the room is still there");
+  });
+
+  it("ends a lobby its host leaves alone, just the same", () => {
+    const h = harness();
+    const ada = host(h);
+    const delivered = h.port.deliveries(ada.roomCode).length;
+
+    assert.deepEqual(unwrap(h.rooms.leave(ada.roomCode, ada.playerId, () => {})), {
+      name: "Ada",
+      ended: true,
+    });
+    assert.equal(h.port.deliveries(ada.roomCode).length, delivered);
+    assert.equal(h.rooms.viewFor(ada.roomCode, ada.playerId), null);
+  });
+
+  it("keeps a room one human is still seated in, and tells them", () => {
+    const h = harness(7, { botCount: 1 });
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    start(h, ada);
+    const seen = h.port.received(ada.roomCode, ada.playerId).length;
+
+    assert.deepEqual(unwrap(h.rooms.leave(ada.roomCode, grace.playerId, () => {})), {
+      name: "Grace",
+      ended: false,
+    });
+
+    const told = h.port.received(ada.roomCode, ada.playerId).slice(seen);
+    assert.equal(told.length, 1, "the departure was published once");
+    assert.ok(told[0]!.opponents.find((o) => o.id === grace.playerId)?.departed);
+  });
+
+  /**
+   * The difference between leaving and dropping, and so between this exit and the sweep: a
+   * seat whose player is merely away is still somebody's, and a room is not ended under it.
+   */
+  it("keeps a room whose one human left is only away", () => {
+    const h = harness(7, { botCount: 1 });
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    start(h, ada);
+    drop(h, ada);
+
+    assert.deepEqual(unwrap(h.rooms.leave(ada.roomCode, grace.playerId, () => {})), {
+      name: "Grace",
+      ended: false,
+    });
+    assert.ok(h.rooms.viewFor(ada.roomCode, ada.playerId), "the room was ended");
+  });
+});
+
+/**
+ * A room that has gone stops doing things (docs/adr/0015): whatever it had waiting on the
+ * clock goes with it, by either way out, so no callback fires at a code that may be issued
+ * again. Asserted the way a player would find out — nothing more arrives and nothing more is
+ * counted, however long the clock is run on — and not by asking the registry.
+ */
+describe("ending a room", () => {
+  it("cancels every pending timer when its last human leaves", async () => {
+    const h = harness(7, { botCount: 2 });
+    const ada = host(h, "Ada", await signedUp(h, "Ada"));
+    botThinking(h, ada);
+
+    unwrap(h.rooms.leave(ada.roomCode, ada.playerId, () => {}));
+    const delivered = h.port.deliveries(ada.roomCode).length;
+    const written = h.written.length;
+    assert.equal(h.clock.pending(), 0, "the room left something on the clock");
+
+    drain(h);
+    assert.equal(h.port.deliveries(ada.roomCode).length, delivered, "a gone room published");
+    assert.equal(h.written.length, written, "a gone room counted a stat");
+  });
+
+  it("cancels every pending timer when it is swept", async () => {
+    const h = harness(7, { botCount: 2 });
+    const ada = host(h, "Ada", await signedUp(h, "Ada"));
+    botThinking(h, ada);
+    drop(h, ada);
+    assert.ok(h.clock.delays().includes(ROOM_SWEEP_MS), "the grace period is running");
+
+    h.clock.tickAt(ROOM_SWEEP_MS);
+    const delivered = h.port.deliveries(ada.roomCode).length;
+    const written = h.written.length;
+
+    assert.equal(h.rooms.viewFor(ada.roomCode, ada.playerId), null, "the room was not swept");
+    assert.equal(h.clock.pending(), 0, "the room left something on the clock");
+    drain(h);
+    assert.equal(h.port.deliveries(ada.roomCode).length, delivered, "a gone room published");
+    assert.equal(h.written.length, written, "a gone room counted a stat");
+  });
+});
+
+/**
+ * The one read `Rooms` has, for `resumeSeat`'s ack — there is no `getState`, so this is
+ * everything the adapter can learn of a position, and it is a view.
+ */
+describe("viewFor", () => {
+  it("returns the seat's own view of the position standing", () => {
+    const h = harness(7, { botCount: 1 });
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    start(h, ada);
+
+    const view = viewOf(h, grace);
+    assert.equal(view.you.id, grace.playerId);
+    assert.equal(view.phase, "playing");
+    assert.deepEqual(
+      view,
+      h.port.received(ada.roomCode, grace.playerId).at(-1),
+      "not the view Grace was last delivered of the same position",
+    );
+  });
+
+  it("returns null for a room that is not there", () => {
+    const h = harness();
+    const ada = host(h);
+    assert.equal(h.rooms.viewFor("NOPE", ada.playerId), null);
+  });
+});
+
+/**
+ * The security boundary, now inside `Rooms` (docs/adr/0025): every view is built here, so
+ * what the port is handed is the whole of what could leak. Asserted over every delivery of
+ * whole rounds, with two humans at the table so a view built for the wrong seat would be a
+ * hand handed to the other.
+ */
+describe("what the port is handed", () => {
+  const EVERY_CARD_ID = createDeck().map((c) => c.id);
+
+  /**
+   * The card ids a view names that its viewer may not know: anything outside their own hand
+   * and the face-up discard, bar the one card a pickup took off that pile in plain sight.
+   *
+   * The round's log is checked on its own terms rather than excused wholesale: a discarded
+   * set was face up when it was laid, so it may be named, but a deck draw is somebody's
+   * hidden card and is named to its drawer alone.
+   */
+  function hiddenCardsIn(view: PlayerGameView): string[] {
+    const maySee = new Set(
+      [...playingSelf(view).hand, ...view.lastDiscard].map((c) => c.id),
+    );
+    const lastMove = view.lastMove;
+    if (lastMove?.drawSource === "discard" && lastMove.drawnCard) {
+      maySee.add(lastMove.drawnCard.id);
+    }
+    const leaked: string[] = [];
+    for (const entry of view.moveHistory) {
+      if (entry.kind === "turn" && entry.drawSource === "deck" && entry.drawnCard) {
+        if (entry.playerId !== view.you.id) leaked.push(entry.drawnCard.id);
+      }
+    }
+    const json = JSON.stringify({ ...view, moveHistory: [] });
+    for (const id of EVERY_CARD_ID) {
+      if (!maySee.has(id) && json.includes(`"${id}"`)) leaked.push(id);
+    }
+    return leaked;
+  }
+
+  it("carries no card id mid-round outside the viewer's hand and the face-up discard", () => {
+    const h = harness(11, { botCount: 2, maxScore: MAX_SCORE_LIMITS.max });
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    start(h, ada);
+    playUntil(h, [ada, grace], (v) => v.roundNumber === 3);
+
+    const midRound = h.port
+      .deliveries(ada.roomCode)
+      .flatMap((delivery) => [...delivery])
+      .filter(([, view]) => view.phase === "playing");
+    assert.ok(midRound.length > 50, "whole rounds were published");
+    for (const [viewer, view] of midRound) {
+      assert.equal(view.you.id, viewer, "a seat was handed somebody else's view");
+      assert.deepEqual(hiddenCardsIn(view), [], `hidden cards reached ${viewer}`);
+      for (const opponent of view.opponents) {
+        assert.ok(!("hand" in opponent), "an opponent was sent with a hand attached");
+      }
+    }
+  });
+
+  /**
+   * A resume token is a seat's credential — the seat itself, not a look at its cards — and
+   * reaches its owner in the answer to the call that seated them and nowhere else. So no
+   * view carries one, in any phase, to anybody, its owner included.
+   */
+  it("carries no resume token, in any phase", () => {
+    const h = harness(7, { botCount: 2, maxScore: 20 });
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    start(h, ada);
+    const ended = playUntil(h, [ada, grace], (v) => v.phase === "gameEnd");
+
+    const views = [
+      ...h.port.deliveries(ada.roomCode).flatMap((delivery) => [...delivery.values()]),
+      ended,
+      viewOf(h, grace),
+    ];
+    assert.deepEqual(
+      [...new Set(views.map((v) => v.phase))].sort(),
+      ["gameEnd", "lobby", "playing", "roundEnd"],
+      "a whole match was published",
+    );
+    for (const view of views) {
+      assert.ok(
+        !JSON.stringify(view).includes(RESUME_TOKEN_MARK),
+        `a resume token reached ${view.you.id} in ${view.phase}`,
+      );
+    }
+  });
+});
