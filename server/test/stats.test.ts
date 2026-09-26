@@ -298,7 +298,8 @@ describe("statsEarned", () => {
    * Ada signed in on 95 and holding a King, so any call she does not Assaf puts her on 105
    * and out; Linus signed in, Grace a guest and Bob a bot. The caller holds an Ace, and
    * everybody else a hand too high to Assaf it. Unless a test says otherwise, three are
-   * still playing after Ada goes, so the match does not end under her.
+   * still playing after Ada goes, so the match does not end under her. A test seating its
+   * own roster keeps these hands; a seat not at its table is simply dealt nothing.
    */
   const knockout = (
     caller: string,

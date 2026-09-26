@@ -49,8 +49,8 @@ Two facts credit a **game completed**, each at most once per seat per match (#21
 is a seat's `outInRound` set across the transition while it is not `departed`: whoever's call
 scored the round, a bot's included, and a seat that went out by leaving earns nothing. **Won** is
 the phase becoming `gameEnd`, crediting the one `winnerIds` entry a game completed and a game won,
-whether a scored round or a departure ended the match, a round behind it or none. The diff reads the
-first entry and relies on there being exactly one (`docs/rules.md` §7).
+whether a scored round or a departure ended the match, a round behind it or none. `statsEarned`
+reads the first entry and relies on there being exactly one (`docs/rules.md` §7).
 
 Losses are **derived**, games completed less games won, and never stored. Leaving after being
 eliminated, the winner leaving at `gameEnd`, a match swept mid-play (no transition at all) and play

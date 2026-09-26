@@ -14,7 +14,7 @@
 
 import type { AccountId, StatsDelta } from "./profiles.ts";
 import type { GameState } from "./state.ts";
-import { getPlayer } from "./state.ts";
+import { getPlayer, inMatch } from "./state.ts";
 
 /**
  * The account `playerId`'s play is credited to, or `null` where it is credited to
@@ -87,8 +87,8 @@ export function statsEarned(before: GameState, after: GameState): Map<AccountId,
   }
 
   for (const player of after.players) {
-    const wasIn = getPlayer(before, player.id)?.outInRound === null;
-    if (wasIn && player.outInRound !== null && !player.departed) {
+    const seat = getPlayer(before, player.id);
+    if (seat && inMatch(seat) && !inMatch(player) && !player.departed) {
       credit(player.id, { gamesCompleted: 1 });
     }
   }
