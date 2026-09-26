@@ -17,10 +17,10 @@ import { describe, it } from "node:test";
 import type { PlayerGameView, RoomSettings } from "@yaniv/shared";
 import { MAX_SCORE_LIMITS } from "@yaniv/shared";
 import { decideTurn } from "../src/bot.ts";
-import { BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
+import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
-import { createMemoryProfileStore, type ProfileStore, type StatsDelta } from "../src/profiles.ts";
+import { createMemoryProfileStore, type ProfileStore } from "../src/profiles.ts";
 import type { Result } from "../src/result.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { createRooms, type Rooms, type RoomsPort, type Transition } from "../src/rooms.ts";
@@ -42,8 +42,6 @@ interface Harness {
   port: RecordingPort;
   clock: TestClock;
   profiles: ProfileStore;
-  /** Every stats write `Rooms` started, in the order it started them. */
-  written: { accountId: string; delta: StatsDelta }[];
   /** Everything `Rooms` logged. */
   logged: unknown[][];
 }
@@ -54,16 +52,16 @@ interface Harness {
  * Bot think time is left at its default: nothing here waits it out, the clock holding every
  * timer until a test ticks it, and a pause of the shipped length is one fewer thing that
  * differs from the room a player sits down at. `settings` seeds every room, `botCount`
- * among them — zero unless a test asks, as it is for a real room (docs/adr/0006).
+ * among them — zero unless a test asks, as it is for a real room (docs/adr/0006). A test
+ * pins its own `seed` where it is written against the cards one deals, and its own `port`
+ * where the transport is what it is about.
  */
 function harness(
-  seed = 7,
   settings: Partial<RoomSettings> = {},
-  port: RecordingPort = recordingPort(),
+  { seed = 7, port = recordingPort() }: { seed?: number; port?: RecordingPort } = {},
 ): Harness {
   const clock = testClock();
   const profiles = createMemoryProfileStore();
-  const written: Harness["written"] = [];
   const logged: unknown[][] = [];
   const manager = new RoomManager({
     rng: mulberry32(seed),
@@ -73,23 +71,10 @@ function harness(
   });
   const rooms = createRooms(manager, port, {
     clock,
-    recordStats: (accountId, delta) => {
-      written.push({ accountId, delta });
-      return profiles.recordStats(accountId, delta);
-    },
+    recordStats: (accountId, delta) => profiles.recordStats(accountId, delta),
     log: (...args) => logged.push(args),
   });
-  return { rooms, port, clock, profiles, written, logged };
-}
-
-/** An account in the harness's store, for a seat stats can be credited to. */
-async function signedUp(h: Harness, name: string): Promise<string> {
-  const account = await h.profiles.createAccount(name, {
-    kind: "google",
-    identifier: `google-${name}`,
-    secret: null,
-  });
-  return account.id;
+  return { rooms, port, clock, profiles, logged };
 }
 
 /** A seat, as a test holds on to it. */
@@ -192,7 +177,7 @@ function playUntil(
 
 describe("a refused transition", () => {
   it("calls nothing, delivers nothing and schedules nothing", () => {
-    const h = harness(7, { botCount: 2 });
+    const h = harness({ botCount: 2 });
     const ada = host(h);
     start(h, ada);
     const view = playUntil(h, [ada], (v) => v.currentTurnPlayerId === ada.playerId);
@@ -283,14 +268,15 @@ describe("a publication", () => {
     // Once a test names a seat here, the transport loses it on every other ask.
     let flickering: string | null = null;
     let asked = 0;
-    const h = harness(7, {}, {
+    const flickers: RecordingPort = {
       ...recording,
       connected: (roomCode) => {
         const now = recording.connected(roomCode);
         if (flickering === null || ++asked % 2 === 0) return now;
         return new Set([...now].filter((id) => id !== flickering));
       },
-    });
+    };
+    const h = harness({}, { port: flickers });
     const ada = host(h);
     join(h, ada.roomCode, "Grace");
     const alan = join(h, ada.roomCode, "Alan");
@@ -303,6 +289,10 @@ describe("a publication", () => {
 
     const deliveries = h.port.deliveries(ada.roomCode).slice(settled);
     assert.equal(deliveries.length, 3, "the deal and both republications went out");
+    assert.ok(
+      deliveries.some((d) => !d.has(alan.playerId)) && deliveries.some((d) => d.has(alan.playerId)),
+      "the transport never changed its mind, so nothing here tells one ask from several",
+    );
     for (const delivery of deliveries) {
       const readings = [...delivery.values()].map((view) =>
         Object.fromEntries(
@@ -345,17 +335,9 @@ function botThinking(h: Harness, human: Seated): void {
   assert.ok(h.clock.delays().includes(BOT_THINK_MS), "a bot is thinking about its turn");
 }
 
-/** Everything the clock is holding, run — and anything that schedules, run too. */
-function drain(h: Harness): void {
-  for (let n = 0; h.clock.pending() > 0; n++) {
-    assert.ok(n < 1000, "the clock never ran dry");
-    h.clock.tick();
-  }
-}
-
 describe("leave", () => {
   it("answers ended and delivers nothing when the last human seat goes", () => {
-    const h = harness(7, { botCount: 2 });
+    const h = harness({ botCount: 2 });
     const ada = host(h);
     botThinking(h, ada);
     const delivered = h.port.deliveries(ada.roomCode).length;
@@ -387,7 +369,7 @@ describe("leave", () => {
   });
 
   it("keeps a room one human is still seated in, and tells them", () => {
-    const h = harness(7, { botCount: 1 });
+    const h = harness({ botCount: 1 });
     const ada = host(h);
     const grace = join(h, ada.roomCode, "Grace");
     start(h, ada);
@@ -407,8 +389,8 @@ describe("leave", () => {
    * The difference between leaving and dropping, and so between this exit and the sweep: a
    * seat whose player is merely away is still somebody's, and a room is not ended under it.
    */
-  it("keeps a room whose one human left is only away", () => {
-    const h = harness(7, { botCount: 1 });
+  it("keeps a room whose last human seat is only away", () => {
+    const h = harness({ botCount: 1 });
     const ada = host(h);
     const grace = join(h, ada.roomCode, "Grace");
     start(h, ada);
@@ -425,41 +407,56 @@ describe("leave", () => {
 /**
  * A room that has gone stops doing things (docs/adr/0015): whatever it had waiting on the
  * clock goes with it, by either way out, so no callback fires at a code that may be issued
- * again. Asserted the way a player would find out — nothing more arrives and nothing more is
- * counted, however long the clock is run on — and not by asking the registry.
+ * again.
+ *
+ * The proof is the test's own clock standing empty — not the registry's bookkeeping, which
+ * is `Rooms`' business, but the one thing every timer in the room is set on. With nothing
+ * waiting there is no later tick at all, so none can deliver anything or count a stat. A
+ * timer left behind would not show up any other way: firing at a room no longer stored, it
+ * does nothing, which is exactly why one would go unnoticed until its code was issued again.
  */
 describe("ending a room", () => {
-  it("cancels every pending timer when its last human leaves", async () => {
-    const h = harness(7, { botCount: 2 });
-    const ada = host(h, "Ada", await signedUp(h, "Ada"));
+  function assertNothingWaiting(h: Harness): void {
+    assert.deepEqual(h.clock.delays(), [], "the room left something on the clock");
+    assert.throws(() => h.clock.tick(), /nothing is waiting/);
+  }
+
+  it("cancels a bot's pending turn when its last human leaves", () => {
+    const h = harness({ botCount: 2 });
+    const ada = host(h);
     botThinking(h, ada);
 
     unwrap(h.rooms.leave(ada.roomCode, ada.playerId, () => {}));
-    const delivered = h.port.deliveries(ada.roomCode).length;
-    const written = h.written.length;
-    assert.equal(h.clock.pending(), 0, "the room left something on the clock");
-
-    drain(h);
-    assert.equal(h.port.deliveries(ada.roomCode).length, delivered, "a gone room published");
-    assert.equal(h.written.length, written, "a gone room counted a stat");
+    assertNothingWaiting(h);
   });
 
-  it("cancels every pending timer when it is swept", async () => {
-    const h = harness(7, { botCount: 2 });
-    const ada = host(h, "Ada", await signedUp(h, "Ada"));
+  /**
+   * The seed deals a round that puts the human out and leaves three bots playing on, so the
+   * room is holding a deal for its one spectator (docs/adr/0014) when they go.
+   */
+  it("cancels a waiting deal when its last human leaves", () => {
+    const h = harness({ botCount: 3, maxScore: 20 }, { seed: 2 });
+    const ada = host(h);
+    start(h, ada);
+    playUntil(h, [ada], (v) => v.phase === "roundEnd");
+    assert.ok(viewOf(h, ada).you.spectating, "the round put the human out");
+    assert.deepEqual(h.clock.delays(), [AUTO_DEAL_MS], "the deal is waiting");
+
+    unwrap(h.rooms.leave(ada.roomCode, ada.playerId, () => {}));
+    assertNothingWaiting(h);
+  });
+
+  it("cancels a bot's pending turn when it is swept", () => {
+    const h = harness({ botCount: 2 });
+    const ada = host(h);
     botThinking(h, ada);
     drop(h, ada);
     assert.ok(h.clock.delays().includes(ROOM_SWEEP_MS), "the grace period is running");
 
     h.clock.tickAt(ROOM_SWEEP_MS);
-    const delivered = h.port.deliveries(ada.roomCode).length;
-    const written = h.written.length;
 
     assert.equal(h.rooms.viewFor(ada.roomCode, ada.playerId), null, "the room was not swept");
-    assert.equal(h.clock.pending(), 0, "the room left something on the clock");
-    drain(h);
-    assert.equal(h.port.deliveries(ada.roomCode).length, delivered, "a gone room published");
-    assert.equal(h.written.length, written, "a gone room counted a stat");
+    assertNothingWaiting(h);
   });
 });
 
@@ -469,7 +466,7 @@ describe("ending a room", () => {
  */
 describe("viewFor", () => {
   it("returns the seat's own view of the position standing", () => {
-    const h = harness(7, { botCount: 1 });
+    const h = harness({ botCount: 1 });
     const ada = host(h);
     const grace = join(h, ada.roomCode, "Grace");
     start(h, ada);
@@ -487,7 +484,7 @@ describe("viewFor", () => {
   it("returns null for a room that is not there", () => {
     const h = harness();
     const ada = host(h);
-    assert.equal(h.rooms.viewFor("NOPE", ada.playerId), null);
+    assert.equal(h.rooms.viewFor("NOT-A-ROOM-CODE", ada.playerId), null);
   });
 });
 
@@ -507,6 +504,11 @@ describe("what the port is handed", () => {
    * The round's log is checked on its own terms rather than excused wholesale: a discarded
    * set was face up when it was laid, so it may be named, but a deck draw is somebody's
    * hidden card and is named to its drawer alone.
+   *
+   * Both allowances are the redaction's own rules, not slack in this check: the pickup is
+   * named on the last move (docs/adr/0007) and the log keeps what was laid face up (0010).
+   * "Outside the viewer's hand and the face-up discard" means what may be known, and a card
+   * everyone watched being played is known.
    */
   function hiddenCardsIn(view: PlayerGameView): string[] {
     const maySee = new Set(
@@ -530,7 +532,7 @@ describe("what the port is handed", () => {
   }
 
   it("carries no card id mid-round outside the viewer's hand and the face-up discard", () => {
-    const h = harness(11, { botCount: 2, maxScore: MAX_SCORE_LIMITS.max });
+    const h = harness({ botCount: 2, maxScore: MAX_SCORE_LIMITS.max }, { seed: 11 });
     const ada = host(h);
     const grace = join(h, ada.roomCode, "Grace");
     start(h, ada);
@@ -556,7 +558,7 @@ describe("what the port is handed", () => {
    * view carries one, in any phase, to anybody, its owner included.
    */
   it("carries no resume token, in any phase", () => {
-    const h = harness(7, { botCount: 2, maxScore: 20 });
+    const h = harness({ botCount: 2, maxScore: 20 });
     const ada = host(h);
     const grace = join(h, ada.roomCode, "Grace");
     start(h, ada);
