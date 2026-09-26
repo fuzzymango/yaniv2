@@ -54,7 +54,7 @@ export interface RoomSweeper {
    * countdown they restarted would be one that never finished.
    *
    * `sweep` is called when the grace period elapses and is what actually drops the room —
-   * owning both the rooms and the connections is the socket layer's job, not this module's,
+   * owning the room and asking who is connected to it are `Rooms`' job, not this module's,
    * and the connections are worth asking again at the far end of a minute.
    */
   consider: (

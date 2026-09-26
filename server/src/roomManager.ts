@@ -332,7 +332,8 @@ export class RoomManager {
    * The one place every change to a room passes — a human's move, a bot's, the auto-deal,
    * an exit — so something that must see all of them registers here once rather than
    * being remembered at each route (docs/adr/0024). The room manager knows nothing of what
-   * is listening: the stats write is the socket layer's, which owns the store.
+   * is listening: the stats write is `Rooms`', which is handed the store's write
+   * (docs/adr/0025).
    */
   observe(observer: TransitionObserver): void {
     this.observers.push(observer);
@@ -340,8 +341,8 @@ export class RoomManager {
 
   /**
    * Run a state transition against a room and persist it if it succeeds. This is the
-   * seam the socket layer uses, so it never touches stored state directly and a
-   * rejected action can never leave a room half-updated.
+   * seam `Rooms` uses, so nothing above it touches stored state directly and a rejected
+   * action can never leave a room half-updated.
    *
    * An accepted transition is handed to every observer only once it is stored, so one
    * that looks the room up finds the position it was told about.
