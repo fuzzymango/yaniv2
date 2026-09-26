@@ -4,7 +4,8 @@
  * `Rooms` is built here as the socket layer builds it, with a recording port in the
  * adapter's place: the test says who is connected, and every delivery is kept. The clock
  * is driven by hand, so time moves only when a test ticks it, and the room manager is
- * seeded, so a failure reproduces from its seed. Stats go to the in-memory store.
+ * seeded, so a failure reproduces from its seed. Stats go to the in-memory store, through
+ * a write a test may stand a slow or failing store in front of.
  *
  * What a test here may look at is what `Rooms` is answerable for: what the port was
  * handed, what the store was asked to record, and what the calls returned. It never reaches
@@ -378,6 +379,18 @@ describe("a publication", () => {
   });
 });
 
+/** `seat`'s turn, taken by shedding `discard` — one card, always legal — and drawing blind. */
+function shed(h: Harness, seat: Seated, discard: string): void {
+  apply(h, seat.roomCode, (state, rng) =>
+    takeTurn(state, seat.playerId, { discardCardIds: [discard], draw: { source: "deck" } }, rng),
+  );
+}
+
+/** `seat` slaps the card they drew down, answering whether the room took it. */
+function slap(h: Harness, seat: Seated): Result<null> {
+  return h.rooms.apply(seat.roomCode, (state) => slapDown(state, seat.playerId), () => {});
+}
+
 /**
  * Deal a human in against bots and hand the turn to one, so the room has a bot thinking —
  * a timer that, left behind by a room that has gone, would fire at its code.
@@ -386,15 +399,7 @@ function botThinking(h: Harness, human: Seated): void {
   start(h, human);
   const view = viewOf(h, human);
   if (view.currentTurnPlayerId === human.playerId) {
-    apply(h, human.roomCode, (state, rng) =>
-      takeTurn(
-        state,
-        human.playerId,
-        // A single card is always a legal discard, whatever was dealt.
-        { discardCardIds: [playingSelf(view).hand[0]!.id], draw: { source: "deck" } },
-        rng,
-      ),
-    );
+    shed(h, human, playingSelf(view).hand[0]!.id);
   }
   assert.ok(h.clock.delays().includes(BOT_THINK_MS), "a bot is thinking about its turn");
 }
@@ -643,20 +648,12 @@ describe("bot think time", () => {
     return played[0]!;
   }
 
-  /** The human's turn, taken by shedding one card and drawing blind. */
-  function takeATurn(h: Harness, ada: Seated, from: PlayerGameView): void {
-    const discard = fishingDiscard(from);
-    apply(h, ada.roomCode, (state, rng) =>
-      takeTurn(state, ada.playerId, { discardCardIds: [discard], draw: { source: "deck" } }, rng),
-    );
-  }
-
   it("leaves a bot's turn unplayed in the tick that handed it over", () => {
     const { h, ada, deal } = sitDown(4242);
     assert.equal(deal.currentTurnPlayerId, ada.playerId, "the host takes the first turn");
     const before = seenCount(h, ada);
 
-    takeATurn(h, ada, deal);
+    shed(h, ada, fishingDiscard(deal));
 
     const delivered = receivedAfter(h, ada, before);
     assert.equal(delivered.length, 1, "the bot moved in the tick that handed it the turn");
@@ -666,7 +663,7 @@ describe("bot think time", () => {
 
   it("plays it once think time has elapsed", () => {
     const { h, ada, deal } = sitDown(4242);
-    takeATurn(h, ada, deal);
+    shed(h, ada, fishingDiscard(deal));
 
     const played = think(h, ada);
 
@@ -679,7 +676,7 @@ describe("bot think time", () => {
 
   it("advances a chain one turn per interval, in seating order", () => {
     const { h, ada, deal } = sitDown(4242);
-    takeATurn(h, ada, deal);
+    shed(h, ada, fishingDiscard(deal));
 
     // Every seat behind the host, one tick at a time. `think` asserts a single timer was
     // waiting for each and a single delivery came of it, so nothing here can be two moves
@@ -740,22 +737,18 @@ describe("bot think time", () => {
         assert.equal(at.phase, "playing", `the fishing stopped in ${at.phase}`);
         assert.equal(at.currentTurnPlayerId, ada.playerId, "the table stopped on a bot");
 
-        takeATurn(h, ada, at);
+        shed(h, ada, fishingDiscard(at));
         const landed = viewOf(h, ada);
         if (landed.phase === "playing" && slapdownOpen(landed)) return landed;
       }
       assert.fail("no slapdown window ever opened");
     }
 
-    function slap(h: Harness, ada: Seated): void {
-      apply(h, ada.roomCode, (state) => slapDown(state, ada.playerId));
-    }
-
     it("lets a human win a window the bot behind them is still thinking in", () => {
       const { h, ada } = sitDown(20250811);
       const open = fishForAWindow(h, ada);
 
-      slap(h, ada);
+      unwrap(slap(h, ada));
 
       const after = viewOf(h, ada);
       assert.equal(after.lastSlapdown?.playerId, ada.playerId);
@@ -776,7 +769,7 @@ describe("bot think time", () => {
       const open = fishForAWindow(h, ada);
       const before = seenCount(h, ada);
 
-      slap(h, ada);
+      unwrap(slap(h, ada));
 
       assert.equal(receivedAfter(h, ada, before).length, 1, "only the slap itself was published");
       // `think` asserts the one timer, and one move out of its beat.
@@ -794,7 +787,7 @@ describe("bot think time", () => {
       const slapped = playingSelf(open).hand.find((c) => c.rank === open.lastDiscard[0]!.rank);
       assert.ok(slapped, "the window is over a card matching the set it would join");
 
-      slap(h, ada);
+      unwrap(slap(h, ada));
       const played = think(h, ada);
 
       // The round's own log, which the bot's turn is written into after the slap: the card
@@ -1152,31 +1145,22 @@ describe("stats counted on the players' accounts", () => {
   }
 
   /**
-   * A human, signed in unless a test says, at a table of `bots` bots, dealt in — at a limit
-   * no run of rounds reaches, since some tests here play a good many looking for a call of
-   * one kind, and a human knocked out on the way could deal no next round (docs/adr/0012).
+   * A signed-in human at a table of `bots` bots, dealt in — at a limit no run of rounds
+   * reaches, since some tests here play a good many looking for a call of one kind, and a
+   * human knocked out on the way could deal no next round (docs/adr/0012).
    */
-  async function sitDown({
+  async function againstBots({
     bots = 3,
-    signedIn = true,
     recordStats,
   }: {
     bots?: number;
-    signedIn?: boolean;
     recordStats?: StatsWrite;
-  } = {}): Promise<{ h: Harness; ada: Seated; accountId: AccountId | null }> {
+  } = {}): Promise<{ h: Harness; ada: Seated; accountId: AccountId }> {
     const h = harness({ botCount: bots, maxScore: MAX_SCORE_LIMITS.max }, { recordStats });
-    const accountId = signedIn ? await signUp(h.profiles, "Ada") : null;
+    const accountId = await signUp(h.profiles, "Ada");
     const ada = host(h, "Ada", accountId);
     start(h, ada);
     return { h, ada, accountId };
-  }
-
-  /** `seat`'s turn, taken by shedding `discard` and drawing blind. */
-  function shed(h: Harness, seat: Seated, discard: string): void {
-    apply(h, seat.roomCode, (state, rng) =>
-      takeTurn(state, seat.playerId, { discardCardIds: [discard], draw: { source: "deck" } }, rng),
-    );
   }
 
   /** The rounds scored so far that `seat` called. */
@@ -1199,16 +1183,16 @@ describe("stats counted on the players' accounts", () => {
 
   describe("a human's move", () => {
     it("counts a signed-in player's call on their account", async () => {
-      const { h, ada, accountId } = await sitDown();
+      const { h, ada, accountId } = await againstBots();
 
       playUntil(h, [ada], (v) => calledBy(v, ada).length === 1);
       await writesLanded();
 
-      assert.equal((await statsOf(h, accountId!)).yanivCalls, 1);
+      assert.equal((await statsOf(h, accountId)).yanivCalls, 1);
     });
 
     it("counts a call that was Assafed exactly as one that stood, and as Assafed", async () => {
-      const { h, ada, accountId } = await sitDown();
+      const { h, ada, accountId } = await againstBots();
 
       const scored = playUntil(h, [ada], (v) => {
         const mine = calledBy(v, ada);
@@ -1217,13 +1201,15 @@ describe("stats counted on the players' accounts", () => {
       await writesLanded();
 
       const mine = calledBy(scored, ada);
-      const stats = await statsOf(h, accountId!);
+      const stats = await statsOf(h, accountId);
       assert.equal(stats.yanivCalls, mine.length);
       assert.equal(stats.callsAssafed, mine.filter((r) => r.assaferId !== null).length);
     });
 
     it("writes nothing for a guest's call", async () => {
-      const { h, ada } = await sitDown({ signedIn: false });
+      const h = harness({ botCount: 3, maxScore: MAX_SCORE_LIMITS.max });
+      const ada = host(h);
+      start(h, ada);
 
       playUntil(h, [ada], (v) => calledBy(v, ada).length === 2);
       await writesLanded();
@@ -1238,14 +1224,14 @@ describe("stats counted on the players' accounts", () => {
    */
   describe("a bot's move", () => {
     it("counts an Assaf on the account of a player who catches a bot's call", async () => {
-      const { h, ada, accountId } = await sitDown({ bots: 1 });
+      const { h, ada, accountId } = await againstBots({ bots: 1 });
 
       playUntil(h, [ada], (v) =>
         v.scorecard.some((r) => r.callerId !== ada.playerId && r.assaferId === ada.playerId),
       );
       await writesLanded();
 
-      assert.equal((await statsOf(h, accountId!)).assafs, 1);
+      assert.equal((await statsOf(h, accountId)).assafs, 1);
     });
 
     /**
@@ -1254,7 +1240,7 @@ describe("stats counted on the players' accounts", () => {
      * at all for a bot's call the player had no part in.
      */
     it("writes nothing for a bot's call the player did not Assaf", async () => {
-      const { h, ada, accountId } = await sitDown();
+      const { h, ada, accountId } = await againstBots();
 
       const scored = playUntil(
         h,
@@ -1269,7 +1255,7 @@ describe("stats counted on the players' accounts", () => {
         h.asked,
         owed(scored, ada).map((delta) => ({ accountId, delta })),
       );
-      assert.equal((await statsOf(h, accountId!)).yanivCalls, calledBy(scored, ada).length);
+      assert.equal((await statsOf(h, accountId)).yanivCalls, calledBy(scored, ada).length);
     });
 
     /**
@@ -1393,9 +1379,6 @@ describe("stats counted on the players' accounts", () => {
       assert.fail("no slapdown window ever opened");
     }
 
-    const slap = (h: Harness, seat: Seated) =>
-      h.rooms.apply(seat.roomCode, (state) => slapDown(state, seat.playerId), () => {});
-
     it("counts an accepted slapdown on the slapper's account, a refused one on nobody's", async () => {
       const { h, ada, grace } = await toAnOpenWindow();
 
@@ -1451,7 +1434,7 @@ describe("stats counted on the players' accounts", () => {
      * writes still pending, and the store is asked for every one of them.
      */
     it("holds up nothing when the store never answers", async () => {
-      const { h, ada, accountId } = await sitDown({ recordStats: never });
+      const { h, ada, accountId } = await againstBots({ recordStats: never });
 
       playUntil(h, [ada], (v) => calledBy(v, ada).length === 2);
       const scored = playUntil(h, [ada], (v) => calledBy(v, ada).length === 3);
@@ -1471,14 +1454,16 @@ describe("stats counted on the players' accounts", () => {
      */
     it("logs a failed write naming the account, and plays on", async () => {
       const failure = new Error("the database is down");
-      const { h, ada, accountId } = await sitDown({ recordStats: () => Promise.reject(failure) });
+      const { h, ada, accountId } = await againstBots({
+        recordStats: () => Promise.reject(failure),
+      });
 
       const scored = playUntil(h, [ada], (v) => calledBy(v, ada).length === 2);
       await writesLanded();
 
       assert.equal(h.logged.length, owed(scored, ada).length);
       for (const entry of h.logged) {
-        assert.ok(String(entry[0]).includes(accountId!), "the log names the account");
+        assert.ok(String(entry[0]).includes(accountId), "the log names the account");
         assert.ok(entry.includes(failure), "and carries the failure");
       }
     });
@@ -1490,7 +1475,7 @@ describe("stats counted on the players' accounts", () => {
      */
     it("logs a store that throws rather than rejecting, and plays on", async () => {
       const failure = new Error("thrown, not rejected");
-      const { h, ada } = await sitDown({
+      const { h, ada } = await againstBots({
         recordStats: () => {
           throw failure;
         },

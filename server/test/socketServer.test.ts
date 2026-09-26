@@ -762,6 +762,41 @@ describe("session tokens on the wire", () => {
 });
 
 /**
+ * The one line stats pass through the adapter on: `createSocketServer` handing `Rooms` the
+ * store's write. What is written, by which route, and what a failing store costs are proved
+ * in `rooms.test.ts` with no socket; what is left here is that the store the server was
+ * given is the one written to, reached from a signed-in connection (docs/adr/0023's
+ * amendment). An exit ends the match, being the one route to a stat with no fishing.
+ */
+describe("stats on the wire", () => {
+  const profiles = createMemoryProfileStore();
+  let table: Harness;
+  before(async () => {
+    table = await startServer(undefined, 0, { thinkTimeMs: 0 }, {}, profiles);
+  });
+  after(async () => {
+    await table.close();
+  });
+
+  it("reach a signed-in player's account in the store the server was given", async () => {
+    const ada = await table.connect();
+    const { account } = await signUp(ada, "Ada", table);
+    const { roomCode } = expectOk(await ask<{ roomCode: string }>(ada, "createRoom", "Ada"));
+    const grace = await table.connect();
+    expectOk(await ask(grace, "joinRoom", roomCode, "Grace"));
+    expectOk(await ask(ada, "startGame"));
+
+    const watcher = watch(ada);
+    expectOk(await ask(grace, "exitToMenu"));
+    await watcher.until((v) => v.phase === "gameEnd", "the match to end");
+
+    const stats = (await profiles.loadAccount(account.id))!;
+    assert.equal(stats.gamesCompleted, 1);
+    assert.equal(stats.gamesWon, 1);
+  });
+});
+
+/**
  * A seat is bound to one identity for life and claimed back by that one (docs/adr/0022): a
  * guest seat by its resume token, exactly as before, and an account seat by its account,
  * the token issued and never consulted. The rule's cases are `roomManager.test.ts`'s
