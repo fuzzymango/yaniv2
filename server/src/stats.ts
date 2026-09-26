@@ -48,6 +48,17 @@ export function accountToCredit(state: GameState, playerId: string): AccountId |
  * agrees with the red cell and the banner the table showed. A call that stood is never
  * stored, being a Yaniv call not Assafed.
  *
+ * **A match seen through** is two facts, and a seat is credited one game completed by
+ * whichever it meets. **Eliminated**: its `outInRound` set across the transition while it
+ * is not departed — whoever's call scored the round, a bot's included; a seat that went out
+ * by leaving earns nothing, and one already out earns nothing for leaving afterwards.
+ * **Won**: the phase becoming `gameEnd`, which credits the one `winnerIds` names a game
+ * completed and a game won — by a scored round or by the last opponent leaving, with or
+ * without a round behind it. Losses are never stored, being games completed less games won,
+ * and a win lands in the same delta as the call that made it, so no interrupted write can
+ * leave a completed game that was not also won. Leaving a finished match, and play again,
+ * make neither fact true.
+ *
  * Nothing is counted twice because each fact becomes true in exactly one accepted
  * transition — a property of the engine, not of this function (docs/adr/0024).
  */
@@ -73,6 +84,18 @@ export function statsEarned(before: GameState, after: GameState): Map<AccountId,
       credit(result.callerId, { callsAssafed: 1 });
       credit(result.assaferId, { assafs: 1 });
     }
+  }
+
+  for (const player of after.players) {
+    const wasIn = getPlayer(before, player.id)?.outInRound === null;
+    if (wasIn && player.outInRound !== null && !player.departed) {
+      credit(player.id, { gamesCompleted: 1 });
+    }
+  }
+
+  // Always one winner (docs/rules.md §7), so the first is the only.
+  if (before.phase !== "gameEnd" && after.phase === "gameEnd" && after.winnerIds) {
+    credit(after.winnerIds[0]!, { gamesCompleted: 1, gamesWon: 1 });
   }
 
   return earned;

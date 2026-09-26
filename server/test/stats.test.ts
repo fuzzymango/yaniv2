@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   callYaniv,
+  playAgain,
   removePlayer,
   startNextRound,
   takeTurn,
@@ -9,6 +10,7 @@ import {
 } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import type { GameState } from "../src/state.ts";
+import { getPlayer } from "../src/state.ts";
 import { accountToCredit, statsEarned } from "../src/stats.ts";
 import type { StateOptions } from "./helpers.ts";
 import { makeState, unwrap } from "./helpers.ts";
@@ -290,5 +292,187 @@ describe("statsEarned", () => {
     assert.equal(after.lastRoundResult?.callerId, "ada", "with Ada's call still standing");
 
     assert.equal(statsEarned(before, after).get("acc-ada")?.yanivCalls, undefined);
+  });
+
+  /**
+   * Ada signed in on 95 and holding a King, so any call she does not Assaf puts her on 105
+   * and out; Linus signed in, Grace a guest and Bob a bot. The caller holds an Ace, and
+   * everybody else a hand too high to Assaf it. Unless a test says otherwise, three are
+   * still playing after Ada goes, so the match does not end under her.
+   */
+  const knockout = (
+    caller: string,
+    overrides: { players?: StateOptions["players"]; hands?: Record<string, string[]> } = {},
+  ): GameState =>
+    makeState({
+      players: overrides.players ?? [
+        { id: "ada", accountId: "acc-ada", score: 95 },
+        { id: "linus", accountId: "acc-linus" },
+        { id: "grace", accountId: null },
+        { id: "bob", isBot: true },
+      ],
+      hands: {
+        ada: ["hearts-K"],
+        linus: ["spades-K"],
+        grace: ["clubs-K"],
+        bob: ["diamonds-K"],
+        [caller]: ["hearts-A"],
+        ...overrides.hands,
+      },
+      currentTurnPlayerId: caller,
+    });
+
+  /** `caller`'s call from `before`, asserting it knocked `out` out of the match. */
+  const callKnockingOut = (before: GameState, caller: string, out: string): GameState => {
+    const after = unwrap(callYaniv(before, caller));
+    assert.notEqual(getPlayer(after, out)!.outInRound, null, `${out} went out`);
+    return after;
+  };
+
+  it("credits a player eliminated by a bot's call with one game completed", () => {
+    const before = knockout("bob");
+    const after = callKnockingOut(before, "bob", "ada");
+    assert.equal(after.phase, "roundEnd", "the match goes on without her");
+
+    assert.deepEqual(statsEarned(before, after), new Map([["acc-ada", { gamesCompleted: 1 }]]));
+  });
+
+  it("credits a player who goes out by leaving with nothing", () => {
+    const before = knockout("bob");
+
+    const after = unwrap(removePlayer(before, "ada"));
+    assert.notEqual(getPlayer(after, "ada")!.outInRound, null, "leaving took her out");
+
+    assert.deepEqual(statsEarned(before, after), new Map());
+  });
+
+  /**
+   * The acceptance case for merging: a completed game that was not also won is a record no
+   * match produced, so the three facts one call makes true go out as one write.
+   */
+  it("credits a call that knocks the last opponent out with a Yaniv call, a game completed and a game won, in one delta", () => {
+    const before = knockout("linus", {
+      players: [{ id: "ada", accountId: "acc-ada", score: 95 }, { id: "linus", accountId: "acc-linus" }],
+    });
+    const after = callKnockingOut(before, "linus", "ada");
+    assert.equal(after.phase, "gameEnd", "nobody is left to play Linus");
+
+    assert.deepEqual(
+      statsEarned(before, after),
+      new Map([
+        ["acc-linus", { yanivCalls: 1, gamesCompleted: 1, gamesWon: 1 }],
+        ["acc-ada", { gamesCompleted: 1 }],
+      ]),
+    );
+  });
+
+  /**
+   * The winner need not be the caller: Grace calls at 3 on 90, Ada Assafs her with an Ace,
+   * and the penalty puts Grace on 123 — out, and Ada last in the match.
+   */
+  it("credits a player left last by Assafing the call that knocked its caller out", () => {
+    const before = knockout("grace", {
+      players: [
+        { id: "ada", accountId: "acc-ada" },
+        { id: "grace", accountId: "acc-grace", score: 90 },
+      ],
+      hands: { ada: ["spades-A"], grace: ["hearts-A", "hearts-2"] },
+    });
+    const after = callKnockingOut(before, "grace", "grace");
+    assert.deepEqual(after.winnerIds, ["ada"]);
+
+    assert.deepEqual(
+      statsEarned(before, after),
+      new Map([
+        ["acc-grace", { yanivCalls: 1, callsAssafed: 1, gamesCompleted: 1 }],
+        ["acc-ada", { assafs: 1, gamesCompleted: 1, gamesWon: 1 }],
+      ]),
+    );
+  });
+
+  it("credits a player left last by the second-to-last leaving, with no round ever scored, with a game completed and won", () => {
+    const before = twoOfUs();
+    assert.deepEqual(before.scorecard, [], "no round has been scored");
+
+    const after = unwrap(removePlayer(before, "grace"));
+    assert.deepEqual(after.winnerIds, ["ada"]);
+
+    assert.deepEqual(
+      statsEarned(before, after),
+      new Map([["acc-ada", { gamesCompleted: 1, gamesWon: 1 }]]),
+    );
+  });
+
+  /** Ada's call knocking Grace out, and the match over with it. */
+  const finished = (): GameState => {
+    const before = knockout("ada", {
+      players: [
+        { id: "ada", accountId: "acc-ada" },
+        { id: "grace", accountId: "acc-grace", score: 95 },
+      ],
+    });
+    return callKnockingOut(before, "ada", "grace");
+  };
+
+  it("earns nothing for the winner leaving a finished match", () => {
+    const before = finished();
+
+    const after = unwrap(removePlayer(before, "ada"));
+
+    assert.deepEqual(statsEarned(before, after), new Map());
+  });
+
+  it("earns nothing for an eliminated player leaving a finished match", () => {
+    const before = finished();
+
+    assert.deepEqual(statsEarned(before, unwrap(removePlayer(before, "grace"))), new Map());
+  });
+
+  /** Their one match was completed when they went out, and walking off does not repeat it. */
+  it("earns nothing for an eliminated spectator leaving a match still being played", () => {
+    const before = makeState({
+      players: [
+        { id: "ada", accountId: "acc-ada", outInRound: 1 },
+        { id: "linus", accountId: "acc-linus" },
+        { id: "grace", accountId: "acc-grace" },
+      ],
+      roundNumber: 2,
+    });
+
+    const after = unwrap(removePlayer(before, "ada"));
+    assert.equal(after.phase, "playing");
+
+    assert.deepEqual(statsEarned(before, after), new Map());
+  });
+
+  it("earns nothing for play again", () => {
+    const before = finished();
+
+    const after = unwrap(playAgain(before, "grace", mulberry32(1)));
+    assert.equal(after.phase, "playing");
+
+    assert.deepEqual(statsEarned(before, after), new Map());
+  });
+
+  it("credits a player a bot knocks out of the match with a game completed, and nobody a game won", () => {
+    const before = knockout("bob", {
+      players: [{ id: "ada", accountId: "acc-ada", score: 95 }, { id: "bob", isBot: true }],
+    });
+    const after = callKnockingOut(before, "bob", "ada");
+    assert.deepEqual(after.winnerIds, ["bob"]);
+
+    assert.deepEqual(statsEarned(before, after), new Map([["acc-ada", { gamesCompleted: 1 }]]));
+  });
+
+  it("credits a guest nothing for a match completed or won, and a bot nothing either", () => {
+    const players = [
+      { id: "grace", accountId: null, score: 95 },
+      { id: "bob", isBot: true, score: 95 },
+    ];
+    const guestWins = knockout("grace", { players });
+    const botWins = knockout("bob", { players });
+
+    assert.deepEqual(statsEarned(guestWins, callKnockingOut(guestWins, "grace", "bob")), new Map());
+    assert.deepEqual(statsEarned(botWins, callKnockingOut(botWins, "bob", "grace")), new Map());
   });
 });

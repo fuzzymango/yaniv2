@@ -4043,16 +4043,17 @@ describe("the scorecard on the wire", () => {
 });
 
 /**
- * A scored round's stats, over the wire (docs/adr/0023, 0024): a signed-in player's call is
- * counted on their account, an Assaf of a bot's call on the account of whoever caught it
- * out, and nothing about either write reaches the game.
+ * The stats, over the wire (docs/adr/0023, 0024): a signed-in player's call is counted on
+ * their account, an Assaf of a bot's call on the account of whoever caught it out, a match
+ * seen through on the account of everybody who was knocked out of it or won it, and
+ * nothing about any write reaches the game.
  *
  * Each test builds its own server around a store it can see into — or one that never
  * answers, or always fails — which is the whole reason `startServer` takes one. And each
  * plays a real table out to real calls: `accountToCredit` is unit-tested and the store is
  * contract-tested, and both would pass against a handler that wrote nothing at all.
  */
-describe("a scored round counted on its players' accounts", () => {
+describe("stats counted on the players' accounts", () => {
   const opened: Harness[] = [];
   after(async () => {
     for (const harness of opened) await harness.close();
@@ -4068,20 +4069,21 @@ describe("a scored round counted on its players' accounts", () => {
 
   /**
    * A player and `bots` bots (three unless a test says), dealt in, at a limit nobody
-   * reaches: several rounds are played here, and a table that emptied on the way would stop
-   * answering.
+   * reaches unless a test sets its own: several rounds are played here, and a table that
+   * emptied on the way would stop answering.
    */
   async function sitDown(
     profiles: ProfileStore,
     signedIn = true,
     options: SocketServerOptions = {},
     bots = 3,
+    settings = LONG_MATCH,
   ): Promise<Player> {
     const harness = await startServer(
       7,
       bots,
       { thinkTimeMs: 0, ...options },
-      LONG_MATCH,
+      settings,
       profiles,
     );
     opened.push(harness);
@@ -4287,5 +4289,69 @@ describe("a scored round counted on its players' accounts", () => {
 
     assert.equal(logged.length, credited(player, calls).length);
     assert.ok(logged.every((entry) => entry.includes(failure)));
+  });
+
+  /**
+   * The route through an exit: nobody's move ends this match, the second-to-last player
+   * leaving does, with no round ever scored — and the one left has seen it through, and won.
+   */
+  it("counts a match an exit ends as completed and won by whoever is left", async () => {
+    const profiles = createMemoryProfileStore();
+    const harness = await startServer(7, 0, { thinkTimeMs: 0 }, {}, profiles);
+    opened.push(harness);
+
+    const ada = await harness.connect();
+    const { account } = await signUp(ada, "Ada", harness);
+    const { roomCode } = expectOk(await ask<{ roomCode: string }>(ada, "createRoom", "Ada"));
+    const grace = await harness.connect();
+    expectOk(await ask(grace, "joinRoom", roomCode, "Grace"));
+    expectOk(await ask(ada, "startGame"));
+
+    const watcher = watch(ada);
+    expectOk(await ask(grace, "exitToMenu"));
+    await watcher.until((v) => v.phase === "gameEnd", "the match to end");
+
+    const stats = (await profiles.loadAccount(account.id))!;
+    assert.equal(stats.gamesCompleted, 1);
+    assert.equal(stats.gamesWon, 1);
+  });
+
+  /**
+   * The route through a bot's move: the call that knocks the player out is the bot's, on
+   * the server's own timer. At a limit of 1 any round the player does not win puts them
+   * out, and a player who never calls cannot win one but by an Assaf — which the seed does
+   * not deal, the assertion on the winner saying so if it ever does.
+   */
+  it("counts a match a bot's call knocks the player out of as completed, and not won", async () => {
+    const profiles = createMemoryProfileStore();
+    const player = await sitDown(profiles, true, {}, 1, { maxScore: MAX_SCORE_LIMITS.min });
+
+    const ended = await (async () => {
+      for (let step = 0; step < 3000; step++) {
+        const current = await player.watcher.until(
+          (v) =>
+            v.phase === "gameEnd" ||
+            v.phase === "roundEnd" ||
+            (v.phase === "playing" && v.currentTurnPlayerId === player.playerId),
+          "the player to be needed",
+        );
+        player.watcher.reset();
+        if (current.phase === "gameEnd") return current;
+        assert.equal(current.phase, "playing", "a round was scored and the player survived it");
+        const discard = playingSelf(current).hand[0]!;
+        expectOk(
+          await ask(player.client, "takeTurn", {
+            discardCardIds: [discard.id],
+            draw: { source: "deck" },
+          }),
+        );
+      }
+      assert.fail("the bot never called");
+    })();
+    assert.notDeepEqual(ended.winnerIds, [player.playerId], "the bot won the match");
+
+    const stats = (await profiles.loadAccount(player.accountId!))!;
+    assert.equal(stats.gamesCompleted, 1);
+    assert.equal(stats.gamesWon, 0);
   });
 });

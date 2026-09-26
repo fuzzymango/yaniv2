@@ -43,6 +43,19 @@ It is **not** the phase leaving `playing`. The last opponent leaving also does t
 `roundEnd` a departure ends the match with the scored round's result still on the state, so reading
 "there is a result and the phase moved" as a call counts that call twice. Both cases are unit-tested.
 
+## A match seen through is going out or winning
+
+Two facts credit a **game completed**, each at most once per seat per match (#212). **Eliminated**
+is a seat's `outInRound` set across the transition while it is not `departed`: whoever's call
+scored the round, a bot's included, and a seat that went out by leaving earns nothing. **Won** is
+the phase becoming `gameEnd`, crediting the one `winnerIds` entry a game completed and a game won,
+whether a scored round or a departure ended the match, a round behind it or none. The diff reads the
+first entry and relies on there being exactly one (`docs/rules.md` §7).
+
+Losses are **derived**, games completed less games won, and never stored. Leaving after being
+eliminated, the winner leaving at `gameEnd`, a match swept mid-play (no transition at all) and play
+again earn nothing. A match a bot wins is completed for every human it eliminated and won by nobody.
+
 Every credit goes through **`accountToCredit`**, so a bot and a guest are both null and dropped.
 Increments to one account in one transition are **merged into one delta** and written in one call.
 A move that earns one account several stats at once, such as a call that stood and knocked the last
