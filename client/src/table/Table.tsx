@@ -632,7 +632,7 @@ export function Table({
           >
             Yaniv!
           </button>
-        ) : yours !== null ? (
+        ) : dealOffered ? (
           <button
             className="button button--primary deal"
             type="button"

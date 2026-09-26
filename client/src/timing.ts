@@ -6,11 +6,11 @@
  * and the jolt behind it with that. A second constant tuned to look right beside the first
  * would be right only until somebody changed the first.
  *
- * **There are three roots, and that they are several is deliberate** (issue #156). A chain is
- * the parts of one thing, and a card crossing the table and a call being announced are not one
- * thing — the reasoning is on `ANNOUNCE_MS` below and in docs/adr/0018, and it is the change
- * here most likely to be undone by somebody tidying. The third, the deal hold (issue #205),
- * is a chain of one: a pause on a control rather than an animation.
+ * **There are three roots, and that they are several is deliberate** (issues #156, #205). A
+ * chain is the parts of one thing, and a card crossing the table and a call being announced
+ * are not one thing — the reasoning is on `ANNOUNCE_MS` below and in docs/adr/0018, and it is
+ * the change here most likely to be undone by somebody tidying. The third, the deal hold, is a
+ * chain of one: a pause on a control rather than an animation.
  *
  * The chains and what each link answers for:
  *
