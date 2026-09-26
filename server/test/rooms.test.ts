@@ -15,11 +15,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { PlayerGameView, RoomSettings } from "@yaniv/shared";
-import { MAX_SCORE_LIMITS } from "@yaniv/shared";
+import { MAX_PLAYERS, MAX_SCORE_LIMITS } from "@yaniv/shared";
 import { decideTurn } from "../src/bot.ts";
 import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
-import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
+import { callYaniv, slapDown, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { createMemoryProfileStore, type ProfileStore } from "../src/profiles.ts";
 import type { Result } from "../src/result.ts";
 import { RoomManager } from "../src/roomManager.ts";
@@ -30,6 +30,7 @@ import {
   expectErr,
   markedResumeTokens,
   playingSelf,
+  slapdownOpen,
   testClock,
   unwrap,
   type TestClock,
@@ -386,6 +387,65 @@ describe("leave", () => {
   });
 
   /**
+   * The last *human* leaving is what ends a room, bots at the table or not — a finished
+   * match with nobody left to play again at is a table of bots playing to no one
+   * (docs/adr/0012).
+   */
+  it("ends a finished match its last human leaves, bots still seated", () => {
+    const h = harness({ botCount: 2, maxScore: 20 });
+    const ada = host(h);
+    start(h, ada);
+    const finished = playUntil(h, [ada], (v) => v.phase === "gameEnd");
+    assert.ok(
+      finished.opponents.some((o) => o.name.includes("(bot)")),
+      "the table this is left with is a bot's",
+    );
+
+    assert.deepEqual(unwrap(h.rooms.leave(ada.roomCode, ada.playerId, () => {})), {
+      name: "Ada",
+      ended: true,
+    });
+    assert.equal(h.rooms.viewFor(ada.roomCode, ada.playerId), null, "the room is still there");
+  });
+
+  /**
+   * Ended is gone, code and all: nothing seats anybody at it again, and the seat that was
+   * given up there is not a way back in. Nobody is told, the seat that left being the only
+   * one there was to tell.
+   */
+  it("seats and hands back nobody once it has ended", () => {
+    const h = harness();
+    const { roomCode, playerId, resumeToken } = unwrap(h.rooms.createRoom("Ada", null));
+    arrive(h, { roomCode, playerId });
+
+    unwrap(h.rooms.leave(roomCode, playerId, () => {}));
+
+    expectErr(h.rooms.joinRoom(roomCode, "Alan", null), "ROOM_NOT_FOUND");
+    expectErr(
+      h.rooms.claimSeat(roomCode, playerId, { accountId: null, resumeToken }),
+      "ROOM_NOT_FOUND",
+    );
+  });
+
+  it("keeps a lobby one seat is still in, open to the next arrival", () => {
+    const h = harness();
+    const ada = host(h);
+    join(h, ada.roomCode, "Grace");
+
+    // Taken off the port inside `accepted`, as the adapter takes the socket out of the room:
+    // a lobby splices the seat out, so there is no view left to build for it.
+    const departure = h.rooms.leave(ada.roomCode, ada.playerId, () =>
+      h.port.setConnected(
+        ada.roomCode,
+        [...h.port.connected(ada.roomCode)].filter((id) => id !== ada.playerId),
+      ),
+    );
+
+    assert.deepEqual(unwrap(departure), { name: "Ada", ended: false });
+    unwrap(h.rooms.joinRoom(ada.roomCode, "Alan", null));
+  });
+
+  /**
    * The difference between leaving and dropping, and so between this exit and the sweep: a
    * seat whose player is merely away is still somebody's, and a room is not ended under it.
    */
@@ -485,6 +545,231 @@ describe("viewFor", () => {
     const h = harness();
     const ada = host(h);
     assert.equal(h.rooms.viewFor("NOT-A-ROOM-CODE", ada.playerId), null);
+  });
+});
+
+/**
+ * A bot's turn is scheduled, not played in the tick that handed it over: every bot waits
+ * out `BOT_THINK_MS`, every turn alike, and then plays against the position in front of it
+ * — so a table of bots reads as a game being played, and a human can win the slapdown
+ * window their own turn opened (docs/adr/0005, 0011).
+ *
+ * The clock is the whole of it: a turn that has *not* happened is asserted as precisely as
+ * one that has, and each beat is checked for the interval it asked for — a chain that
+ * hurried its later moves would look the same by its deliveries alone.
+ */
+describe("bot think time", () => {
+  /**
+   * A lone human at a table of five bots, dealt in. At a limit no run of rounds reaches,
+   * since some of these fish a great many rounds for a position, and a human knocked out
+   * along the way could deal no next round (docs/adr/0012).
+   */
+  function sitDown(seed: number): { h: Harness; ada: Seated; deal: PlayerGameView } {
+    const h = harness({ botCount: MAX_PLAYERS - 1, maxScore: MAX_SCORE_LIMITS.max }, { seed });
+    const ada = host(h);
+    start(h, ada);
+    return { h, ada, deal: viewOf(h, ada) };
+  }
+
+  /** Everything the human has been handed since they had seen `from` views. */
+  const receivedSince = (h: Harness, ada: Seated, from: number) =>
+    h.port.received(ada.roomCode, ada.playerId).slice(from);
+  const receivedSoFar = (h: Harness, ada: Seated) => receivedSince(h, ada, 0).length;
+
+  /** Let the one bot thinking play, and answer the position it produced. */
+  function think(h: Harness, ada: Seated): PlayerGameView {
+    const before = receivedSoFar(h, ada);
+    assert.deepEqual(h.clock.delays(), [BOT_THINK_MS], "one bot thinking, for the interval");
+    h.clock.tick();
+    const played = receivedSince(h, ada, before);
+    assert.equal(played.length, 1, "the beat played one move, delivered on its own");
+    return played[0]!;
+  }
+
+  /**
+   * A card worth discarding to fish for a window: one whose rank the player holds only
+   * once, since every copy still in hand is a copy that cannot come back off the deck.
+   */
+  function fishingDiscard(view: PlayerGameView): string {
+    const hand = playingSelf(view).hand;
+    const lonely = hand.find(
+      (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
+    );
+    return (lonely ?? hand[0]!).id;
+  }
+
+  /** The human's turn, taken by shedding one card and drawing blind. */
+  function takeATurn(h: Harness, ada: Seated, from: PlayerGameView): void {
+    const discard = fishingDiscard(from);
+    apply(h, ada.roomCode, (state, rng) =>
+      takeTurn(state, ada.playerId, { discardCardIds: [discard], draw: { source: "deck" } }, rng),
+    );
+  }
+
+  /** The seat `n` places behind the human in turn order, wrapping round the table. */
+  const behind = (deal: PlayerGameView, ada: Seated, n: number) =>
+    deal.turnOrder[(deal.turnOrder.indexOf(ada.playerId) + n) % deal.turnOrder.length]!;
+
+  it("leaves a bot's turn unplayed in the tick that handed it over", () => {
+    const { h, ada, deal } = sitDown(4242);
+    assert.equal(deal.currentTurnPlayerId, ada.playerId, "the host takes the first turn");
+    const before = receivedSoFar(h, ada);
+
+    takeATurn(h, ada, deal);
+
+    const delivered = receivedSince(h, ada, before);
+    assert.equal(delivered.length, 1, "the bot moved in the tick that handed it the turn");
+    assert.equal(delivered[0]!.currentTurnPlayerId, behind(deal, ada, 1));
+    assert.deepEqual(h.clock.delays(), [BOT_THINK_MS], "and it is thinking about its turn");
+  });
+
+  it("plays it once think time has elapsed", () => {
+    const { h, ada, deal } = sitDown(4242);
+    takeATurn(h, ada, deal);
+
+    const played = think(h, ada);
+
+    assert.equal(
+      played.currentTurnPlayerId,
+      behind(deal, ada, 2),
+      "the first bot played and handed on to the second",
+    );
+  });
+
+  it("advances a chain one turn per interval, in seating order", () => {
+    const { h, ada, deal } = sitDown(4242);
+    takeATurn(h, ada, deal);
+
+    // Every seat behind the host, one tick at a time. `think` asserts a single timer was
+    // waiting for each and a single delivery came of it, so nothing here can be two moves
+    // in one beat.
+    const seats: (string | null)[] = [];
+    for (let i = 0; i < MAX_PLAYERS - 1; i++) seats.push(think(h, ada).currentTurnPlayerId);
+
+    assert.deepEqual(
+      seats,
+      [2, 3, 4, 5, 6].map((n) => behind(deal, ada, n)),
+      "each bot in turn, and the turn back to the human",
+    );
+    assert.equal(h.clock.pending(), 0, "nothing is left thinking behind the human");
+  });
+
+  /**
+   * The pause is a property of a bot's turn, not of a turn following a human's. Seeds are
+   * dealt in order until one opens on a bot — most do, five in six — so the table this is
+   * written against is the same one every run.
+   */
+  it("pauses before the first move of a round that opens on a bot", () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const { h, ada, deal } = sitDown(seed);
+      if (deal.currentTurnPlayerId === ada.playerId) continue;
+
+      assert.equal(deal.lastMove, null, "the opening bot has not moved");
+      assert.deepEqual(h.clock.delays(), [BOT_THINK_MS], "it is thinking about it");
+
+      const opener = deal.turnOrder.indexOf(deal.currentTurnPlayerId!);
+      const opened = think(h, ada);
+      assert.equal(
+        opened.currentTurnPlayerId,
+        deal.turnOrder[(opener + 1) % deal.turnOrder.length],
+        "the opening bot played, once it had thought about it, and handed on",
+      );
+      return;
+    }
+    assert.fail("no deal ever opened on a bot");
+  });
+
+  /**
+   * The whole of what makes slapdown against a bot winnable: there is no window timer,
+   * only the pause the next bot takes (docs/adr/0005).
+   *
+   * The window cannot be arranged — it is opened by drawing blind — so the table is fished
+   * until one appears, the bots played out on the clock along the way.
+   */
+  describe("the window it holds open", () => {
+    /** Play until the human draws a card they may slap down, and stop exactly there. */
+    function fishForAWindow(h: Harness, ada: Seated): PlayerGameView {
+      for (let step = 0; step < 400; step++) {
+        while (h.clock.pending() > 0) think(h, ada);
+        const at = viewOf(h, ada);
+        if (at.phase === "roundEnd") {
+          apply(h, ada.roomCode, (state, rng) => startNextRound(state, ada.playerId, rng));
+          continue;
+        }
+        assert.equal(at.currentTurnPlayerId, ada.playerId, "the table stopped on a bot");
+
+        takeATurn(h, ada, at);
+        const landed = viewOf(h, ada);
+        if (landed.phase === "playing" && slapdownOpen(landed)) return landed;
+      }
+      assert.fail("no slapdown window ever opened");
+    }
+
+    function slap(h: Harness, ada: Seated): void {
+      apply(h, ada.roomCode, (state) => slapDown(state, ada.playerId));
+    }
+
+    it("lets a human win a window the bot behind them is still thinking in", () => {
+      const { h, ada } = sitDown(20250811);
+      const open = fishForAWindow(h, ada);
+
+      slap(h, ada);
+
+      const after = viewOf(h, ada);
+      assert.equal(after.lastSlapdown?.playerId, ada.playerId);
+      assert.equal(
+        playingSelf(after).hand.length,
+        playingSelf(open).hand.length - 1,
+        "the drawn card went back down",
+      );
+      assert.equal(
+        after.currentTurnPlayerId,
+        open.currentTurnPlayerId,
+        "and the bot it beat has still not moved",
+      );
+    });
+
+    it("neither hurries the pending turn nor schedules a second", () => {
+      const { h, ada } = sitDown(20250811);
+      const open = fishForAWindow(h, ada);
+      const before = receivedSoFar(h, ada);
+
+      slap(h, ada);
+
+      assert.equal(receivedSince(h, ada, before).length, 1, "only the slap itself was published");
+      // `think` asserts the one timer, and one move out of its beat.
+      const played = think(h, ada);
+      assert.equal(
+        played.lastMove?.playerId,
+        open.currentTurnPlayerId,
+        "which was a turn, taken by the bot",
+      );
+    });
+
+    it("plays the bot's turn against the position the slap produced", () => {
+      const { h, ada } = sitDown(20250811);
+      const open = fishForAWindow(h, ada);
+      const slapped = playingSelf(open).hand.find((c) => c.rank === open.lastDiscard[0]!.rank);
+      assert.ok(slapped, "the window is over a card matching the set it would join");
+
+      slap(h, ada);
+      const played = think(h, ada);
+
+      // The round's own log, which the bot's turn is written into after the slap: the card
+      // was on the pile, in front of it, when it decided.
+      const since = played.moveHistory.slice(-2);
+      assert.deepEqual(
+        since.map((entry) => entry.kind),
+        ["slapdown", "turn"],
+        "the bot moved after the slap, not around it",
+      );
+      assert.equal(since[0]!.playerId, ada.playerId);
+      assert.equal(
+        since[0]!.kind === "slapdown" && since[0]!.card.id,
+        slapped.id,
+        "and it is the slapped card the bot was looking at",
+      );
+    });
   });
 });
 
