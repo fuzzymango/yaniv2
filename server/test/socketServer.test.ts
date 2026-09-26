@@ -3318,6 +3318,10 @@ describe("disconnect", () => {
         "Grace",
       ),
     );
+    // The guest's ack and the host's broadcast travel on two connections, so the one
+    // landing says nothing of the other — and a test's next `nextEvent` could catch the
+    // arrival rather than whatever it is waiting for.
+    await hostViews.until((v) => v.opponents.length === 1, "the guest's arrival");
     return { roomCode, host, hostId, hostViews, guest, guestId, guestToken };
   }
 
