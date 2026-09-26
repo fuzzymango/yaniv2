@@ -54,6 +54,13 @@ export interface RoomManagerOptions {
 }
 
 /**
+ * Told of a transition a room has just gone through: the position it stood at, and the one
+ * now stored. Called synchronously inside `apply`, so it must not throw and must not make
+ * the room wait — anything slow it starts, it starts and leaves running.
+ */
+export type TransitionObserver = (before: GameState, after: GameState) => void;
+
+/**
  * Owns the live rooms. Each room code maps to one fully independent `GameState` plus
  * its own rng. Storage is an in-memory Map: a server restart drops every game in
  * progress. That is a known and accepted limitation, not an oversight.
@@ -65,6 +72,7 @@ export class RoomManager {
   private readonly newResumeToken: () => string;
   private readonly newRoomRng: () => Rng;
   private readonly defaultSettings: Partial<RoomSettings>;
+  private readonly observers: TransitionObserver[] = [];
 
   constructor(options: RoomManagerOptions = {}) {
     this.rng = options.rng ?? systemRng;
@@ -271,9 +279,24 @@ export class RoomManager {
   }
 
   /**
+   * Be told of every transition `apply` accepts, from now on, whoever asked for it.
+   *
+   * The one place every change to a room passes — a human's move, a bot's, the auto-deal,
+   * an exit — so something that must see all of them registers here once rather than
+   * being remembered at each route (docs/adr/0024). The room manager knows nothing of what
+   * is listening: the stats write is the socket layer's, which owns the store.
+   */
+  observe(observer: TransitionObserver): void {
+    this.observers.push(observer);
+  }
+
+  /**
    * Run a state transition against a room and persist it if it succeeds. This is the
    * seam the socket layer uses, so it never touches stored state directly and a
    * rejected action can never leave a room half-updated.
+   *
+   * An accepted transition is handed to every observer only once it is stored, so one
+   * that looks the room up finds the position it was told about.
    */
   apply(
     roomCode: string,
@@ -282,9 +305,11 @@ export class RoomManager {
     const room = this.rooms.get(roomCode);
     if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
 
-    const result = transition(room.state, room.rng);
+    const before = room.state;
+    const result = transition(before, room.rng);
     if (result.ok) {
       room.state = result.value;
+      for (const observer of this.observers) observer(before, result.value);
     }
     return result;
   }

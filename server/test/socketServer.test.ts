@@ -35,7 +35,11 @@ import { io as connectClient, type Socket as ClientSocket } from "socket.io-clie
 import { decideTurn } from "../src/bot.ts";
 import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
-import { createMemoryProfileStore, type ProfileStore } from "../src/profiles.ts";
+import {
+  createMemoryProfileStore,
+  type ProfileStore,
+  type StatsDelta,
+} from "../src/profiles.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import type { SocketServerOptions } from "../src/socketServer.ts";
@@ -4133,12 +4137,12 @@ describe("a Yaniv call counted on the caller's account", () => {
   }
 
   /**
-   * The memory store with its Yaniv-call write replaced, and every account that write was
-   * asked for recorded in order — whatever the replacement then does with it. The
-   * replacement is handed the store underneath, which is where the accounts are.
+   * The memory store with its stats write replaced, and every account that write was asked
+   * for recorded in order — whatever the replacement then does with it. The replacement is
+   * handed the store underneath, which is where the accounts are.
    */
   function storeWith(
-    recordYanivCall: (id: string, memory: ProfileStore) => Promise<void>,
+    recordStats: (id: string, delta: StatsDelta, memory: ProfileStore) => Promise<void>,
   ): { profiles: ProfileStore; asked: string[] } {
     const memory = createMemoryProfileStore();
     const asked: string[] = [];
@@ -4146,9 +4150,9 @@ describe("a Yaniv call counted on the caller's account", () => {
       asked,
       profiles: {
         ...memory,
-        recordYanivCall: (id) => {
+        recordStats: (id, delta) => {
           asked.push(id);
-          return recordYanivCall(id, memory);
+          return recordStats(id, delta, memory);
         },
       },
     };
@@ -4177,7 +4181,9 @@ describe("a Yaniv call counted on the caller's account", () => {
   });
 
   it("writes nothing for a bot's call", async () => {
-    const { profiles, asked } = storeWith((id, memory) => memory.recordYanivCall(id));
+    const { profiles, asked } = storeWith((id, delta, memory) =>
+      memory.recordStats(id, delta),
+    );
     const player = await sitDown(profiles);
 
     const { mine } = await playUntil(

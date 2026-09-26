@@ -15,20 +15,21 @@
  * and the second registration in `test/profiles.test.ts` that turns the contract suite on
  * this file. Every query below is therefore written to be read against that suite.
  *
- * Rows are mapped to the seam's types by hand, four field names written down, rather than
+ * Rows are mapped to the seam's types by hand, every field name written down, rather than
  * with the driver's `transform: postgres.camel`: a global rename would live in `connect.ts`,
  * the one file that is about the driver rather than about accounts, and a silent renaming
  * of every column in every query is a worse thing to debug than a mapping function.
  */
 
 import { randomUUID } from "node:crypto";
-import type {
-  Account,
-  AccountId,
-  CredentialKind,
-  NewCredential,
-  ProfileStore,
-  StoredCredential,
+import {
+  NO_STATS,
+  type Account,
+  type AccountId,
+  type CredentialKind,
+  type NewCredential,
+  type ProfileStore,
+  type StoredCredential,
 } from "../profiles.ts";
 import type { SqlClient } from "./connect.ts";
 
@@ -36,6 +37,11 @@ interface AccountRow {
   id: string;
   display_name: string;
   yaniv_calls: number;
+  calls_assafed: number;
+  assafs: number;
+  games_completed: number;
+  games_won: number;
+  slapdowns: number;
 }
 
 /**
@@ -53,6 +59,11 @@ const toAccount = (row: AccountRow): Account => ({
   id: row.id,
   displayName: row.display_name,
   yanivCalls: row.yaniv_calls,
+  callsAssafed: row.calls_assafed,
+  assafs: row.assafs,
+  gamesCompleted: row.games_completed,
+  gamesWon: row.games_won,
+  slapdowns: row.slapdowns,
 });
 
 /**
@@ -91,12 +102,12 @@ export function createSqlProfileStore(sql: SqlClient): ProfileStore {
        * key refuses it — takes the account row down with it and leaves no account nobody
        * can sign in to. The caller's answer to a returning player is `findByCredential`.
        */
-      const account: Account = { id: randomUUID(), displayName, yanivCalls: 0 };
+      // Every stat is left to its column's default of zero, which is what `NO_STATS` says.
+      const account: Account = { id: randomUUID(), displayName, ...NO_STATS };
 
       await sql.begin(async (tx) => {
         await tx`
-          insert into account (id, display_name, yaniv_calls)
-          values (${account.id}, ${account.displayName}, ${account.yanivCalls})
+          insert into account (id, display_name) values (${account.id}, ${account.displayName})
         `;
         await tx`
           insert into credential (kind, identifier, account_id, secret)
@@ -126,7 +137,9 @@ export function createSqlProfileStore(sql: SqlClient): ProfileStore {
       if (!UUID.test(id)) return null;
 
       const [row] = await sql<AccountRow[]>`
-        select id, display_name, yaniv_calls from account where id = ${id}
+        select id, display_name, yaniv_calls, calls_assafed, assafs, games_completed,
+          games_won, slapdowns
+        from account where id = ${id}
       `;
       return row ? toAccount(row) : null;
     },
@@ -140,11 +153,21 @@ export function createSqlProfileStore(sql: SqlClient): ProfileStore {
       requireUpdated(updated, id);
     },
 
-    async recordYanivCall(id) {
-      // Incremented in the database rather than read, added to and written back: two calls
+    async recordStats(id, delta) {
+      // Incremented in the database rather than read, added to and written back: two writes
       // at once are then two increments, with no lost update and no transaction to hold.
+      // Every column in one statement, a counter the delta leaves out adding zero, so the
+      // query is one fixed template rather than a string built from whatever was named.
       const updated = await sql`
-        update account set yaniv_calls = yaniv_calls + 1 where id = ${id} returning id
+        update account set
+          yaniv_calls = yaniv_calls + ${delta.yanivCalls ?? 0},
+          calls_assafed = calls_assafed + ${delta.callsAssafed ?? 0},
+          assafs = assafs + ${delta.assafs ?? 0},
+          games_completed = games_completed + ${delta.gamesCompleted ?? 0},
+          games_won = games_won + ${delta.gamesWon ?? 0},
+          slapdowns = slapdowns + ${delta.slapdowns ?? 0}
+        where id = ${id}
+        returning id
       `;
       requireUpdated(updated, id);
     },

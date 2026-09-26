@@ -380,7 +380,7 @@ handler logic — `socketServer.test.ts` drives real `socket.io-client` connecti
 stub, this layer's whole job *being* its wire behaviour, and observes server-side facts through
 the socket rather than by asking `RoomManager`. `options` carries the clock every room timer is
 set on, the bot think time, the verifier, the session-token generator and the `log` a dropped
-Yaniv-call write is reported to, all defaulted, so production construction is unchanged.
+stats write is reported to, all defaulted, so production construction is unchanged.
 
 ### There are two ways to boot, and the command says which
 
@@ -414,13 +414,17 @@ Every in-game handler shares one `act(ack, transition)` helper: identify the cal
 seat, apply, and on success ack, broadcast, then run any bot turns. A rejection acks the
 error and publishes nothing, so a refused action costs the player nothing.
 
-**The one stat hangs off that tail, last** (docs/adr/0023): `act` takes an optional side effect
-run after the bot turns, and `callYaniv` is its only user. It asks `accountToCredit`
-(`stats.ts`) — the caller's account, or null for a guest and for a bot, two nulls kept apart
-by a name — and starts `recordYanivCall`, **never awaited**: a failure is logged naming the
-account and dropped, so a slow or dead database costs a counter and never the table. The call
-is counted, never the verdict, and nothing can count one twice, a second call being
-`WRONG_PHASE` with no tail.
+**Stats are read off the transition, not off a handler** (docs/adr/0024): `RoomManager.apply`
+hands every accepted transition to its observers once stored, and `createSocketServer` registers
+one — a human's move, a bot's, the auto-deal and an exit all reach it, none of them calling it.
+It asks the pure `statsEarned(before, after)` (`stats.ts`) what each account is owed — a round
+scored, **the scorecard growing and never the phase leaving `playing`**, credits its caller a
+Yaniv call — every credit through `accountToCredit` (null for a guest and for a bot, two nulls
+kept apart by a name), merged to one delta per account, and starts `recordStats` on it,
+**never awaited**: a failure is logged naming the account and dropped, so a slow or dead database
+costs a counter and never the table (0023, which still holds but for where the write hangs).
+Nothing counts twice because each fact becomes true in exactly one accepted transition — an
+engine property, which a change letting a round be scored twice would break.
 
 ### Bots think before they move
 

@@ -6,6 +6,7 @@ import { removePlayer, startGame } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { err, ok } from "../src/result.ts";
 import { mulberry32 } from "../src/rng.ts";
+import type { GameState } from "../src/state.ts";
 import { expectErr, makeState, unwrap } from "./helpers.ts";
 
 function manager(): RoomManager {
@@ -446,6 +447,58 @@ describe("apply", () => {
       manager().apply("ZZZZ", (state) => ok(state)),
       "ROOM_NOT_FOUND",
     );
+  });
+});
+
+describe("observe", () => {
+  it("hands every accepted transition to the observer, the position before and after", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    unwrap(rooms.joinRoom(roomCode, "Grace", null));
+    const before = rooms.getState(roomCode)!;
+    const seen: Array<[GameState, GameState]> = [];
+    rooms.observe((from, to) => seen.push([from, to]));
+
+    const after = unwrap(
+      rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)),
+    );
+
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]![0], before);
+    assert.equal(seen[0]![1], after);
+  });
+
+  /** So an observer that looks the room up again finds the position it was handed. */
+  it("tells the observer only once the new position is stored", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    unwrap(rooms.joinRoom(roomCode, "Grace", null));
+    let stored: GameState | undefined;
+    let handed: GameState | undefined;
+    rooms.observe((_, to) => {
+      handed = to;
+      stored = rooms.getState(roomCode);
+    });
+
+    unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
+
+    assert.ok(handed);
+    assert.equal(stored, handed);
+  });
+
+  it("tells the observer nothing of a rejected transition", () => {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+    let told = 0;
+    rooms.observe(() => told++);
+
+    expectErr(
+      rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)),
+      "NOT_ENOUGH_PLAYERS",
+    );
+    expectErr(rooms.apply("ZZZZ", (state) => ok(state)), "ROOM_NOT_FOUND");
+
+    assert.equal(told, 0);
   });
 });
 

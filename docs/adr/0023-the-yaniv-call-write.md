@@ -1,5 +1,14 @@
 # The Yaniv-call write hangs off the handler, counts the call and never the verdict, and is never awaited
 
+> **Superseded in part by [ADR-0024](0024-stats-read-off-the-transition.md).** "Off the handler,
+> not off the state" no longer holds: `accountToCredit` already makes a bot nobody, so the reason
+> for refusing to read the state is gone. Every stat is now read off each accepted transition in
+> `statsEarned`, the `callYaniv` handler has no tail and `act` has no `after`. The write is
+> `recordStats`, not `recordYanivCall`. The rest stands and every stat inherits it: the call is
+> counted and never the verdict, the write is never awaited, a failure is logged naming the account
+> and dropped, nothing is buffered for a guest, and there is no idempotency key. Left as written
+> below, as the record of what was decided and why.
+
 The engine is pure: transitions in `game.ts` return `Result<GameState>`, errors are values,
 randomness and the clock are injected, and nothing reaches outside. A durable write is a side
 effect and cannot go in there without breaking the property the whole codebase is built on. One
