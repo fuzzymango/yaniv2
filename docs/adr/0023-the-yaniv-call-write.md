@@ -160,6 +160,11 @@ holds up neither the next round nor the bots in it; and that a failed write, rej
 thrown, is logged naming the account and goes no further. **Step 5 is now wired to
 `callYaniv` by a test that fails if it is not.**
 
+*Amended by ADR-0025 (issue #222):* those tests now drive `Rooms` over a recording port, with no
+socket (`rooms.test.ts`), the observer having moved there; `socketServer.test.ts` keeps one, a
+signed-in player's match ended by an exit reaching the store the server was given, which fails if
+the adapter hands `Rooms` any other write.
+
 What it does not prove is the same write against a real Postgres, behind a real Google
 sign-in, from the real client — the half #194 still exists to check by hand, and ADR-0019's
 gap rather than this one's.

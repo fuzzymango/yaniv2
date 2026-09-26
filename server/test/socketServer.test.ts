@@ -19,7 +19,6 @@ import type {
   PlayerGameView,
   ResumeRequest,
   RoomSettings,
-  RoundResultView,
   SignedIn,
   SignInResult,
 } from "@yaniv/shared";
@@ -33,13 +32,9 @@ import {
 } from "@yaniv/shared";
 import { io as connectClient, type Socket as ClientSocket } from "socket.io-client";
 import { decideTurn } from "../src/bot.ts";
-import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
+import { BOT_THINK_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
-import {
-  createMemoryProfileStore,
-  type ProfileStore,
-  type StatsDelta,
-} from "../src/profiles.ts";
+import { createMemoryProfileStore, type ProfileStore } from "../src/profiles.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import type { SocketServerOptions } from "../src/socketServer.ts";
@@ -48,9 +43,11 @@ import { fakeVerifier, type FakeVerifier } from "./auth/verifier.ts";
 import {
   RESUME_TOKEN_MARK,
   SESSION_TOKEN_MARK,
+  fishingDiscard,
   markedResumeTokens,
   markedSessionTokens,
   playingSelf,
+  seatBehind,
   slapdownOpen,
   testClock,
   type TestClock,
@@ -94,11 +91,11 @@ const LONG_MATCH: Partial<RoomSettings> = { maxScore: MAX_SCORE_LIMITS.max };
  * tests were written against without an `updateSettings` call in front of every one of
  * them. Suites about the seating rule itself, or about that event, pass their own.
  *
- * `timing` switches bot think time off by default. Every suite here but the one about the
- * pause itself is about something else, and none of them should have to learn about a
- * clock — nor spend real seconds waiting on a bot. Bot turns are still scheduled rather
- * than played in the handler's own tick, so a test that wants one waits for its broadcast
- * whatever the interval is set to.
+ * `timing` switches bot think time off by default. The pause itself is `Rooms`' and is
+ * asserted in `rooms.test.ts`; the suites here are about the wire, and none of them should
+ * have to learn about a clock — nor spend real seconds waiting on a bot. Bot turns are
+ * still scheduled rather than played in the handler's own tick, so a test that wants one
+ * waits for its broadcast whatever the interval is set to.
  *
  * `settings` is anything else a suite wants every room seeded with. `SHORT_MATCH` is what
  * the suites that play a match all the way out pass: a match now ends when one player is
@@ -269,16 +266,6 @@ function assertNoResumeToken(view: PlayerGameView, where: string): void {
   );
 }
 
-/**
- * The seat `n` places behind `playerId` in turn order, wrapping round the table. Counted
- * from the player rather than from the front, the seating being drawn at the deal
- * (docs/rules.md §2).
- */
-function seatBehind(view: PlayerGameView, playerId: string, n: number): string {
-  const order = view.turnOrder;
-  return order[(order.indexOf(playerId) + n) % order.length]!;
-}
-
 /** Unwrap a rejection, failing the test if the call unexpectedly succeeded. */
 function expectError<T>(result: AckResult<T>): GameError {
   if (result.ok) assert.fail("expected a rejection, got success");
@@ -319,6 +306,10 @@ describe("createRoom", () => {
     assert.ok(result.value.playerId.length > 0, "a player id was issued");
   });
 
+  /**
+   * Also the wiring proof that a seated arrival is published to: seating publishes nothing,
+   * so this lobby reaches the host only because the adapter reports the bind to `Rooms`.
+   */
   it("publishes the room's settings with the lobby, before any round is dealt", async () => {
     const client = await server.connect();
     const lobby = nextEvent<PlayerGameView>(client, "gameStateUpdate");
@@ -771,10 +762,46 @@ describe("session tokens on the wire", () => {
 });
 
 /**
+ * The one line stats pass through the adapter on: `createSocketServer` handing `Rooms` the
+ * store's write. What is written, by which route, and what a failing store costs are proved
+ * in `rooms.test.ts` with no socket; what is left here is that the store the server was
+ * given is the one written to, reached from a signed-in connection (docs/adr/0023's
+ * amendment). An exit ends the match, being the one route to a stat with no fishing.
+ */
+describe("stats on the wire", () => {
+  const profiles = createMemoryProfileStore();
+  let table: Harness;
+  before(async () => {
+    table = await startServer(undefined, 0, { thinkTimeMs: 0 }, {}, profiles);
+  });
+  after(async () => {
+    await table.close();
+  });
+
+  it("reach a signed-in player's account in the store the server was given", async () => {
+    const ada = await table.connect();
+    const { account } = await signUp(ada, "Ada", table);
+    const { roomCode } = expectOk(await ask<{ roomCode: string }>(ada, "createRoom", "Ada"));
+    const grace = await table.connect();
+    expectOk(await ask(grace, "joinRoom", roomCode, "Grace"));
+    expectOk(await ask(ada, "startGame"));
+
+    const watcher = watch(ada);
+    expectOk(await ask(grace, "exitToMenu"));
+    await watcher.until((v) => v.phase === "gameEnd", "the match to end");
+
+    const stats = (await profiles.loadAccount(account.id))!;
+    assert.equal(stats.gamesCompleted, 1);
+    assert.equal(stats.gamesWon, 1);
+  });
+});
+
+/**
  * A seat is bound to one identity for life and claimed back by that one (docs/adr/0022): a
  * guest seat by its resume token, exactly as before, and an account seat by its account,
- * the token issued and never consulted. The whole check is
- * `player.accountId ? account === player.accountId : token === player.resumeToken`.
+ * the token issued and never consulted. The rule's cases are `roomManager.test.ts`'s
+ * (`claimSeat`); what is left here proves the wiring — that the claimant is built from the
+ * connection's account binding and the payload's token, and a refusal reaches the wire.
  */
 describe("a seat claimed by whoever took it", () => {
   interface Seating {
@@ -887,68 +914,12 @@ describe("a seat claimed by whoever took it", () => {
       assert.equal(view.you.accountId, seat.account.account.id);
     });
 
-    it("refuses an account seat to its own token, presented by a guest", async () => {
-      const seat = await accountSeat();
-      seat.client.disconnect();
-
-      const guest = await server.connect();
-      assert.equal(expectError(await resume(guest, seat)).code, "INVALID_RESUME_TOKEN");
-    });
-
-    it("refuses an account seat to another account, token and all", async () => {
-      const seat = await accountSeat();
-      seat.client.disconnect();
-
-      const other = await server.connect();
-      await signUp(other, "Mallory");
-      assert.equal(expectError(await resume(other, seat)).code, "INVALID_RESUME_TOKEN");
-    });
-
-    /** The cost ADR-0022 accepts: a signed-out reload cannot claim what the account took. */
-    it("refuses an account seat to a connection whose account signed out", async () => {
-      const seat = await accountSeat();
-      seat.client.disconnect();
-
-      const returning = await signedInAs(seat.account.sessionToken);
-      expectOk(await ask(returning, "signOut"));
-      assert.equal(expectError(await resume(returning, seat)).code, "INVALID_RESUME_TOKEN");
-    });
-
     it("hands a guest seat back to its token, exactly as before", async () => {
       const seat = await guestSeat();
       seat.client.disconnect();
 
       const returning = await server.connect();
       assert.equal(expectOk(await resume(returning, seat)).view.you.id, seat.playerId);
-    });
-
-    /**
-     * Signing in while seated as a guest binds the connection, not the seat — so the seat
-     * is still its token's, and a reload that has since signed in gets it back by that.
-     */
-    it("hands a guest seat back to its token whoever is signed in on the connection", async () => {
-      const seat = await guestSeat();
-      await signUp(seat.client, "Grace");
-      seat.client.disconnect();
-
-      const returning = await server.connect();
-      await signUp(returning, "Somebody");
-      const { view } = expectOk(await resume(returning, seat));
-
-      assert.equal(view.you.id, seat.playerId);
-      assert.equal(view.you.accountId, null, "still a guest seat");
-    });
-
-    it("refuses a guest seat to a signed-in connection with the wrong token", async () => {
-      const seat = await guestSeat();
-      seat.client.disconnect();
-
-      const returning = await server.connect();
-      await signUp(returning, "Grace");
-      assert.equal(
-        expectError(await resume(returning, { ...seat, resumeToken: "not-the-token" })).code,
-        "INVALID_RESUME_TOKEN",
-      );
     });
 
     /**
@@ -1183,6 +1154,9 @@ describe("updateSettings", () => {
     const guest = await server.connect();
     const guestViews = watch(guest);
     expectOk(await ask(guest, "joinRoom", roomCode, "Grace"));
+    // The guest's ack says nothing about the host's connection: wait for the arrival to
+    // reach the host too, or it could land after a test has reset what the host has seen.
+    await hostViews.until((v) => v.opponents.length === 1, "the guest's arrival");
 
     return { roomCode, host, hostViews, guest, guestViews };
   }
@@ -1441,7 +1415,7 @@ describe("playing a match", () => {
 
     // How long the chain takes is not this test's subject: this server is built with
     // think time off, and the pause each bot waits out is asserted on a clock of its own
-    // further down. What has to hold at any interval is that the moves are separate.
+    // in `rooms.test.ts`. What has to hold at any interval is that the moves are separate.
   });
 
   /*
@@ -2108,43 +2082,6 @@ describe("play again and exit to menu", () => {
       expectOk(await ask(guests[0]!.client, "startGame"));
     });
 
-    /**
-     * The last *human* leaving is what ends a room, bots at the table or not: a bot never
-     * departs and never asks for anything, so a table of them with nobody watching is a
-     * room playing to no one — and, with no player left who could leave, one nothing else
-     * would ever end (docs/adr/0012).
-     */
-    it("drops a room whose last human leaves, bots still seated", async () => {
-      const { roomCode, seats } = await openLobby(["Ada"]);
-      expectOk(await ask(seats[0]!.client, "startGame"));
-      const finished = await playToGameEnd(seats);
-      assert.ok(
-        finished.opponents.some((o) => o.name.includes("(bot)")),
-        "the table this is left with is a bot's",
-      );
-
-      expectOk(await ask(seats[0]!.client, "exitToMenu"));
-
-      const latecomer = await table.connect();
-      assert.equal(
-        expectError(await ask(latecomer, "joinRoom", roomCode, "Tony")).code,
-        "ROOM_NOT_FOUND",
-      );
-    });
-
-    /** The other half: a room ends when the last seat in it goes, and not before. */
-    it("drops a room whose last seat leaves", async () => {
-      const { roomCode, seats } = await openLobby(["Ada"]);
-
-      expectOk(await ask(seats[0]!.client, "exitToMenu"));
-
-      const latecomer = await table.connect();
-      assert.equal(
-        expectError(await ask(latecomer, "joinRoom", roomCode, "Tony")).code,
-        "ROOM_NOT_FOUND",
-      );
-    });
-
     it("leaves the finished match standing for whoever stays", async () => {
       const { seats } = await openLobby(["Ada", "Grace"]);
       const [host, guest] = seats;
@@ -2363,7 +2300,7 @@ describe("play again and exit to menu", () => {
  * Two humans seated next to each other is the arrangement this suite races in, because it
  * is the one that does not depend on a clock: Ada acts, Grace is next, and the window stays
  * open until she moves, whatever the server's bot think time is set to. Racing a bot is a
- * race against that pause, and is asserted on a clock of its own in "bot think time" below.
+ * race against that pause, and is asserted on a clock of its own in `rooms.test.ts`.
  *
  * The window itself cannot be arranged — it is opened by drawing blind off the deck —
  * so the table is played on a seeded server until one appears, and every test here
@@ -2371,8 +2308,6 @@ describe("play again and exit to menu", () => {
  */
 describe("slapping down", () => {
   let table: Harness;
-  /** The accounts behind the table, so a test can read what a slapdown was credited. */
-  const profiles = createMemoryProfileStore();
 
   before(async () => {
     /*
@@ -2385,7 +2320,7 @@ describe("slapping down", () => {
      * And no bots: the fishing needs Grace to play directly after Ada, which a table of
      * two is whatever the seating the deal draws (docs/rules.md §2).
      */
-    table = await startServer(20250811, 0, undefined, LONG_MATCH, profiles);
+    table = await startServer(20250811, 0, undefined, LONG_MATCH);
   });
   after(async () => {
     await table.close();
@@ -2396,38 +2331,14 @@ describe("slapping down", () => {
     watcher: Watcher;
     id: string;
     name: string;
-    /** The account the seat was taken under, or `null` for a guest. */
-    accountId: string | null;
     /** Every view this seat was ever sent, never reset — what the wire actually said. */
     heard: PlayerGameView[];
   }
 
-  function seat(
-    client: ClientSocket,
-    id: string,
-    name: string,
-    accountId: string | null,
-  ): Seat {
+  function seat(client: ClientSocket, id: string, name: string): Seat {
     const heard: PlayerGameView[] = [];
     client.on("gameStateUpdate", (view: PlayerGameView) => heard.push(view));
-    return { client, watcher: watch(client), id, name, accountId, heard };
-  }
-
-  /** Sign `client` up as `name` where the test asked for accounts, and say under what. */
-  const accountFor = async (client: ClientSocket, name: string, signedIn: boolean) =>
-    signedIn ? (await signUp(client, name, table)).account.id : null;
-
-  /**
-   * A card worth discarding to fish for a window: one whose rank the player holds only
-   * once, since every copy still in hand is a copy that cannot come back off the deck.
-   * Jokers are skipped outright — a drawn joker never opens a window.
-   */
-  function fishingDiscard(view: PlayerGameView): string {
-    const hand = playingSelf(view).hand;
-    const lonely = hand.find(
-      (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
-    );
-    return (lonely ?? hand[0]!).id;
+    return { client, watcher: watch(client), id, name, heard };
   }
 
   interface OpenWindow {
@@ -2440,24 +2351,21 @@ describe("slapping down", () => {
   }
 
   /**
-   * Sit Ada and Grace down — as guests, or both signed in — and play until Ada draws a
-   * card she may slap down, leaving the table exactly there: her window open, the turn on
-   * Grace, nothing else moved.
+   * Sit Ada and Grace down and play until Ada draws a card she may slap down, leaving
+   * the table exactly there: her window open, the turn on Grace, nothing else moved.
    */
-  async function playToAnOpenWindow(signedIn = false): Promise<OpenWindow> {
+  async function playToAnOpenWindow(): Promise<OpenWindow> {
     const adaClient = await table.connect();
-    const adaAccount = await accountFor(adaClient, "Ada", signedIn);
     const created = expectOk(
       await ask<{ roomCode: string; playerId: string }>(adaClient, "createRoom", "Ada"),
     );
-    const ada = seat(adaClient, created.playerId, "Ada", adaAccount);
+    const ada = seat(adaClient, created.playerId, "Ada");
 
     const graceClient = await table.connect();
-    const graceAccount = await accountFor(graceClient, "Grace", signedIn);
     const joined = expectOk(
       await ask<{ playerId: string }>(graceClient, "joinRoom", created.roomCode, "Grace"),
     );
-    const grace = seat(graceClient, joined.playerId, "Grace", graceAccount);
+    const grace = seat(graceClient, joined.playerId, "Grace");
 
     expectOk(await ask(ada.client, "startGame"));
 
@@ -2518,9 +2426,6 @@ describe("slapping down", () => {
     }
     assert.fail("no slapdown window ever opened");
   }
-
-  /** What `of`'s account has been credited in slapdowns so far. */
-  const slapdownsOf = async (of: Seat) => (await profiles.loadAccount(of.accountId!))!.slapdowns;
 
   /** Take Grace's turn, from the view she is holding. */
   const graceTakesHerTurn = (grace: Seat, graceView: PlayerGameView) =>
@@ -2704,33 +2609,6 @@ describe("slapping down", () => {
     }
   });
 
-  /**
-   * The route a human's own move is credited by (docs/adr/0024): the slap is Ada's, acked
-   * to her, and her account reads it — Grace's, trying after it, loses the race and reads
-   * nothing, and Ada's own second try is no second slapdown.
-   */
-  it("counts an accepted slapdown on the slapper's account, a refused one on nobody's", async () => {
-    const { ada, grace } = await playToAnOpenWindow(true);
-
-    expectOk(await ask(ada.client, "slapDown"));
-    for (const late of [grace, ada]) {
-      const refused = expectError(await ask(late.client, "slapDown"));
-      assert.equal(refused.code, "SLAPDOWN_NOT_AVAILABLE", `${late.name}'s slap was refused`);
-    }
-
-    assert.equal(await slapdownsOf(ada), 1);
-    assert.equal(await slapdownsOf(grace), 0);
-  });
-
-  it("counts nothing for a slap the next player's turn got in ahead of", async () => {
-    const { ada, grace, graceView } = await playToAnOpenWindow(true);
-    expectOk(await graceTakesHerTurn(grace, graceView));
-
-    expectError(await ask(ada.client, "slapDown"));
-
-    assert.equal(await slapdownsOf(ada), 0);
-  });
-
   it("rejects a slap from a connection that is not in a room", async () => {
     const stranger = await table.connect();
 
@@ -2741,341 +2619,99 @@ describe("slapping down", () => {
 });
 
 /**
- * The pause a bot takes before its turn, and what a human can do inside it.
+ * A move, and the bot turn it hands over, as they reach a client.
  *
- * Every server here is built with a clock the test drives by hand, which is the only way
- * to assert a turn has *not* happened yet as precisely as that it has — a suite that
- * waited on real time could only ever say "not for a while yet". Each test gets its own
- * server, since a clock with somebody else's timer on it is a clock that ticks the wrong
- * one.
+ * What a bot's pause is — its length, the chain it spaces out, the slapdown window it holds
+ * open — is `Rooms`' and is proved there with no socket (`rooms.test.ts`). What is left
+ * here is the adapter's part in it: the ack it sends inside `accepted` arriving ahead of
+ * the broadcast behind it, and a turn played on a timer, with no handler anywhere near it,
+ * still finding the connection it is for.
  *
- * Nothing here reaches for the runner. What is under test is what a client can see: when
- * a position arrives relative to the clock, and what is in it.
+ * The server is built with a clock the test drives by hand, so nothing but this test moves
+ * a bot.
  */
-describe("bot think time", () => {
-  /** A lone human at a table of bots, on a clock nothing moves but this test. */
-  interface Table {
+describe("bot turns on the wire", () => {
+  /** A lone human at a table of bots, dealt in with the first turn theirs. */
+  async function sitDown(): Promise<{
     close: () => Promise<void>;
     clock: TestClock;
     client: ClientSocket;
     watcher: Watcher;
-    me: string;
-    /** The opening position: the deal, whoever it landed on. */
-    view: PlayerGameView;
-  }
-
-  async function sitDown(seed?: number): Promise<Table> {
+    deal: PlayerGameView;
+  }> {
     const clock = testClock();
-    // A limit no run of rounds reaches (`LONG_MATCH`): these tables are one human against
-    // five bots and some of them play a great many rounds fishing for a position. A human
-    // knocked out along the way could not deal the next round (docs/adr/0012), and the
-    // fishing would stall on a rule none of this is about.
-    const harness = await startServer(
-      seed,
-      MAX_PLAYERS - 1,
-      { clock, thinkTimeMs: BOT_THINK_MS },
-      LONG_MATCH,
-    );
+    // The seed opens on the host.
+    const harness = await startServer(4242, MAX_PLAYERS - 1, {
+      clock,
+      thinkTimeMs: BOT_THINK_MS,
+    });
     const client = await harness.connect();
     const watcher = watch(client);
-    const { playerId } = expectOk(
-      await ask<{ playerId: string }>(client, "createRoom", "Ada"),
-    );
+    expectOk(await ask(client, "createRoom", "Ada"));
     expectOk(await ask(client, "startGame"));
-    const view = await watcher.until((v) => v.phase === "playing", "the deal");
-    return { close: harness.close, clock, client, watcher, me: playerId, view };
-  }
-
-  const behind = (t: Table, n: number) => seatBehind(t.view, t.me, n);
-
-  /**
-   * A full round trip through the server, so "nothing was published" is a fact rather
-   * than a guess: a socket delivers in order, so anything broadcast before this ack was
-   * sent has already arrived by the time it comes back.
-   */
-  async function roundTrip(t: Table): Promise<void> {
-    // Refused, and deliberately: a rejection publishes nothing of its own.
-    expectError(await ask(t.client, "startNextRound"));
+    const deal = await watcher.until((v) => v.phase === "playing", "the deal");
+    assert.equal(deal.currentTurnPlayerId, deal.you.id, "the host takes the first turn");
+    watcher.reset();
+    return { close: harness.close, clock, client, watcher, deal };
   }
 
   /**
-   * Let the thinking bot play, and answer the position it produced.
-   *
-   * The interval it asked for is checked on every tick, which is where "every bot waits
-   * the same interval, every time" is actually asserted — a chain that hurried its later
-   * moves would look identical from the outside.
+   * The order `session.ts`'s busy lock and the CLI harness's watermark are built on. A
+   * socket delivers in order, so the order the client hears the two in is the order the
+   * server sent them.
    */
-  async function think(t: Table): Promise<PlayerGameView> {
-    const before = t.watcher.seen.length;
-    assert.equal(t.clock.pending(), 1, "exactly one bot was thinking");
-    assert.equal(t.clock.tick(), BOT_THINK_MS, "the interval every bot waits");
-
-    const deadline = Date.now() + 2000;
-    while (t.watcher.seen.length === before) {
-      if (Date.now() > deadline) assert.fail("no move arrived once think time elapsed");
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    return t.watcher.seen[before]!;
-  }
-
-  /** Play every bot the table is waiting on, back round to the human or the score. */
-  async function advanceBots(t: Table): Promise<void> {
-    while (t.clock.pending() > 0) await think(t);
-  }
-
-  /** The host's turn, taken by shedding one card and drawing blind. */
-  async function takeATurn(t: Table, from: PlayerGameView): Promise<void> {
-    expectOk(
-      await ask(t.client, "takeTurn", {
-        discardCardIds: [fishingDiscard(from)],
-        draw: { source: "deck" },
-      }),
-    );
-  }
-
-  /**
-   * A card worth discarding to fish for a window: one whose rank the player holds only
-   * once, since every copy still in hand is a copy that cannot come back off the deck.
-   */
-  function fishingDiscard(view: PlayerGameView): string {
-    const hand = playingSelf(view).hand;
-    const lonely = hand.find(
-      (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
-    );
-    return (lonely ?? hand[0]!).id;
-  }
-
-  it("leaves a bot's turn unplayed in the tick that handed it over", async () => {
-    const t = await sitDown(4242);
+  it("acks a move before the broadcast of it", async () => {
+    const t = await sitDown();
     try {
-      assert.equal(t.view.currentTurnPlayerId, t.me, "the host takes the first turn");
-      t.watcher.reset();
+      const heard: string[] = [];
+      t.client.on("gameStateUpdate", () => heard.push("broadcast"));
 
-      await takeATurn(t, t.view);
+      const acked = await new Promise<AckResult<unknown>>((resolve) =>
+        t.client.emit(
+          "takeTurn",
+          // A single card is always a legal discard, whatever was dealt.
+          { discardCardIds: [playingSelf(t.deal).hand[0]!.id], draw: { source: "deck" } },
+          (result: AckResult<unknown>) => {
+            heard.push("ack");
+            resolve(result);
+          },
+        ),
+      );
+      expectOk(acked);
+      await t.watcher.until((v) => v.currentTurnPlayerId !== t.deal.you.id, "the move");
 
+      assert.deepEqual(heard, ["ack", "broadcast"]);
+    } finally {
+      await t.close();
+    }
+  });
+
+  it("delivers a bot's turn once it has thought about it", async () => {
+    const t = await sitDown();
+    try {
+      expectOk(
+        await ask(t.client, "takeTurn", {
+          discardCardIds: [playingSelf(t.deal).hand[0]!.id],
+          draw: { source: "deck" },
+        }),
+      );
       const handedOver = await t.watcher.until(
-        (v) => v.currentTurnPlayerId !== t.me,
-        "the turn to pass to the bot behind me",
+        (v) => v.currentTurnPlayerId !== t.deal.you.id,
+        "the turn to pass to a bot",
       );
-      await roundTrip(t);
-      assert.equal(
-        t.watcher.seen.length,
-        1,
-        "the bot moved in the same tick as the turn that handed it over",
+      const bot = handedOver.currentTurnPlayerId;
+
+      t.clock.tickAt(BOT_THINK_MS);
+
+      const played = await t.watcher.until(
+        (v) => v.lastMove?.playerId === bot,
+        "the bot's turn to arrive",
       );
-      assert.equal(handedOver.currentTurnPlayerId, behind(t, 1));
+      assert.notEqual(played.currentTurnPlayerId, bot, "and it handed the turn on");
     } finally {
       await t.close();
     }
   });
-
-  it("plays it once think time has elapsed", async () => {
-    const t = await sitDown(4242);
-    try {
-      t.watcher.reset();
-      await takeATurn(t, t.view);
-      await t.watcher.until((v) => v.currentTurnPlayerId !== t.me, "the handover");
-
-      const played = await think(t);
-
-      assert.equal(
-        played.currentTurnPlayerId,
-        behind(t, 2),
-        "the first bot played and handed on to the second",
-      );
-    } finally {
-      await t.close();
-    }
-  });
-
-  it("advances a chain one turn per interval, in seating order", async () => {
-    const t = await sitDown(4242);
-    try {
-      t.watcher.reset();
-      await takeATurn(t, t.view);
-      await t.watcher.until((v) => v.currentTurnPlayerId !== t.me, "the handover");
-
-      // Every seat behind the host, one tick at a time. `think` asserts a single timer
-      // was waiting for each, so nothing here can be two moves in one beat.
-      const seats: (string | null)[] = [];
-      for (let i = 0; i < MAX_PLAYERS - 1; i++) {
-        const played = await think(t);
-        assert.equal(t.watcher.seen.length, i + 2, "one broadcast per beat");
-        seats.push(played.currentTurnPlayerId);
-      }
-
-      assert.deepEqual(
-        seats,
-        [2, 3, 4, 5, 6].map((n) => behind(t, n)),
-        "each bot in turn, and the turn back to the human",
-      );
-      assert.equal(t.clock.pending(), 0, "nothing is left thinking behind the human");
-    } finally {
-      await t.close();
-    }
-  });
-
-  /**
-   * The pause is a property of a bot's turn, not of a turn following a human's. An
-   * unseeded server is dealt until the opening seat is a bot — which is most of them,
-   * five in six — because the same seed always opens on the same seat.
-   */
-  it("pauses before the first move of a round that opens on a bot", async () => {
-    for (let attempt = 0; attempt < 40; attempt++) {
-      const t = await sitDown();
-      try {
-        if (t.view.currentTurnPlayerId === t.me) continue;
-
-        t.watcher.reset();
-        await roundTrip(t);
-        assert.equal(t.watcher.seen.length, 0, "the opening bot has not moved");
-
-        const opener = t.view.turnOrder.indexOf(t.view.currentTurnPlayerId!);
-        const opened = await think(t);
-        assert.equal(
-          opened.currentTurnPlayerId,
-          t.view.turnOrder[(opener + 1) % t.view.turnOrder.length],
-          "the opening bot played, once it had thought about it, and handed on",
-        );
-        return;
-      } finally {
-        await t.close();
-      }
-    }
-    assert.fail("no deal ever opened on a bot");
-  });
-
-  /**
-   * The whole of what makes slapdown against a bot winnable, and the reason this and
-   * #125 were one change: there is no window timer, only the pause the next bot takes.
-   *
-   * The window cannot be arranged — it is opened by drawing blind — so the table is
-   * fished until one appears, the bots played out by hand along the way.
-   */
-  describe("the window it holds open", () => {
-    /** Play until the host draws a card they may slap down, and stop exactly there. */
-    async function fishForAWindow(t: Table): Promise<PlayerGameView> {
-      for (let step = 0; step < 400; step++) {
-        // A deal that opened on a bot, or a chain still owed a beat: the loop below only
-        // ever waits on a position, so nothing may be left waiting on the clock.
-        await advanceBots(t);
-        const at = await t.watcher.until(
-          // The lobby is still in the watcher on the first pass through, and is not a
-          // position anybody is being asked to act on.
-          (v) =>
-            v.phase !== "lobby" &&
-            (v.phase !== "playing" || v.currentTurnPlayerId === t.me),
-          "the host to be needed",
-        );
-        t.watcher.reset();
-
-        if (at.phase === "gameEnd") {
-          expectOk(await ask(t.client, "playAgain"));
-          continue;
-        }
-        if (at.phase === "roundEnd") {
-          expectOk(await ask(t.client, "startNextRound"));
-          continue;
-        }
-
-        await takeATurn(t, at);
-        const landed = await t.watcher.until(
-          (v) => v.phase !== "playing" || v.currentTurnPlayerId !== t.me,
-          "the host's own move to land",
-        );
-        if (landed.phase === "playing" && slapdownOpen(landed)) return landed;
-      }
-      assert.fail("no slapdown window ever opened");
-    }
-
-    it("lets a human win a window the bot behind them is still thinking in", async () => {
-      const t = await sitDown(20250811);
-      try {
-        const open = await fishForAWindow(t);
-        t.watcher.reset();
-
-        expectOk(await ask(t.client, "slapDown"));
-
-        const after = await t.watcher.until(
-          (v) => v.lastSlapdown !== null,
-          "the slap to land",
-        );
-        assert.equal(after.lastSlapdown!.playerId, t.me);
-        assert.equal(
-          playingSelf(after).hand.length,
-          playingSelf(open).hand.length - 1,
-          "the drawn card went back down",
-        );
-        assert.equal(
-          after.currentTurnPlayerId,
-          open.currentTurnPlayerId,
-          "and the bot it beat has still not moved",
-        );
-      } finally {
-        await t.close();
-      }
-    });
-
-    it("neither hurries the pending turn nor schedules a second", async () => {
-      const t = await sitDown(20250811);
-      try {
-        await fishForAWindow(t);
-        t.watcher.reset();
-
-        expectOk(await ask(t.client, "slapDown"));
-        await roundTrip(t);
-
-        assert.equal(t.watcher.seen.length, 1, "only the slap itself was published");
-        assert.equal(t.clock.pending(), 1, "one pending turn, not two");
-        const played = await think(t);
-        assert.equal(t.watcher.seen.length, 2, "and the beat played exactly one move");
-        assert.notEqual(played.lastMove, null, "which was a turn, taken by the bot");
-      } finally {
-        await t.close();
-      }
-    });
-
-    it("plays the bot's turn against the position the slap produced", async () => {
-      const t = await sitDown(20250811);
-      try {
-        const open = await fishForAWindow(t);
-        const slapped = playingSelf(open).hand.find((c) => c.rank === open.lastDiscard[0]!.rank);
-        assert.ok(slapped, "the window is over a card matching the set it would join");
-        t.watcher.reset();
-
-        expectOk(await ask(t.client, "slapDown"));
-        await t.watcher.until((v) => v.lastSlapdown !== null, "the slap to land");
-        const played = await think(t);
-
-        // The round's own log, which the bot's turn is written into after the slap: the
-        // card was on the pile, in front of it, when it decided.
-        const since = played.moveHistory.slice(-2);
-        assert.deepEqual(
-          since.map((entry) => entry.kind),
-          ["slapdown", "turn"],
-          "the bot moved after the slap, not around it",
-        );
-        assert.equal(since[0]!.playerId, t.me);
-        assert.equal(
-          since[0]!.kind === "slapdown" && since[0]!.card.id,
-          slapped.id,
-          "and it is the slapped card the bot was looking at",
-        );
-      } finally {
-        await t.close();
-      }
-    });
-  });
-
-  /*
-   * A pending turn being called off with the room it belongs to has no test here any
-   * more, and there is nowhere left to write one from: the host's close-room button was
-   * what ended a room mid-think, and it is gone (docs/adr/0012). A room now ends when its
-   * last seat leaves, which is only permitted from the lobby or a finished match — neither
-   * of which has a bot thinking in it. The cancellation itself is unchanged and still one
-   * call on the registry (`destroyRoom` in socketServer.ts); the seam to assert it from
-   * comes back with mid-round leaving (#147) and the abandoned-room sweep (#150).
-   */
 });
 
 /**
@@ -3294,8 +2930,9 @@ describe("resumeSeat", () => {
 
 /**
  * The way a room ends now that no player can close one: its last seat leaves and it goes
- * with them (docs/adr/0012). Nobody is told, because the seat that left was the only one
- * there was to tell.
+ * with them (docs/adr/0012). When a room ends, and what it takes with it, is `Rooms`' and
+ * is proved there (`rooms.test.ts`); this is the proof that `exitToMenu` reaches it, seen
+ * the only way a client can see it — the code resolving nothing afterwards.
  */
 describe("a room with nobody left in it", () => {
   it("is gone from the server, code and all", async () => {
@@ -3323,22 +2960,17 @@ describe("a room with nobody left in it", () => {
       "ROOM_NOT_FOUND",
     );
   });
-
-  it("stands as long as one seat is still in it", async () => {
-    const host = await server.connect();
-    const created = expectOk(
-      await ask<{ roomCode: string; playerId: string }>(host, "createRoom", "Ada"),
-    );
-    const guest = await server.connect();
-    expectOk(await ask(guest, "joinRoom", created.roomCode, "Grace"));
-
-    expectOk(await ask(host, "exitToMenu"));
-
-    const probe = await server.connect();
-    expectOk(await ask(probe, "joinRoom", created.roomCode, "Alan"));
-  });
 });
 
+/**
+ * A seat's connection going, as the rest of the room hears it (issue #146).
+ *
+ * What a drop starts and calls off — the room's grace period and sweep, a deal waiting for a
+ * spectator — is `Rooms`' and is proved there (`rooms.test.ts`), attendance told to it on the
+ * recording port. The adapter's share is reporting the drop at all, which the first test here
+ * is the proof of: a disconnect reaches `attendanceChanged`, seen as the republication
+ * whoever is left receives. Its twin, a seated arrival receiving the lobby, is `createRoom`'s.
+ */
 describe("disconnect", () => {
   /**
    * A seat and the connection holding it, for the suites about who is there. Two humans in
@@ -3373,6 +3005,10 @@ describe("disconnect", () => {
         "Grace",
       ),
     );
+    // The guest's ack and the host's broadcast travel on two connections, so the one
+    // landing says nothing of the other — and a test's next `nextEvent` could catch the
+    // arrival rather than whatever it is waiting for.
+    await hostViews.until((v) => v.opponents.length === 1, "the guest's arrival");
     return { roomCode, host, hostId, hostViews, guest, guestId, guestToken };
   }
 
@@ -3479,439 +3115,6 @@ describe("disconnect", () => {
         "INVALID_RESUME_TOKEN",
         "the room answered, so it is still there",
       );
-    }
-  });
-});
-
-/**
- * Dealing a scored round on when nobody left in the match can deal it (issue #148).
- *
- * A spectator whose match went on without them watches the bots that beat them play; the
- * round they were knocked out in is up in front of them, and only a player still in the
- * match may deal the next one (docs/adr/0012) — so the server does, after a pause. What
- * is asserted here is what a client can see: whether a pause is waiting on the clock at
- * all, and the position ticking it produces.
- *
- * Every server here is built with a clock this suite drives by hand, bots included: a
- * table nobody is waiting on is exactly what the auto-deal is for, so the tests have to
- * be able to say "nothing is pending" as precisely as "one thing is". Each test gets its
- * own server for the same reason `bot think time` above does.
- */
-describe("auto-dealing a table only bots are still playing", () => {
-  interface Table {
-    close: () => Promise<void>;
-    clock: TestClock;
-    client: ClientSocket;
-    watcher: Watcher;
-    me: string;
-    /** The latest position this seat has been sent. */
-    view: PlayerGameView;
-  }
-
-  async function sitDown(
-    seed: number,
-    bots: number,
-    settings: Partial<RoomSettings> = SHORT_MATCH,
-  ): Promise<Table> {
-    const clock = testClock();
-    // A short match by default, since the subject is a human being knocked out of one.
-    // The one test about a human who is *not* out yet asks for a long one instead.
-    const harness = await startServer(seed, bots, { clock, thinkTimeMs: 0 }, settings);
-    const client = await harness.connect();
-    const watcher = watch(client);
-    const { playerId } = expectOk(
-      await ask<{ playerId: string }>(client, "createRoom", "Ada"),
-    );
-    expectOk(await ask(client, "startGame"));
-    const view = await watcher.until((v) => v.phase === "playing", "the deal");
-    return { close: harness.close, clock, client, watcher, me: playerId, view };
-  }
-
-  /**
-   * Move the table on by one position, whatever it is standing on: the human's own turn,
-   * a bot waiting on the clock, or a scored round the human may still deal on.
-   *
-   * The human plays to lose, and deliberately — the point of every test here is a table
-   * that has gone on without them. They never call Yaniv and always shed their cheapest
-   * card, which is the fastest legal way to be holding an expensive hand when somebody
-   * else calls.
-   */
-  async function next(t: Table): Promise<PlayerGameView> {
-    const before = t.watcher.seen.length;
-
-    if (t.view.phase === "playing" && t.view.currentTurnPlayerId === t.me) {
-      // The hand arrives sorted ascending by value, so the first card is the cheapest.
-      const cheapest = playingSelf(t.view).hand[0]!.id;
-      expectOk(
-        await ask(t.client, "takeTurn", {
-          discardCardIds: [cheapest],
-          draw: { source: "deck" },
-        }),
-      );
-    } else if (t.view.phase === "playing") {
-      assert.ok(t.clock.pending() > 0, "a bot was waiting to take the turn");
-      t.clock.tick();
-    } else if (t.view.phase === "roundEnd" && !t.view.you.spectating) {
-      expectOk(await ask(t.client, "startNextRound"));
-    } else {
-      assert.fail(`nothing to play from ${t.view.phase}`);
-    }
-
-    const deadline = Date.now() + 2000;
-    while (t.watcher.seen.length === before) {
-      if (Date.now() > deadline) assert.fail("no position followed");
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    t.view = t.watcher.seen[t.watcher.seen.length - 1]!;
-    return t.view;
-  }
-
-  /** Play on until the position answers `done`, or fail saying what it reached instead. */
-  async function playUntil(
-    t: Table,
-    done: (view: PlayerGameView) => boolean,
-    what: string,
-  ): Promise<PlayerGameView> {
-    for (let step = 0; step < 400; step++) {
-      if (done(t.view)) return t.view;
-      await next(t);
-    }
-    assert.fail(`the table never reached ${what} (it is at ${t.view.phase})`);
-  }
-
-  /** The scored round a knocked-out human is left watching, bots still playing. */
-  const watchingAScoredRound = (view: PlayerGameView) =>
-    view.phase === "roundEnd" && view.you.spectating;
-
-  /**
-   * Wait for the clock to hold exactly `count` timers, so a fact that arrives with a
-   * disconnect the server processes asynchronously can be asserted at all.
-   */
-  async function settle(t: Table, count: number, what: string): Promise<void> {
-    const deadline = Date.now() + 1000;
-    while (t.clock.pending() !== count) {
-      if (Date.now() > deadline) {
-        assert.equal(t.clock.pending(), count, what);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-  }
-
-  /**
-   * The same wait, for the cases where a count cannot tell the two pauses apart: a drop
-   * calls the deal off and starts the room's grace period (issue #150), so one timer
-   * stands where one timer stood, and only the interval says which.
-   */
-  async function settleDelays(t: Table, delays: number[], what: string): Promise<void> {
-    const deadline = Date.now() + 1000;
-    while (JSON.stringify(t.clock.delays()) !== JSON.stringify(delays)) {
-      if (Date.now() > deadline) assert.deepEqual(t.clock.delays(), delays, what);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-  }
-
-  it("deals the next round for a spectator once the pause has elapsed", async () => {
-    const t = await sitDown(7, 3);
-    try {
-      const scored = await playUntil(t, watchingAScoredRound, "a round it was out of");
-
-      assert.equal(t.clock.pending(), 1, "the scored round is waiting to deal itself on");
-      // Every position of the match so far is behind us; only what the pause produces
-      // should answer the wait below.
-      t.watcher.reset();
-      assert.equal(t.clock.tick(), AUTO_DEAL_MS, "the pause a spectator reads it in");
-
-      const dealt = await t.watcher.until(
-        (v) => v.phase === "playing",
-        "the next round, dealt by nobody at the table",
-      );
-      assert.equal(
-        dealt.roundNumber,
-        scored.roundNumber + 1,
-        "the round after the one it watched",
-      );
-      assert.ok(dealt.you.spectating, "and the spectator is still watching, not dealt in");
-    } finally {
-      await t.close();
-    }
-  });
-
-  /**
-   * A finished match waits: the standings are there to be read, and play again is offered
-   * to anybody still in the room (docs/adr/0012), so there is always somebody who can
-   * answer for it. One bot, so the human going out ends the match on the spot.
-   */
-  it("leaves a finished match up", async () => {
-    const t = await sitDown(97, 1);
-    try {
-      await playUntil(t, (v) => v.phase === "gameEnd", "a finished match");
-
-      await settle(t, 0, "a finished match waits on nothing");
-    } finally {
-      await t.close();
-    }
-  });
-
-  /**
-   * A human still in the match is who the round is waiting for, whether or not there is a
-   * socket behind them: a drop costs a seat nothing (docs/adr/0013), and dealing the next
-   * round out from under one is the one thing it must not cost.
-   */
-  it("waits on a human still in the match, dropped or not", async () => {
-    // A limit no round of this reaches, so the human is scored rather than knocked out.
-    const t = await sitDown(7, 3, LONG_MATCH);
-    try {
-      await playUntil(
-        t,
-        (v) => v.phase === "roundEnd" && !v.you.spectating,
-        "a round it was scored in",
-      );
-
-      assert.equal(t.clock.pending(), 0, "the round is the human's to deal");
-
-      t.client.disconnect();
-      // The room's own grace period is the only thing a drop starts (issue #150): the
-      // round is still waiting for the seat that went quiet, not being dealt out from
-      // under it.
-      await settleDelays(
-        t,
-        [ROOM_SWEEP_MS],
-        "and still theirs once their connection has gone",
-      );
-    } finally {
-      await t.close();
-    }
-  });
-
-  /**
-   * The spectator leaving is not the same event as their socket going: the seat is given
-   * up, the room is left with nothing but bots in it, and it is dropped outright. The
-   * pause goes with it — `destroyRoom` calls off everything a room had waiting, which is
-   * the whole reason this is set on the registry rather than on a timer of its own.
-   */
-  it("calls the pause off when the spectator leaves the room", async () => {
-    const t = await sitDown(7, 3);
-    try {
-      await playUntil(t, watchingAScoredRound, "a round it was out of");
-      assert.equal(t.clock.pending(), 1, "the pause is running");
-
-      expectOk(await ask(t.client, "exitToMenu"));
-
-      await settle(t, 0, "the room went, and its pause with it");
-    } finally {
-      await t.close();
-    }
-  });
-
-  /**
-   * A table with nobody watching plays to nobody, so the deal is called off — and what
-   * takes its place on the clock is the room's own grace period, the drop being what
-   * starts one (issue #150). The two never run together: the deal wants a spectator there
-   * and the sweep wants nobody there.
-   */
-  it("calls the pause off when the spectator it was for goes", async () => {
-    const t = await sitDown(7, 3);
-    try {
-      await playUntil(t, watchingAScoredRound, "a round it was out of");
-      assert.deepEqual(t.clock.delays(), [AUTO_DEAL_MS], "the pause is running");
-
-      t.client.disconnect();
-
-      await settleDelays(t, [ROOM_SWEEP_MS], "a table with nobody watching plays to nobody");
-    } finally {
-      await t.close();
-    }
-  });
-});
-
-/**
- * Sweeping a room nobody is in any more (issue #150).
- *
- * A room ends when its last seat leaves, which says nothing about the exits players do
- * not take: a tab closed, a phone backgrounded, a laptop shut. Those rooms used to stand
- * for as long as the process did. Now they are given a minute and then dropped — a minute
- * rather than nothing, because a reload is a disconnect and a seat is resumable precisely
- * so a drop costs nothing (docs/adr/0013).
- *
- * Every server here is built with a clock this suite drives by hand, and one per test: the
- * subject is what a room has waiting and what firing it does, so the tests have to be able
- * to name a timer and to say "nothing is pending" as precisely as "one thing is". The room
- * having gone is observed the way it is everywhere else here — a later join is refused,
- * not a `RoomManager` asked.
- */
-describe("sweeping a room nobody is in", () => {
-  interface Abandonable {
-    close: () => Promise<void>;
-    connect: () => Promise<ClientSocket>;
-    clock: TestClock;
-    client: ClientSocket;
-    watcher: Watcher;
-    roomCode: string;
-    me: string;
-    token: string;
-  }
-
-  /** One human in a fresh room, on a clock nothing moves but this test. */
-  async function sitDown(bots = 0): Promise<Abandonable> {
-    const clock = testClock();
-    const harness = await startServer(7, bots, { clock, thinkTimeMs: BOT_THINK_MS });
-    const client = await harness.connect();
-    const watcher = watch(client);
-    const { roomCode, playerId, resumeToken } = expectOk(
-      await ask<{ roomCode: string; playerId: string; resumeToken: string }>(
-        client,
-        "createRoom",
-        "Ada",
-      ),
-    );
-    return {
-      close: harness.close,
-      connect: harness.connect,
-      clock,
-      client,
-      watcher,
-      roomCode,
-      me: playerId,
-      token: resumeToken,
-    };
-  }
-
-  /**
-   * Wait for the grace period to be on the clock, or off it — a disconnect is processed
-   * asynchronously, so neither fact is true the instant the socket is told to go.
-   */
-  async function untilSweep(t: Abandonable, waiting: boolean): Promise<void> {
-    const deadline = Date.now() + 1000;
-    while (t.clock.delays().includes(ROOM_SWEEP_MS) !== waiting) {
-      if (Date.now() > deadline) {
-        assert.fail(
-          `the sweep was ${waiting ? "never" : "still"} pending (waiting: ${t.clock.delays()})`,
-        );
-      }
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-  }
-
-  /** Deal a match out and hand the turn to a bot, so the room has one thinking. */
-  async function underway(t: Abandonable): Promise<PlayerGameView> {
-    expectOk(await ask(t.client, "startGame"));
-    const view = await t.watcher.until((v) => v.phase === "playing", "the deal");
-    if (view.currentTurnPlayerId !== t.me) return view;
-
-    const cheapest = playingSelf(view).hand[0]!.id;
-    expectOk(
-      await ask(t.client, "takeTurn", {
-        discardCardIds: [cheapest],
-        draw: { source: "deck" },
-      }),
-    );
-    return t.watcher.until(
-      (v) => v.phase === "playing" && v.currentTurnPlayerId !== t.me,
-      "the turn handed to a bot",
-    );
-  }
-
-  it("drops a room no human has been connected to for the grace period", async () => {
-    const t = await sitDown();
-    try {
-      t.client.disconnect();
-      await untilSweep(t, true);
-
-      t.clock.tickAt(ROOM_SWEEP_MS);
-
-      const probe = await t.connect();
-      assert.equal(
-        expectError(await ask(probe, "joinRoom", t.roomCode, "Alan")).code,
-        "ROOM_NOT_FOUND",
-        "the room went with the last connection to it",
-      );
-    } finally {
-      await t.close();
-    }
-  });
-
-  /** A reload is a disconnect, and the socket coming back is the whole answer to one. */
-  it("keeps a room whose connection comes back inside the grace period", async () => {
-    const t = await sitDown();
-    try {
-      t.client.disconnect();
-      await untilSweep(t, true);
-
-      const returning = await t.connect();
-      expectOk(
-        await ask(returning, "resumeSeat", {
-          roomCode: t.roomCode,
-          playerId: t.me,
-          resumeToken: t.token,
-        }),
-      );
-
-      await untilSweep(t, false);
-      assert.equal(t.clock.pending(), 0, "nothing is counting the room down");
-
-      const probe = await t.connect();
-      expectOk(await ask(probe, "joinRoom", t.roomCode, "Alan"));
-    } finally {
-      await t.close();
-    }
-  });
-
-  it("gives a lone human against bots their match back after a reload", async () => {
-    const t = await sitDown(2);
-    try {
-      const before = await underway(t);
-
-      t.client.disconnect();
-      await untilSweep(t, true);
-
-      const returning = await t.connect();
-      const { view } = expectOk(
-        await ask<{ view: PlayerGameView }>(returning, "resumeSeat", {
-          roomCode: t.roomCode,
-          playerId: t.me,
-          resumeToken: t.token,
-        }),
-      );
-
-      assert.equal(view.phase, "playing", "the same round, still being played");
-      assert.equal(view.roundNumber, before.roundNumber);
-      assert.deepEqual(
-        playingSelf(view).hand.map((c) => c.id),
-        playingSelf(before).hand.map((c) => c.id),
-        "and the same hand in front of them",
-      );
-      await untilSweep(t, false);
-    } finally {
-      await t.close();
-    }
-  });
-
-  /**
-   * A swept room stops doing things. Its bot was mid-think when the last human went, and
-   * that turn is called off with everything else the room had waiting — a callback left
-   * behind would fire at a code that may be issued again.
-   */
-  it("takes the room's timers with it", async () => {
-    const t = await sitDown(2);
-    try {
-      await underway(t);
-      assert.ok(
-        t.clock.delays().includes(BOT_THINK_MS),
-        "a bot was thinking about its turn",
-      );
-
-      t.client.disconnect();
-      await untilSweep(t, true);
-      t.clock.tickAt(ROOM_SWEEP_MS);
-
-      assert.equal(t.clock.pending(), 0, "nothing is left on the clock");
-      const probe = await t.connect();
-      assert.equal(
-        expectError(await ask(probe, "joinRoom", t.roomCode, "Alan")).code,
-        "ROOM_NOT_FOUND",
-      );
-    } finally {
-      await t.close();
     }
   });
 });
@@ -4085,319 +3288,5 @@ describe("the scorecard on the wire", () => {
     );
 
     assert.deepEqual(view.scorecard, dealtOn.scorecard, "the match's history, not a blank sheet");
-  });
-});
-
-/**
- * The stats, over the wire (docs/adr/0023, 0024): a signed-in player's call is counted on
- * their account, an Assaf of a bot's call on the account of whoever caught it out, a match
- * seen through on the account of everybody who was knocked out of it or won it, and
- * nothing about any write reaches the game.
- *
- * Each test builds its own server around a store it can see into — or one that never
- * answers, or always fails — which is the whole reason `startServer` takes one. And each
- * plays a real table out to real calls: `accountToCredit` is unit-tested and the store is
- * contract-tested, and both would pass against a handler that wrote nothing at all.
- */
-describe("stats counted on the players' accounts", () => {
-  const opened: Harness[] = [];
-  after(async () => {
-    for (const harness of opened) await harness.close();
-  });
-
-  interface Player {
-    client: ClientSocket;
-    watcher: Watcher;
-    playerId: string;
-    /** The account the player sat down under, or `null` for a guest. */
-    accountId: string | null;
-  }
-
-  /**
-   * A player and `bots` bots (three unless a test says), dealt in, at a limit nobody
-   * reaches unless a test sets its own: several rounds are played here, and a table that
-   * emptied on the way would stop answering.
-   */
-  async function sitDown(
-    profiles: ProfileStore,
-    signedIn = true,
-    options: SocketServerOptions = {},
-    bots = 3,
-    settings = LONG_MATCH,
-  ): Promise<Player> {
-    const harness = await startServer(
-      7,
-      bots,
-      { thinkTimeMs: 0, ...options },
-      settings,
-      profiles,
-    );
-    opened.push(harness);
-
-    const client = await harness.connect();
-    const watcher = watch(client);
-    const accountId = signedIn ? (await signUp(client, "Ada", harness)).account.id : null;
-    const { playerId } = expectOk(
-      await ask<{ playerId: string }>(client, "createRoom", "Ada"),
-    );
-    watcher.reset();
-    expectOk(await ask(client, "startGame"));
-    return { client, watcher, playerId, accountId };
-  }
-
-  /** Every round a table has scored so far, split by whose call ended it. */
-  interface Calls {
-    mine: RoundResultView[];
-    bots: RoundResultView[];
-  }
-
-  /**
-   * Play on with the bots' own judgement until `done` says enough rounds have been called,
-   * answering each call's verdict — so a test can ask for a call that was Assafed without
-   * knowing in advance which round that will be.
-   */
-  async function playUntil(player: Player, done: (calls: Calls) => boolean): Promise<Calls> {
-    const calls: Calls = { mine: [], bots: [] };
-
-    for (let step = 0; step < 3000; step++) {
-      const current = await player.watcher.until(
-        (v) =>
-          v.phase !== "lobby" &&
-          (v.phase !== "playing" || v.currentTurnPlayerId === player.playerId),
-        "the player to be needed",
-      );
-      player.watcher.reset();
-
-      if (current.phase === "roundEnd") {
-        const result = current.roundResult!;
-        (result.callerId === player.playerId ? calls.mine : calls.bots).push(result);
-        if (done(calls)) return calls;
-        expectOk(await ask(player.client, "startNextRound"));
-        continue;
-      }
-      assert.equal(current.phase, "playing", "the match ended first");
-
-      const decision = decideTurn(current);
-      if (decision.type === "yaniv") {
-        expectOk(await ask(player.client, "callYaniv"));
-      } else {
-        expectOk(await ask(player.client, "takeTurn", decision.action));
-      }
-    }
-    assert.fail("the table never called the rounds under test");
-  }
-
-  /**
-   * The scored rounds that owe `player`'s account a write: the ones they called, and the
-   * bots' calls they Assafed. A bot's call anybody else Assafed owes nobody anything.
-   */
-  function credited(player: Player, { mine, bots }: Calls): RoundResultView[] {
-    return [...mine, ...bots.filter((r) => r.assaferId === player.playerId)];
-  }
-
-  /**
-   * The memory store with its stats write replaced, and every account that write was asked
-   * for recorded in order — whatever the replacement then does with it. The replacement is
-   * handed the store underneath, which is where the accounts are.
-   */
-  function storeWith(
-    recordStats: (id: string, delta: StatsDelta, memory: ProfileStore) => Promise<void>,
-  ): { profiles: ProfileStore; asked: string[] } {
-    const memory = createMemoryProfileStore();
-    const asked: string[] = [];
-    return {
-      asked,
-      profiles: {
-        ...memory,
-        recordStats: (id, delta) => {
-          asked.push(id);
-          return recordStats(id, delta, memory);
-        },
-      },
-    };
-  }
-
-  it("counts a signed-in player's call on their account", async () => {
-    const profiles = createMemoryProfileStore();
-    const player = await sitDown(profiles);
-
-    await playUntil(player, ({ mine }) => mine.length === 1);
-
-    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, 1);
-  });
-
-  it("counts a call that was Assafed exactly as one that stood", async () => {
-    const profiles = createMemoryProfileStore();
-    const player = await sitDown(profiles);
-
-    const { mine } = await playUntil(
-      player,
-      ({ mine }) =>
-        mine.some((r) => r.assaferId !== null) && mine.some((r) => r.assaferId === null),
-    );
-
-    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, mine.length);
-  });
-
-  /**
-   * The route #210's suite could not reach: a bot's move crediting a human. The call is the
-   * bot's, played on the server's own timer with no handler of the player's under it, and
-   * the Assaf lands on the account of whoever caught it out all the same.
-   */
-  it("counts an Assaf on the account of a player who catches a bot's call", async () => {
-    const profiles = createMemoryProfileStore();
-    const player = await sitDown(profiles, true, {}, 1);
-
-    await playUntil(player, ({ bots }) => bots.some((r) => r.assaferId === player.playerId));
-
-    assert.equal((await profiles.loadAccount(player.accountId!))!.assafs, 1);
-  });
-
-  it("writes nothing for a bot's call the player did not Assaf", async () => {
-    const { profiles, asked } = storeWith((id, delta, memory) =>
-      memory.recordStats(id, delta),
-    );
-    const player = await sitDown(profiles);
-
-    const calls = await playUntil(
-      player,
-      ({ mine, bots }) => mine.length > 0 && bots.length > 0,
-    );
-
-    assert.deepEqual(asked, credited(player, calls).map(() => player.accountId));
-    assert.equal(
-      (await profiles.loadAccount(player.accountId!))!.yanivCalls,
-      calls.mine.length,
-    );
-  });
-
-  it("writes nothing for a guest's call", async () => {
-    const { profiles, asked } = storeWith(async () => {});
-    const player = await sitDown(profiles, false);
-
-    await playUntil(player, ({ mine }) => mine.length === 2);
-
-    assert.deepEqual(asked, []);
-  });
-
-  /**
-   * The write is started after the broadcast and awaited nowhere, so a database that has
-   * stopped answering holds up nothing: the call is acked, the scored round goes out, and
-   * the next round is dealt and played — bots and all — over the writes still pending.
-   */
-  it("holds up nothing when the store never answers", async () => {
-    const { profiles, asked } = storeWith(() => new Promise(() => {}));
-    const player = await sitDown(profiles);
-
-    const calls = await playUntil(player, ({ mine }) => mine.length === 2);
-
-    assert.deepEqual(
-      asked,
-      credited(player, calls).map(() => player.accountId),
-      "the store was asked, and hung",
-    );
-  });
-
-  /**
-   * Dropped, and logged naming the account — so a missing account can be told from a dead
-   * connection — and nothing else. An unhandled rejection would take the whole process
-   * down, and this suite with it.
-   */
-  it("logs a failed write naming the account, and plays on", async () => {
-    const logged: unknown[][] = [];
-    const failure = new Error("the database is down");
-    const { profiles } = storeWith(() => Promise.reject(failure));
-    const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
-
-    const calls = await playUntil(player, ({ mine }) => mine.length === 2);
-
-    assert.equal(logged.length, credited(player, calls).length);
-    for (const entry of logged) {
-      assert.ok(String(entry[0]).includes(player.accountId!), "the log names the account");
-      assert.ok(entry.includes(failure), "and carries the failure");
-    }
-  });
-
-  /**
-   * `ProfileStore` promises a promise, and both shipped stores keep that by being `async`
-   * — but an implementation that threw before returning one would otherwise throw out of
-   * the handler, past the `.catch` meant for it. The same answer, whichever way it fails.
-   */
-  it("logs a store that throws rather than rejecting, and plays on", async () => {
-    const logged: unknown[][] = [];
-    const failure = new Error("thrown, not rejected");
-    const { profiles } = storeWith(() => {
-      throw failure;
-    });
-    const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
-
-    const calls = await playUntil(player, ({ mine }) => mine.length === 2);
-
-    assert.equal(logged.length, credited(player, calls).length);
-    assert.ok(logged.every((entry) => entry.includes(failure)));
-  });
-
-  /**
-   * The route through an exit: nobody's move ends this match, the second-to-last player
-   * leaving does, with no round ever scored — and the one left has seen it through, and won.
-   */
-  it("counts a match an exit ends as completed and won by whoever is left", async () => {
-    const profiles = createMemoryProfileStore();
-    const harness = await startServer(7, 0, { thinkTimeMs: 0 }, {}, profiles);
-    opened.push(harness);
-
-    const ada = await harness.connect();
-    const { account } = await signUp(ada, "Ada", harness);
-    const { roomCode } = expectOk(await ask<{ roomCode: string }>(ada, "createRoom", "Ada"));
-    const grace = await harness.connect();
-    expectOk(await ask(grace, "joinRoom", roomCode, "Grace"));
-    expectOk(await ask(ada, "startGame"));
-
-    const watcher = watch(ada);
-    expectOk(await ask(grace, "exitToMenu"));
-    await watcher.until((v) => v.phase === "gameEnd", "the match to end");
-
-    const stats = (await profiles.loadAccount(account.id))!;
-    assert.equal(stats.gamesCompleted, 1);
-    assert.equal(stats.gamesWon, 1);
-  });
-
-  /**
-   * The route through a bot's move: the call that knocks the player out is the bot's, on
-   * the server's own timer. At a limit of 1 any round the player does not win puts them
-   * out, and a player who never calls cannot win one but by an Assaf — which the seed does
-   * not deal, the assertion on the winner saying so if it ever does.
-   */
-  it("counts a match a bot's call knocks the player out of as completed, and not won", async () => {
-    const profiles = createMemoryProfileStore();
-    const player = await sitDown(profiles, true, {}, 1, { maxScore: MAX_SCORE_LIMITS.min });
-
-    const ended = await (async () => {
-      for (let step = 0; step < 3000; step++) {
-        const current = await player.watcher.until(
-          (v) =>
-            v.phase === "gameEnd" ||
-            v.phase === "roundEnd" ||
-            (v.phase === "playing" && v.currentTurnPlayerId === player.playerId),
-          "the player to be needed",
-        );
-        player.watcher.reset();
-        if (current.phase === "gameEnd") return current;
-        assert.equal(current.phase, "playing", "a round was scored and the player survived it");
-        const discard = playingSelf(current).hand[0]!;
-        expectOk(
-          await ask(player.client, "takeTurn", {
-            discardCardIds: [discard.id],
-            draw: { source: "deck" },
-          }),
-        );
-      }
-      assert.fail("the bot never called");
-    })();
-    assert.notDeepEqual(ended.winnerIds, [player.playerId], "the bot won the match");
-
-    const stats = (await profiles.loadAccount(player.accountId!))!;
-    assert.equal(stats.gamesCompleted, 1);
-    assert.equal(stats.gamesWon, 0);
   });
 });

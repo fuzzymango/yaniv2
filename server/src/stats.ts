@@ -3,7 +3,7 @@
  * (docs/adr/0024).
  *
  * Pure, and in a file of its own on `autoDealSeat`'s pattern: a question about a position,
- * answered once, with the layer above doing what it is told. The socket layer asks
+ * answered once, with the layer above doing what it is told. `Rooms` asks
  * `statsEarned` of every accepted transition — the room manager hands it each one — and
  * writes whatever comes back, fired and never awaited.
  *

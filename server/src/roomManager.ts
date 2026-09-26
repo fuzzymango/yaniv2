@@ -25,6 +25,34 @@ const MAX_CODE_ATTEMPTS = 100;
  */
 const RESUME_TOKEN_BYTES = 32;
 
+/**
+ * Whoever is presenting themselves for a seat that already exists: the account bound to
+ * their connection, and the resume token they hold — either of which may be absent. A
+ * join presents an account and no token; a resume presents both, as they stand.
+ */
+export interface Claimant {
+  accountId: string | null;
+  resumeToken: string | null;
+}
+
+/**
+ * The claim rule, and the only statement of it (docs/adr/0022). A seat given up is
+ * nobody's: leaving is final, and the server is what says so. An account seat is its
+ * account's — the token, issued for a uniform seat and a uniform ack, is not consulted, so
+ * a token left in a shared browser after signing out claims nothing. A guest seat is its
+ * token's, whoever is signed in: signing in while seated binds the connection, never the
+ * seat.
+ *
+ * A missing half never matches: a null token is no guest seat's, and a null account no
+ * account seat's, so a guest's join is never handed a seat and needs no case of its own.
+ */
+function claims(player: Player, claimant: Claimant): boolean {
+  if (player.departed) return false;
+  return player.accountId !== null
+    ? claimant.accountId === player.accountId
+    : claimant.resumeToken === player.resumeToken;
+}
+
 interface Room {
   state: GameState;
   /** Per-room rng, so one room's shuffles are reproducible independently. */
@@ -182,11 +210,11 @@ export class RoomManager {
    * Seat a player in an existing room — or, for an account that already holds a seat
    * here, hand that seat back rather than seating it twice (docs/adr/0022).
    *
-   * The account *is* that seat's credential, so joining again is claiming it, and it is
-   * answered before any refusal of a *new* seat: a match under way or a full table is no
-   * reason to keep a player out of the seat they are sitting in. `resumed` says which
-   * happened, for the transport's announcement; nothing is changed by a resumption. Only a
-   * seat still somebody's counts — one given up stays given up, as it does to `resumeSeat`.
+   * The account *is* that seat's credential, so joining is a claim — the account and no
+   * token, judged by `claims` over every seat — and it is answered before any refusal of a
+   * *new* seat: a match under way or a full table is no reason to keep a player out of the
+   * seat they are sitting in. `resumed` says which happened, for the transport's
+   * announcement; nothing is changed by a resumption.
    */
   joinRoom(
     roomCode: string,
@@ -196,10 +224,8 @@ export class RoomManager {
     const room = this.rooms.get(roomCode);
     if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
 
-    const held =
-      accountId === null
-        ? undefined
-        : room.state.players.find((p) => p.accountId === accountId && !p.departed);
+    const claimant: Claimant = { accountId, resumeToken: null };
+    const held = room.state.players.find((p) => claims(p, claimant));
     if (held) {
       return ok({
         playerId: held.id,
@@ -228,6 +254,28 @@ export class RoomManager {
       state: room.state,
       resumed: false,
     });
+  }
+
+  /**
+   * Judge a claim on one seat by `claims`, answering the room as it stands. Nothing is
+   * changed by a claim — binding a connection to the seat is the transport's, and the
+   * seat already exists.
+   *
+   * A room that has gone is said so plainly, `joinRoom` already answering that question for
+   * any code. What is inside one is a different matter: a player the room never held, a
+   * seat given up and a seat that is somebody else's share one code with a wrong token, or
+   * a room code would become a way of fishing for the seats behind it — and for which are
+   * accounts'.
+   */
+  claimSeat(roomCode: string, playerId: string, claimant: Claimant): Result<GameState> {
+    const room = this.rooms.get(roomCode);
+    if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
+
+    const player = room.state.players.find((p) => p.id === playerId);
+    if (!player || !claims(player, claimant)) {
+      return err("INVALID_RESUME_TOKEN", "That seat cannot be resumed");
+    }
+    return ok(room.state);
   }
 
   /**
@@ -284,7 +332,8 @@ export class RoomManager {
    * The one place every change to a room passes — a human's move, a bot's, the auto-deal,
    * an exit — so something that must see all of them registers here once rather than
    * being remembered at each route (docs/adr/0024). The room manager knows nothing of what
-   * is listening: the stats write is the socket layer's, which owns the store.
+   * is listening: the stats write is `Rooms`', which is handed the store's write
+   * (docs/adr/0025).
    */
   observe(observer: TransitionObserver): void {
     this.observers.push(observer);
@@ -292,8 +341,8 @@ export class RoomManager {
 
   /**
    * Run a state transition against a room and persist it if it succeeds. This is the
-   * seam the socket layer uses, so it never touches stored state directly and a
-   * rejected action can never leave a room half-updated.
+   * seam `Rooms` uses, so nothing above it touches stored state directly and a rejected
+   * action can never leave a room half-updated.
    *
    * An accepted transition is handed to every observer only once it is stored, so one
    * that looks the room up finds the position it was told about.

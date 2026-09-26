@@ -255,6 +255,29 @@ export function slapdownOpen(view: PlayerGameView): boolean {
 }
 
 /**
+ * The seat `n` places behind `playerId` in turn order, wrapping round the table. Counted
+ * from the player rather than from the front, the seating being drawn at the deal
+ * (docs/rules.md §2).
+ */
+export function seatBehind(view: PlayerGameView, playerId: string, n: number): string {
+  const order = view.turnOrder;
+  return order[(order.indexOf(playerId) + n) % order.length]!;
+}
+
+/**
+ * A card worth discarding to fish for a slapdown window: one whose rank the player holds
+ * only once, since every copy still in hand is a copy that cannot come back off the deck.
+ * Jokers are skipped outright — a drawn joker never opens a window.
+ */
+export function fishingDiscard(view: PlayerGameView): string {
+  const hand = playingSelf(view).hand;
+  const lonely = hand.find(
+    (c) => c.suit !== null && hand.filter((o) => o.rank === c.rank).length === 1,
+  );
+  return (lonely ?? hand[0]!).id;
+}
+
+/**
  * A clock a test drives by hand, so bot think time is asserted without waiting out
  * seconds of it.
  *

@@ -212,7 +212,8 @@ describe("the account a seat was taken under", () => {
 
   /**
    * The account *is* that seat's credential, so joining again is claiming it back — at
-   * any phase and however full the table, those being refusals of a *new* seat.
+   * any phase, however full the table and whatever name is typed, those being refusals of
+   * a *new* seat.
    */
   it("hands an account back the seat it already holds rather than seating it twice", () => {
     const rooms = manager();
@@ -220,7 +221,7 @@ describe("the account a seat was taken under", () => {
     for (let i = 1; i < MAX_PLAYERS; i++) unwrap(rooms.joinRoom(roomCode, `P${i}`, null));
     unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
 
-    const again = unwrap(rooms.joinRoom(roomCode, "Anyone", "account-ada"));
+    const again = unwrap(rooms.joinRoom(roomCode, "", "account-ada"));
 
     assert.equal(again.playerId, playerId);
     assert.equal(again.resumed, true);
@@ -253,6 +254,111 @@ describe("the account a seat was taken under", () => {
 
     assert.equal(joined.resumed, false);
     assert.equal(joined.state.players.length, 3);
+  });
+});
+
+/**
+ * The claim rule, whole (docs/adr/0022): a seat given up is nobody's, an account seat is
+ * its account's, a guest seat is its token's. The socket layer builds the claimant from
+ * the connection's account binding and the payload's token, and decides nothing itself.
+ */
+describe("claimSeat", () => {
+  /** A lobby of an account seat (`player-1`, `token-1`) and a guest's (`player-2`, `token-2`). */
+  function table() {
+    const rooms = manager();
+    const { roomCode } = unwrap(rooms.createRoom("Ada", "account-ada"));
+    unwrap(rooms.joinRoom(roomCode, "Grace", null));
+    return { rooms, roomCode };
+  }
+
+  it("hands an account seat to its account, the token not consulted", () => {
+    const { rooms, roomCode } = table();
+
+    for (const resumeToken of ["not-the-token", null]) {
+      const state = unwrap(
+        rooms.claimSeat(roomCode, "player-1", { accountId: "account-ada", resumeToken }),
+      );
+      assert.equal(state, rooms.getState(roomCode), "the room as it stands, unchanged");
+    }
+  });
+
+  /** So a token left in a shared browser after signing out claims nothing. */
+  it("refuses an account seat to its own token, presented by a guest", () => {
+    const { rooms, roomCode } = table();
+
+    expectErr(
+      rooms.claimSeat(roomCode, "player-1", { accountId: null, resumeToken: "token-1" }),
+      "INVALID_RESUME_TOKEN",
+    );
+  });
+
+  it("refuses an account seat to another account, token and all", () => {
+    const { rooms, roomCode } = table();
+
+    expectErr(
+      rooms.claimSeat(roomCode, "player-1", {
+        accountId: "account-mallory",
+        resumeToken: "token-1",
+      }),
+      "INVALID_RESUME_TOKEN",
+    );
+  });
+
+  /** Signing in while seated as a guest binds the connection, never the seat. */
+  it("hands a guest seat to its token, whoever is signed in", () => {
+    const { rooms, roomCode } = table();
+
+    for (const accountId of [null, "account-someone", "account-ada"]) {
+      unwrap(rooms.claimSeat(roomCode, "player-2", { accountId, resumeToken: "token-2" }));
+    }
+  });
+
+  it("refuses a guest seat to the wrong token, or to none", () => {
+    const { rooms, roomCode } = table();
+
+    for (const resumeToken of ["not-the-token", "token-1", null]) {
+      expectErr(
+        rooms.claimSeat(roomCode, "player-2", { accountId: null, resumeToken }),
+        "INVALID_RESUME_TOKEN",
+      );
+    }
+  });
+
+  /** The same code as a wrong identity, or a room code would be a way to fish for seats. */
+  it("refuses a player the room never seated", () => {
+    const { rooms, roomCode } = table();
+
+    expectErr(
+      rooms.claimSeat(roomCode, "nobody", { accountId: "account-ada", resumeToken: "token-1" }),
+      "INVALID_RESUME_TOKEN",
+    );
+  });
+
+  it("says plainly that a room is not there", () => {
+    const { rooms } = table();
+
+    expectErr(
+      rooms.claimSeat("ZZZZ", "player-1", { accountId: "account-ada", resumeToken: "token-1" }),
+      "ROOM_NOT_FOUND",
+    );
+  });
+
+  /** Leaving is final, whichever identity the seat was taken under. */
+  it("refuses a seat that has been given up, to whoever took it", () => {
+    const { rooms, roomCode } = table();
+    unwrap(rooms.joinRoom(roomCode, "Alan", null));
+    unwrap(rooms.apply(roomCode, (state, rng) => startGame(state, state.hostId, rng)));
+    unwrap(rooms.apply(roomCode, (state) => removePlayer(state, "player-1")));
+    unwrap(rooms.apply(roomCode, (state) => removePlayer(state, "player-2")));
+
+    expectErr(
+      rooms.claimSeat(roomCode, "player-1", { accountId: "account-ada", resumeToken: "token-1" }),
+      "INVALID_RESUME_TOKEN",
+    );
+    expectErr(
+      rooms.claimSeat(roomCode, "player-2", { accountId: null, resumeToken: "token-2" }),
+      "INVALID_RESUME_TOKEN",
+    );
   });
 });
 

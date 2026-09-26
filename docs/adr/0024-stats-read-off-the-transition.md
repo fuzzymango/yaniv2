@@ -26,6 +26,9 @@ argument `broadcastState` makes for reconsidering the auto-deal and the sweep in
 **The room manager stays free of the store.** It knows it has observers and nothing about them. The
 socket layer already owns the store and the `log`, so the write sits there.
 
+*Amended by ADR-0025:* the observer's registration moves to `Rooms`, which owns everything that
+follows a new position; the room manager is still free of the store, and the decision here stands.
+
 Rejected: **a wrapper around `apply`** handed to the bot runner and the auto-dealer in its place.
 It works, but every construction site then has to be handed the wrapped manager rather than the
 real one, and "was this route given the wrapper?" is a question somebody has to remember to ask.
