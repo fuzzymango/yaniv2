@@ -610,7 +610,7 @@ export function Table({
             disabled={busy}
             onClick={onNextRound}
           >
-            Deal the next round
+            Deal next round
           </button>
         ) : (
           // Its own class rather than `notice`, which carries news that has just arrived.

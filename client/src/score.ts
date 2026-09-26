@@ -61,6 +61,6 @@ export function roundOutcome(result: RoundResultView, youId: string): string {
   const object = (id: string) => (id === youId ? "you" : named(id));
 
   const verdict =
-    result.assaferId === null ? "it stood." : `Assafed by ${object(result.assaferId)}.`;
-  return `${subject(result.callerId)} called Yaniv — ${verdict}`;
+    result.assaferId === null ? "" : `Assafed by ${object(result.assaferId)}.`;
+  return `${subject(result.callerId)} called Yaniv${verdict}`;
 }
