@@ -413,12 +413,7 @@ export function Table({
             said: "Slapdown! Tap the pile to send the card you just drew straight back",
             tone: "turn--slap",
           }
-        : yourTurn
-          ? {
-              said: "Your turn — tap cards, then the deck or a face-up card",
-              tone: "turn--yours",
-            }
-          : { said: `${nameOf(view.currentTurnPlayerId)} is playing`, tone: "" };
+        : { said: `${nameOf(view.currentTurnPlayerId)} is playing`, tone: yourTurn ? "turn--yours" : "" };
 
   return (
     <>
