@@ -47,9 +47,10 @@ const VERSION_TABLE = `
  *
  * `account` is one row per identity: its own id (a UUID minted by the server, as
  * `Player.id` already is, never anything Google issued), the display name the player is
- * known by at a table, and the one stat V0 counts — **a plain integer column, not an event
- * log** (docs/adr/0019). `created_at` is for whoever is looking at the database; nothing
- * reads it, which is why it is not on the seam.
+ * known by at a table, and its stats — **plain integer columns, not an event log**
+ * (docs/adr/0019), the first of them created with the table and the other five appended.
+ * `created_at` is for whoever is looking at the database; nothing reads it, which is why it
+ * is not on the seam.
  *
  * `credential` is a table rather than a column on `account`, and that shape is the whole
  * reason it exists: a second sign-in method can be added later without invalidating a
@@ -88,6 +89,16 @@ export const MIGRATIONS: readonly string[] = [
     expires_at timestamptz not null,
     created_at timestamptz not null default now()
   )`,
+
+  // The five stats beside the first (issue #209): plain columns on the row, read by eye,
+  // an existing account reading zero on every one — nothing before this was recorded, so
+  // nothing is backfilled.
+  `alter table account
+    add column calls_assafed integer not null default 0,
+    add column assafs integer not null default 0,
+    add column games_completed integer not null default 0,
+    add column games_won integer not null default 0,
+    add column slapdowns integer not null default 0`,
 ];
 
 /**

@@ -45,19 +45,53 @@ export type AccountId = string;
 export type CredentialKind = "google";
 
 /**
- * An identity that outlives every room: the name a player is known by, and the one stat
- * V0 counts.
+ * An account's six counters, each only ever going up (`CONTEXT.md`'s **Stats**). Only what
+ * cannot be worked out from the others is kept: a call that stood is a Yaniv call not
+ * Assafed, and a loss is a game completed and not won.
+ */
+export interface Stats {
+  /** Times this player has called Yaniv — the call, never the verdict (docs/adr/0023). */
+  yanivCalls: number;
+  /** Of those calls, the ones that were Assafed. */
+  callsAssafed: number;
+  /** Rounds this player was the Assafer — the one player `docs/rules.md` §6 names. */
+  assafs: number;
+  /** Matches played to their end from this seat: eliminated from, or won. */
+  gamesCompleted: number;
+  /** Matches won. */
+  gamesWon: number;
+  /** Slapdowns made. */
+  slapdowns: number;
+}
+
+/**
+ * What one write adds: any of the counters, by any amount, and a counter left out is a
+ * counter left alone. One transition's worth for one account, merged before it is written,
+ * so an interrupted write can never leave a game completed that was not also won.
+ */
+export type StatsDelta = Partial<Stats>;
+
+/** A new account's stats, and the list of what a stat is. */
+export const NO_STATS: Readonly<Stats> = {
+  yanivCalls: 0,
+  callsAssafed: 0,
+  assafs: 0,
+  gamesCompleted: 0,
+  gamesWon: 0,
+  slapdowns: 0,
+};
+
+/**
+ * An identity that outlives every room: the name a player is known by, and its stats.
  *
  * No created-at, though the column exists: nothing reads it, and a field on the seam is
  * a conversion every implementation has to agree on (epoch milliseconds? a `Date`?) with
  * no caller to settle the question against. It is a column for whoever is looking at the
  * database, and it joins this type when something here asks for it.
  */
-export interface Account {
+export interface Account extends Stats {
   id: AccountId;
   displayName: string;
-  /** Times this player has called Yaniv — the call, never the verdict (docs/adr/0023). */
-  yanivCalls: number;
 }
 
 /**
@@ -103,8 +137,14 @@ export interface ProfileStore {
    */
   renameAccount(id: AccountId, displayName: string): Promise<void>;
 
-  /** Count one Yaniv call. Throws if there is no such account. */
-  recordYanivCall(id: AccountId): Promise<void>;
+  /**
+   * Add `delta` to an account's stats, as one atomic increment — every counter it names
+   * or none of them. Throws if there is no such account.
+   *
+   * One method rather than one per counter, so the seam stays narrow and a transition that
+   * earned an account several stats at once is one write, not several that can half land.
+   */
+  recordStats(id: AccountId, delta: StatsDelta): Promise<void>;
 
   /**
    * Record that somebody proved who they are, until `expiresAt`. The hash is the
@@ -188,7 +228,7 @@ export function createMemoryProfileStore(): ProfileStore {
         throw new Error(`credential ${credential.kind}:${credential.identifier} is taken`);
       }
 
-      const account: Account = { id: randomUUID(), displayName, yanivCalls: 0 };
+      const account: Account = { id: randomUUID(), displayName, ...NO_STATS };
       accounts.set(account.id, account);
       credentials.set(key, { ...credential, accountId: account.id });
       return copy(account);
@@ -208,8 +248,11 @@ export function createMemoryProfileStore(): ProfileStore {
       requireAccount(id).displayName = displayName;
     },
 
-    async recordYanivCall(id) {
-      requireAccount(id).yanivCalls += 1;
+    async recordStats(id, delta) {
+      const account = requireAccount(id);
+      for (const stat of Object.keys(NO_STATS) as Array<keyof Stats>) {
+        account[stat] += delta[stat] ?? 0;
+      }
     },
 
     async createSession(id, tokenHash, expiresAt) {

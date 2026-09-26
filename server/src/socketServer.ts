@@ -41,7 +41,7 @@ import { createRoomSweeper, unattended } from "./roomSweep.ts";
 import { createRoomTimers } from "./roomTimers.ts";
 import type { Rng } from "./rng.ts";
 import { serializeStateForPlayer } from "./serialize.ts";
-import { accountToCredit } from "./stats.ts";
+import { statsEarned } from "./stats.ts";
 import type { ActionResult, GameState, Player } from "./state.ts";
 import { getPlayer } from "./state.ts";
 
@@ -121,8 +121,8 @@ export interface SocketServerOptions extends BotTurnRunnerOptions {
   /** Defaults to a CSPRNG. A test issues marked tokens, to sweep the wire for them. */
   newSessionToken?: SessionTokenGenerator;
   /**
-   * Where a failure nobody is waiting on is reported — a Yaniv call the store would not
-   * count (docs/adr/0023). Defaults to `console.error`; a test listens in.
+   * Where a failure nobody is waiting on is reported — stats the store would not record
+   * (docs/adr/0023, 0024). Defaults to `console.error`; a test listens in.
    */
   log?: (...args: unknown[]) => void;
 }
@@ -159,6 +159,35 @@ export function createSocketServer(
     clock,
     newSessionToken: options.newSessionToken ?? randomSessionToken,
   };
+
+  /**
+   * Write whatever a transition earned the accounts at its table (docs/adr/0024).
+   *
+   * Registered once, on the room manager, rather than hung off the handlers: every route
+   * to a new position — a human's move, a bot's, the auto-deal, an exit — passes through
+   * `apply`, so a route that is added later is counted without anybody remembering to.
+   *
+   * Started and awaited nowhere, so a database that is slow or down is a counter lost and
+   * nothing more (docs/adr/0023): the failure is logged naming the account — a missing
+   * account told apart from a dead connection — and dropped. No retry and no queue. The
+   * store still throws, as ADR-0019 says it must; it is this one caller that decides its
+   * write is not worth a card game waiting on.
+   *
+   * The write is called from inside a `.then`, which does two things. A store that throws
+   * rather than rejecting lands in the same `.catch` instead of out of `apply`. And the
+   * store is not reached until the synchronous work that made the move — the ack, the
+   * broadcast, the bot turns scheduled — has finished: the game first, the stat after it.
+   */
+  function recordEarned(before: GameState, after: GameState): void {
+    for (const [accountId, delta] of statsEarned(before, after)) {
+      Promise.resolve()
+        .then(() => profiles.recordStats(accountId, delta))
+        .catch((error: unknown) =>
+          log(`Recording stats for account ${accountId} failed:`, error),
+        );
+    }
+  }
+  rooms.observe(recordEarned);
 
   /**
    * Send every connection in a room its own view of the current state.
@@ -641,15 +670,12 @@ export function createSocketServer(
      * A rejection acks the error and stops there. Nothing is published, so a refused
      * action costs the player nothing: the turn is still theirs to take again.
      *
-     * `after` is a side effect of the move having stood, run **last** — behind the ack,
-     * the broadcast and the bot turns, so the order the tail reads in is the order that
-     * matters: the game first, anything else after it. It is handed the position the
-     * transition produced and must not make the tail wait on it (docs/adr/0023).
+     * Whatever an accepted move earned an account is not this helper's business: the
+     * room manager hands every accepted transition to `recordEarned`, this one included.
      */
     function act(
       ack: Ack<null>,
       transition: (seat: Seat, state: GameState, rng: Rng) => ActionResult,
-      after?: (seat: Seat, state: GameState) => void,
     ): void {
       const seat = socket.data.seat;
       if (!seat) {
@@ -668,7 +694,6 @@ export function createSocketServer(
       ack({ ok: true, value: null });
       broadcastState(seat.roomCode);
       runBotTurns(seat.roomCode);
-      after?.(seat, result.value);
     }
 
     /**
@@ -701,35 +726,8 @@ export function createSocketServer(
       );
     });
 
-    /**
-     * The one stat: an accepted call is counted on the caller's account, whether it stood
-     * or was Assafed — the call, never the verdict (docs/adr/0023). Hung off this handler
-     * rather than read back off the state, because this handler *is* the knowledge that a
-     * human called; and never twice for one round, a second call being `WRONG_PHASE` and
-     * a refused action having no tail.
-     *
-     * Started and awaited nowhere, so a database that is slow or down is a counter lost
-     * and nothing more: the failure is logged naming the account — a missing account told
-     * apart from a dead connection — and dropped. No retry and no queue. The store still
-     * throws, as ADR-0019 says it must; it is this one caller that decides its write is
-     * not worth a card game waiting on.
-     */
     socket.on("callYaniv", (ack) => {
-      act(
-        ack,
-        (seat, state) => callYaniv(state, seat.playerId),
-        (seat, state) => {
-          const accountId = accountToCredit(state, seat.playerId);
-          if (accountId === null) return;
-          // Called from inside a `.then`, so a store that throws rather than rejecting
-          // lands in the same `.catch` instead of out of this handler.
-          Promise.resolve()
-            .then(() => profiles.recordYanivCall(accountId))
-            .catch((error: unknown) =>
-              log(`Counting a Yaniv call for account ${accountId} failed:`, error),
-            );
-        },
-      );
+      act(ack, (seat, state) => callYaniv(state, seat.playerId));
     });
 
     /**

@@ -35,7 +35,11 @@ import { io as connectClient, type Socket as ClientSocket } from "socket.io-clie
 import { decideTurn } from "../src/bot.ts";
 import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
 import { createDeck } from "../src/deck.ts";
-import { createMemoryProfileStore, type ProfileStore } from "../src/profiles.ts";
+import {
+  createMemoryProfileStore,
+  type ProfileStore,
+  type StatsDelta,
+} from "../src/profiles.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import type { SocketServerOptions } from "../src/socketServer.ts";
@@ -2367,6 +2371,8 @@ describe("play again and exit to menu", () => {
  */
 describe("slapping down", () => {
   let table: Harness;
+  /** The accounts behind the table, so a test can read what a slapdown was credited. */
+  const profiles = createMemoryProfileStore();
 
   before(async () => {
     /*
@@ -2379,7 +2385,7 @@ describe("slapping down", () => {
      * And no bots: the fishing needs Grace to play directly after Ada, which a table of
      * two is whatever the seating the deal draws (docs/rules.md §2).
      */
-    table = await startServer(20250811, 0, undefined, LONG_MATCH);
+    table = await startServer(20250811, 0, undefined, LONG_MATCH, profiles);
   });
   after(async () => {
     await table.close();
@@ -2390,15 +2396,26 @@ describe("slapping down", () => {
     watcher: Watcher;
     id: string;
     name: string;
+    /** The account the seat was taken under, or `null` for a guest. */
+    accountId: string | null;
     /** Every view this seat was ever sent, never reset — what the wire actually said. */
     heard: PlayerGameView[];
   }
 
-  function seat(client: ClientSocket, id: string, name: string): Seat {
+  function seat(
+    client: ClientSocket,
+    id: string,
+    name: string,
+    accountId: string | null,
+  ): Seat {
     const heard: PlayerGameView[] = [];
     client.on("gameStateUpdate", (view: PlayerGameView) => heard.push(view));
-    return { client, watcher: watch(client), id, name, heard };
+    return { client, watcher: watch(client), id, name, accountId, heard };
   }
+
+  /** Sign `client` up as `name` where the test asked for accounts, and say under what. */
+  const accountFor = async (client: ClientSocket, name: string, signedIn: boolean) =>
+    signedIn ? (await signUp(client, name, table)).account.id : null;
 
   /**
    * A card worth discarding to fish for a window: one whose rank the player holds only
@@ -2423,21 +2440,24 @@ describe("slapping down", () => {
   }
 
   /**
-   * Sit Ada and Grace down and play until Ada draws a card she may slap down, leaving
-   * the table exactly there: her window open, the turn on Grace, nothing else moved.
+   * Sit Ada and Grace down — as guests, or both signed in — and play until Ada draws a
+   * card she may slap down, leaving the table exactly there: her window open, the turn on
+   * Grace, nothing else moved.
    */
-  async function playToAnOpenWindow(): Promise<OpenWindow> {
+  async function playToAnOpenWindow(signedIn = false): Promise<OpenWindow> {
     const adaClient = await table.connect();
+    const adaAccount = await accountFor(adaClient, "Ada", signedIn);
     const created = expectOk(
       await ask<{ roomCode: string; playerId: string }>(adaClient, "createRoom", "Ada"),
     );
-    const ada = seat(adaClient, created.playerId, "Ada");
+    const ada = seat(adaClient, created.playerId, "Ada", adaAccount);
 
     const graceClient = await table.connect();
+    const graceAccount = await accountFor(graceClient, "Grace", signedIn);
     const joined = expectOk(
       await ask<{ playerId: string }>(graceClient, "joinRoom", created.roomCode, "Grace"),
     );
-    const grace = seat(graceClient, joined.playerId, "Grace");
+    const grace = seat(graceClient, joined.playerId, "Grace", graceAccount);
 
     expectOk(await ask(ada.client, "startGame"));
 
@@ -2498,6 +2518,9 @@ describe("slapping down", () => {
     }
     assert.fail("no slapdown window ever opened");
   }
+
+  /** What `of`'s account has been credited in slapdowns so far. */
+  const slapdownsOf = async (of: Seat) => (await profiles.loadAccount(of.accountId!))!.slapdowns;
 
   /** Take Grace's turn, from the view she is holding. */
   const graceTakesHerTurn = (grace: Seat, graceView: PlayerGameView) =>
@@ -2679,6 +2702,33 @@ describe("slapping down", () => {
         );
       }
     }
+  });
+
+  /**
+   * The route a human's own move is credited by (docs/adr/0024): the slap is Ada's, acked
+   * to her, and her account reads it — Grace's, trying after it, loses the race and reads
+   * nothing, and Ada's own second try is no second slapdown.
+   */
+  it("counts an accepted slapdown on the slapper's account, a refused one on nobody's", async () => {
+    const { ada, grace } = await playToAnOpenWindow(true);
+
+    expectOk(await ask(ada.client, "slapDown"));
+    for (const late of [grace, ada]) {
+      const refused = expectError(await ask(late.client, "slapDown"));
+      assert.equal(refused.code, "SLAPDOWN_NOT_AVAILABLE", `${late.name}'s slap was refused`);
+    }
+
+    assert.equal(await slapdownsOf(ada), 1);
+    assert.equal(await slapdownsOf(grace), 0);
+  });
+
+  it("counts nothing for a slap the next player's turn got in ahead of", async () => {
+    const { ada, grace, graceView } = await playToAnOpenWindow(true);
+    expectOk(await graceTakesHerTurn(grace, graceView));
+
+    expectError(await ask(ada.client, "slapDown"));
+
+    assert.equal(await slapdownsOf(ada), 0);
   });
 
   it("rejects a slap from a connection that is not in a room", async () => {
@@ -4039,15 +4089,17 @@ describe("the scorecard on the wire", () => {
 });
 
 /**
- * The one stat, over the wire (docs/adr/0023): a signed-in player's accepted `callYaniv`
- * is counted on their account, and nothing about that write reaches the game.
+ * The stats, over the wire (docs/adr/0023, 0024): a signed-in player's call is counted on
+ * their account, an Assaf of a bot's call on the account of whoever caught it out, a match
+ * seen through on the account of everybody who was knocked out of it or won it, and
+ * nothing about any write reaches the game.
  *
  * Each test builds its own server around a store it can see into — or one that never
  * answers, or always fails — which is the whole reason `startServer` takes one. And each
  * plays a real table out to real calls: `accountToCredit` is unit-tested and the store is
  * contract-tested, and both would pass against a handler that wrote nothing at all.
  */
-describe("a Yaniv call counted on the caller's account", () => {
+describe("stats counted on the players' accounts", () => {
   const opened: Harness[] = [];
   after(async () => {
     for (const harness of opened) await harness.close();
@@ -4062,19 +4114,22 @@ describe("a Yaniv call counted on the caller's account", () => {
   }
 
   /**
-   * A player and three bots, dealt in, at a limit nobody reaches: several rounds are
-   * played here, and a table that emptied on the way would stop answering.
+   * A player and `bots` bots (three unless a test says), dealt in, at a limit nobody
+   * reaches unless a test sets its own: several rounds are played here, and a table that
+   * emptied on the way would stop answering.
    */
   async function sitDown(
     profiles: ProfileStore,
     signedIn = true,
     options: SocketServerOptions = {},
+    bots = 3,
+    settings = LONG_MATCH,
   ): Promise<Player> {
     const harness = await startServer(
       7,
-      3,
+      bots,
       { thinkTimeMs: 0, ...options },
-      LONG_MATCH,
+      settings,
       profiles,
     );
     opened.push(harness);
@@ -4133,12 +4188,20 @@ describe("a Yaniv call counted on the caller's account", () => {
   }
 
   /**
-   * The memory store with its Yaniv-call write replaced, and every account that write was
-   * asked for recorded in order — whatever the replacement then does with it. The
-   * replacement is handed the store underneath, which is where the accounts are.
+   * The scored rounds that owe `player`'s account a write: the ones they called, and the
+   * bots' calls they Assafed. A bot's call anybody else Assafed owes nobody anything.
+   */
+  function credited(player: Player, { mine, bots }: Calls): RoundResultView[] {
+    return [...mine, ...bots.filter((r) => r.assaferId === player.playerId)];
+  }
+
+  /**
+   * The memory store with its stats write replaced, and every account that write was asked
+   * for recorded in order — whatever the replacement then does with it. The replacement is
+   * handed the store underneath, which is where the accounts are.
    */
   function storeWith(
-    recordYanivCall: (id: string, memory: ProfileStore) => Promise<void>,
+    recordStats: (id: string, delta: StatsDelta, memory: ProfileStore) => Promise<void>,
   ): { profiles: ProfileStore; asked: string[] } {
     const memory = createMemoryProfileStore();
     const asked: string[] = [];
@@ -4146,9 +4209,9 @@ describe("a Yaniv call counted on the caller's account", () => {
       asked,
       profiles: {
         ...memory,
-        recordYanivCall: (id) => {
+        recordStats: (id, delta) => {
           asked.push(id);
-          return recordYanivCall(id, memory);
+          return recordStats(id, delta, memory);
         },
       },
     };
@@ -4176,17 +4239,36 @@ describe("a Yaniv call counted on the caller's account", () => {
     assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, mine.length);
   });
 
-  it("writes nothing for a bot's call", async () => {
-    const { profiles, asked } = storeWith((id, memory) => memory.recordYanivCall(id));
+  /**
+   * The route #210's suite could not reach: a bot's move crediting a human. The call is the
+   * bot's, played on the server's own timer with no handler of the player's under it, and
+   * the Assaf lands on the account of whoever caught it out all the same.
+   */
+  it("counts an Assaf on the account of a player who catches a bot's call", async () => {
+    const profiles = createMemoryProfileStore();
+    const player = await sitDown(profiles, true, {}, 1);
+
+    await playUntil(player, ({ bots }) => bots.some((r) => r.assaferId === player.playerId));
+
+    assert.equal((await profiles.loadAccount(player.accountId!))!.assafs, 1);
+  });
+
+  it("writes nothing for a bot's call the player did not Assaf", async () => {
+    const { profiles, asked } = storeWith((id, delta, memory) =>
+      memory.recordStats(id, delta),
+    );
     const player = await sitDown(profiles);
 
-    const { mine } = await playUntil(
+    const calls = await playUntil(
       player,
       ({ mine, bots }) => mine.length > 0 && bots.length > 0,
     );
 
-    assert.deepEqual(asked, mine.map(() => player.accountId));
-    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, mine.length);
+    assert.deepEqual(asked, credited(player, calls).map(() => player.accountId));
+    assert.equal(
+      (await profiles.loadAccount(player.accountId!))!.yanivCalls,
+      calls.mine.length,
+    );
   });
 
   it("writes nothing for a guest's call", async () => {
@@ -4207,9 +4289,13 @@ describe("a Yaniv call counted on the caller's account", () => {
     const { profiles, asked } = storeWith(() => new Promise(() => {}));
     const player = await sitDown(profiles);
 
-    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+    const calls = await playUntil(player, ({ mine }) => mine.length === 2);
 
-    assert.deepEqual(asked, mine.map(() => player.accountId), "the store was asked, and hung");
+    assert.deepEqual(
+      asked,
+      credited(player, calls).map(() => player.accountId),
+      "the store was asked, and hung",
+    );
   });
 
   /**
@@ -4223,9 +4309,9 @@ describe("a Yaniv call counted on the caller's account", () => {
     const { profiles } = storeWith(() => Promise.reject(failure));
     const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
 
-    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+    const calls = await playUntil(player, ({ mine }) => mine.length === 2);
 
-    assert.equal(logged.length, mine.length);
+    assert.equal(logged.length, credited(player, calls).length);
     for (const entry of logged) {
       assert.ok(String(entry[0]).includes(player.accountId!), "the log names the account");
       assert.ok(entry.includes(failure), "and carries the failure");
@@ -4245,9 +4331,73 @@ describe("a Yaniv call counted on the caller's account", () => {
     });
     const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
 
-    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+    const calls = await playUntil(player, ({ mine }) => mine.length === 2);
 
-    assert.equal(logged.length, mine.length);
+    assert.equal(logged.length, credited(player, calls).length);
     assert.ok(logged.every((entry) => entry.includes(failure)));
+  });
+
+  /**
+   * The route through an exit: nobody's move ends this match, the second-to-last player
+   * leaving does, with no round ever scored — and the one left has seen it through, and won.
+   */
+  it("counts a match an exit ends as completed and won by whoever is left", async () => {
+    const profiles = createMemoryProfileStore();
+    const harness = await startServer(7, 0, { thinkTimeMs: 0 }, {}, profiles);
+    opened.push(harness);
+
+    const ada = await harness.connect();
+    const { account } = await signUp(ada, "Ada", harness);
+    const { roomCode } = expectOk(await ask<{ roomCode: string }>(ada, "createRoom", "Ada"));
+    const grace = await harness.connect();
+    expectOk(await ask(grace, "joinRoom", roomCode, "Grace"));
+    expectOk(await ask(ada, "startGame"));
+
+    const watcher = watch(ada);
+    expectOk(await ask(grace, "exitToMenu"));
+    await watcher.until((v) => v.phase === "gameEnd", "the match to end");
+
+    const stats = (await profiles.loadAccount(account.id))!;
+    assert.equal(stats.gamesCompleted, 1);
+    assert.equal(stats.gamesWon, 1);
+  });
+
+  /**
+   * The route through a bot's move: the call that knocks the player out is the bot's, on
+   * the server's own timer. At a limit of 1 any round the player does not win puts them
+   * out, and a player who never calls cannot win one but by an Assaf — which the seed does
+   * not deal, the assertion on the winner saying so if it ever does.
+   */
+  it("counts a match a bot's call knocks the player out of as completed, and not won", async () => {
+    const profiles = createMemoryProfileStore();
+    const player = await sitDown(profiles, true, {}, 1, { maxScore: MAX_SCORE_LIMITS.min });
+
+    const ended = await (async () => {
+      for (let step = 0; step < 3000; step++) {
+        const current = await player.watcher.until(
+          (v) =>
+            v.phase === "gameEnd" ||
+            v.phase === "roundEnd" ||
+            (v.phase === "playing" && v.currentTurnPlayerId === player.playerId),
+          "the player to be needed",
+        );
+        player.watcher.reset();
+        if (current.phase === "gameEnd") return current;
+        assert.equal(current.phase, "playing", "a round was scored and the player survived it");
+        const discard = playingSelf(current).hand[0]!;
+        expectOk(
+          await ask(player.client, "takeTurn", {
+            discardCardIds: [discard.id],
+            draw: { source: "deck" },
+          }),
+        );
+      }
+      assert.fail("the bot never called");
+    })();
+    assert.notDeepEqual(ended.winnerIds, [player.playerId], "the bot won the match");
+
+    const stats = (await profiles.loadAccount(player.accountId!))!;
+    assert.equal(stats.gamesCompleted, 1);
+    assert.equal(stats.gamesWon, 0);
   });
 });

@@ -9,22 +9,26 @@
  * credentials and token hashes below are reused from test to test, and a primary key
  * remembers them.
  *
- * Two things this suite cannot honestly prove, named here rather than written as skipped
- * tests, because a skipped test reads as something somebody forgot:
+ * One thing this suite cannot honestly prove, named here rather than written as a skipped
+ * test, because a skipped test reads as something somebody forgot:
  *
- * 1. **`createAccount` writes two rows that land together.** Against the in-memory store
- *    the account and its credential go into two maps in one synchronous body, so there is
- *    no window for a half-written account to exist and nothing to observe if there were.
- *    Only a store with a real transaction can be caught getting this wrong.
- * 2. **Concurrent `recordYanivCall`s add up.** The in-memory store runs on one thread and
- *    increments in a body no `await` interrupts, so two calls in flight at once are two
- *    calls in sequence. A test of it would prove the event loop works, not the store.
+ * **`createAccount` writes two rows that land together.** Against the in-memory store the
+ * account and its credential go into two maps in one synchronous body, so there is no
+ * window for a half-written account to exist and nothing to observe if there were. Only a
+ * store with a real transaction can be caught getting this wrong.
+ *
+ * One more is written anyway, for the arm it is waiting for: **concurrent `recordStats`
+ * add up**. The in-memory store runs on one thread and increments in a body no `await`
+ * interrupts, so two writes in flight at once are two writes in sequence and the test
+ * proves only the event loop — but against Postgres it is the lost-update check, and the
+ * suite is that store's specification before it is this one's.
  */
 
 import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 import {
   createMemoryProfileStore,
+  NO_STATS,
   type NewCredential,
   type ProfileStore,
 } from "../src/profiles.ts";
@@ -62,12 +66,20 @@ for (const [name, createStore] of implementations) {
     }
 
     describe("createAccount", () => {
-      it("returns an account with the name it was given and no calls yet", async (t) => {
+      it("returns an account with the name it was given and every stat at zero", async (t) => {
         const store = storeFor(t);
         const account = await store.createAccount("Ada", googleCredential("google-1"));
 
-        assert.equal(account.displayName, "Ada");
-        assert.equal(account.yanivCalls, 0);
+        assert.deepEqual(account, {
+          id: account.id,
+          displayName: "Ada",
+          yanivCalls: 0,
+          callsAssafed: 0,
+          assafs: 0,
+          gamesCompleted: 0,
+          gamesWon: 0,
+          slapdowns: 0,
+        });
         assert.ok(account.id.length > 0);
       });
 
@@ -155,7 +167,7 @@ for (const [name, createStore] of implementations) {
         loaded.displayName = "Grace";
         loaded.yanivCalls = 99;
 
-        assert.deepEqual(await store.loadAccount(id), { id, displayName: "Ada", yanivCalls: 0 });
+        assert.deepEqual(await store.loadAccount(id), { id, displayName: "Ada", ...NO_STATS });
       });
     });
 
@@ -163,11 +175,16 @@ for (const [name, createStore] of implementations) {
       it("changes the name and nothing else", async (t) => {
         const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
-        await store.recordYanivCall(id);
+        await store.recordStats(id, { yanivCalls: 1 });
 
         await store.renameAccount(id, "Grace");
 
-        assert.deepEqual(await store.loadAccount(id), { id, displayName: "Grace", yanivCalls: 1 });
+        assert.deepEqual(await store.loadAccount(id), {
+          id,
+          displayName: "Grace",
+          ...NO_STATS,
+          yanivCalls: 1,
+        });
       });
 
       it("leaves the credential reaching the same account", async (t) => {
@@ -186,33 +203,71 @@ for (const [name, createStore] of implementations) {
       });
     });
 
-    describe("recordYanivCall", () => {
-      it("counts one call per write", async (t) => {
+    describe("recordStats", () => {
+      it("adds the counters a delta names and leaves the rest alone", async (t) => {
         const store = storeFor(t);
         const { id } = await store.createAccount("Ada", googleCredential("google-1"));
 
-        await store.recordYanivCall(id);
-        await store.recordYanivCall(id);
-        await store.recordYanivCall(id);
+        await store.recordStats(id, { yanivCalls: 1, callsAssafed: 1 });
+        await store.recordStats(id, { gamesCompleted: 1, gamesWon: 1, yanivCalls: 1 });
 
-        assert.equal((await store.loadAccount(id))?.yanivCalls, 3);
+        assert.deepEqual(await store.loadAccount(id), {
+          id,
+          displayName: "Ada",
+          yanivCalls: 2,
+          callsAssafed: 1,
+          assafs: 0,
+          gamesCompleted: 1,
+          gamesWon: 1,
+          slapdowns: 0,
+        });
       });
 
-      it("counts against the account that called and no other", async (t) => {
+      it("adds every counter it is handed", async (t) => {
+        const store = storeFor(t);
+        const { id } = await store.createAccount("Ada", googleCredential("google-1"));
+        const everything = {
+          yanivCalls: 1,
+          callsAssafed: 2,
+          assafs: 3,
+          gamesCompleted: 4,
+          gamesWon: 5,
+          slapdowns: 6,
+        };
+
+        await store.recordStats(id, everything);
+
+        assert.deepEqual(await store.loadAccount(id), { id, displayName: "Ada", ...everything });
+      });
+
+      it("adds up writes made at once", async (t) => {
+        const store = storeFor(t);
+        const { id } = await store.createAccount("Ada", googleCredential("google-1"));
+
+        await Promise.all(
+          Array.from({ length: 10 }, () => store.recordStats(id, { yanivCalls: 1, slapdowns: 2 })),
+        );
+
+        const account = await store.loadAccount(id);
+        assert.equal(account?.yanivCalls, 10);
+        assert.equal(account?.slapdowns, 20);
+      });
+
+      it("counts against the account named and no other", async (t) => {
         const store = storeFor(t);
         const ada = await store.createAccount("Ada", googleCredential("google-1"));
         const grace = await store.createAccount("Grace", googleCredential("google-2"));
 
-        await store.recordYanivCall(ada.id);
+        await store.recordStats(ada.id, { assafs: 1 });
 
-        assert.equal((await store.loadAccount(ada.id))?.yanivCalls, 1);
-        assert.equal((await store.loadAccount(grace.id))?.yanivCalls, 0);
+        assert.equal((await store.loadAccount(ada.id))?.assafs, 1);
+        assert.deepEqual(await store.loadAccount(grace.id), grace);
       });
 
       it("throws against an account that is not there", async (t) => {
         const store = storeFor(t);
 
-        await assert.rejects(() => store.recordYanivCall("nobody"));
+        await assert.rejects(() => store.recordStats("nobody", { yanivCalls: 1 }));
       });
     });
 
