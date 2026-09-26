@@ -143,9 +143,9 @@ it to disagree; *why* is derived — **eliminated** is out with a score past the
 is out with **`Player.departed`** — and the two are disjoint by the rules, not by convention.
 The first deal **draws the roster's order** — the seating, uniformly at random over every
 seat, bots included, turn order following it (docs/rules.md §2, #202) — and from then on the
-**roster is append-only**: leaving marks a seat rather than splicing it
-out, which is what makes "out, and gone" representable. In the lobby it still splices, there
-being no match record for a seat to be part of yet — `docs/adr/0016`.
+**roster is append-only**: leaving marks a seat rather than splicing it out, which is what
+makes "out, and gone" representable. In the lobby it still splices, there being no match
+record for a seat to be part of yet — `docs/adr/0016`.
 
 Membership in `players` therefore no longer means membership in the match, and every seat count
 and map over it asks `inMatch` (`state.ts`): `dealRound`, `randomOpener`, the minimum to start,

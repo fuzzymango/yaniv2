@@ -12,6 +12,7 @@ import {
   updateSettings,
 } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
+import { RoomManager } from "../src/roomManager.ts";
 import type { StateOptions } from "./helpers.ts";
 import {
   RESUME_TOKEN_MARK,
@@ -115,23 +116,27 @@ describe("startGame", () => {
 
 /**
  * docs/rules.md §2: the seating is drawn uniformly at random over every seat when the
- * match is first dealt, and turn order follows it round the table. Before this, join
- * order was the seating, and bots — seated by `seatBots` only at the start — always sat
- * in a block after every human (issue #202).
+ * match is first dealt, and turn order follows it round the table. `seatBots` appends
+ * bots after every human, so without the draw they would always sit in a block.
  */
 describe("startGame — drawing the seating", () => {
-  /** Two humans in join order, host first, and the two bots `seatBots` appends after them. */
-  const humansThenBots = () =>
-    makeState({
-      phase: "lobby",
-      roundNumber: 0,
-      players: [
-        { id: "host" },
-        { id: "guest" },
-        { id: "bot1", isBot: true },
-        { id: "bot2", isBot: true },
-      ],
-    });
+  /**
+   * Two humans in join order, host first, and the two bots `seatBots` appends after them —
+   * the table the socket handler hands `startGame`. Bot ids are counted rather than random,
+   * so two calls build the same lobby.
+   */
+  const humansThenBots = () => {
+    let bots = 0;
+    const rooms = new RoomManager({ newPlayerId: () => `bot${++bots}` });
+    return rooms.seatBots(
+      makeState({
+        phase: "lobby",
+        roundNumber: 0,
+        players: [{ id: "host" }, { id: "guest" }],
+        settings: { botCount: 2 },
+      }),
+    );
+  };
 
   const seatingFor = (lobby: ReturnType<typeof makeState>, seed: number) =>
     unwrap(startGame(lobby, lobby.hostId, mulberry32(seed))).players.map((p) => p.id);
@@ -189,16 +194,27 @@ describe("startGame — drawing the seating", () => {
 
   /**
    * A refusal is a `Result`, so nothing reaches the room's `apply` — but only if the draw
-   * builds a new roster rather than shuffling the lobby's in place on the way past.
+   * builds a new roster rather than shuffling the one it was handed in place on the way
+   * past, which every refusal and the start itself are checked for here.
    */
-  it("leaves the lobby's roster as it was, whether the start is refused or not", () => {
+  it("returns every refusal, and leaves the roster it was handed as it was", () => {
     const lobby = humansThenBots();
+    const alone = makeState({ phase: "lobby", roundNumber: 0, players: [{ id: "host" }] });
+    const dealt = unwrap(startGame(humansThenBots(), "host", rng()));
+    const refusals = [
+      [lobby, "guest", "NOT_HOST"],
+      [alone, "host", "NOT_ENOUGH_PLAYERS"],
+      [dealt, "host", "WRONG_PHASE"],
+    ] as const;
+
+    for (const [state, requester, code] of refusals) {
+      const before = JSON.stringify(state);
+      expectErr(startGame(state, requester, rng()), code);
+      assert.equal(JSON.stringify(state), before, `${code} reordered the roster`);
+    }
     const before = JSON.stringify(lobby);
-
-    expectErr(startGame(lobby, "guest", rng()), "NOT_HOST");
     unwrap(startGame(lobby, lobby.hostId, rng()));
-
-    assert.equal(JSON.stringify(lobby), before);
+    assert.equal(JSON.stringify(lobby), before, "the start reordered the lobby it was handed");
   });
 });
 

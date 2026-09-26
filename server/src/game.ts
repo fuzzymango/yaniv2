@@ -121,8 +121,8 @@ export function startGame(
       `Need at least ${MIN_PLAYERS} players to start`,
     );
   }
-  const seated: GameState = { ...state, players: shuffle(state.players, rng) };
-  return ok(dealRound(seated, randomOpener(seated, rng), rng));
+  const drawn: GameState = { ...state, players: shuffle(state.players, rng) };
+  return ok(dealRound(drawn, randomOpener(drawn, rng), rng));
 }
 
 /**

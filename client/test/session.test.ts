@@ -385,9 +385,7 @@ async function twoHumanMatch(server: Harness): Promise<[Session, Session]> {
  * Reaching a callable hand is a race: five bots are shedding as fast as this seat is and
  * each of them calls the instant it is legal, so on most deals a bot ends the round first.
  * This one is a deal where the human seat gets there. Nothing else about it is special, and
- * `playUntilCallable` says so out loud if it ever stops being true — which it did once
- * already, when the seating became a draw at the deal (docs/rules.md §2) and moved every
- * seed's deal along.
+ * `playUntilCallable` says so out loud if it ever stops being true.
  */
 const HUMAN_CALLS_FIRST = 15;
 

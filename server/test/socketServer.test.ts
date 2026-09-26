@@ -265,6 +265,16 @@ function assertNoResumeToken(view: PlayerGameView, where: string): void {
   );
 }
 
+/**
+ * The seat `n` places behind `playerId` in turn order, wrapping round the table. Counted
+ * from the player rather than from the front, the seating being drawn at the deal
+ * (docs/rules.md §2).
+ */
+function seatBehind(view: PlayerGameView, playerId: string, n: number): string {
+  const order = view.turnOrder;
+  return order[(order.indexOf(playerId) + n) % order.length]!;
+}
+
 /** Unwrap a rejection, failing the test if the call unexpectedly succeeded. */
 function expectError<T>(result: AckResult<T>): GameError {
   if (result.ok) assert.fail("expected a rejection, got success");
@@ -1377,8 +1387,7 @@ describe("playing a match", () => {
   let table: Harness;
 
   // A seed whose deal opens on the host and never knocks them out while bots play on,
-  // which is what every test below is written against. Re-chosen when the seating became
-  // a draw of its own (docs/rules.md §2), that draw moving every seed's deal along.
+  // which is what every test below is written against.
   before(async () => {
     table = await startServer(29, MAX_PLAYERS - 1, { thinkTimeMs: 0 }, SHORT_MATCH);
   });
@@ -1419,13 +1428,11 @@ describe("playing a match", () => {
 
     await watcher.until((v) => v.currentTurnPlayerId === me, "the turn to come back");
 
-    // One broadcast per turn taken — the player's, then each bot's, in seating order,
-    // counted round the table from wherever the deal seated the player (docs/rules.md §2).
+    // One broadcast per turn taken — the player's, then each bot's, in seating order.
     // A single collapsed update would show only the last of these.
-    const mine = view.turnOrder.indexOf(me);
     assert.deepEqual(
       watcher.seen.map((v) => v.currentTurnPlayerId),
-      [...view.turnOrder.slice(mine + 1), ...view.turnOrder.slice(0, mine), me],
+      view.turnOrder.map((_, n) => seatBehind(view, me, n + 1)),
     );
 
     // How long the chain takes is not this test's subject: this server is built with
@@ -2649,18 +2656,21 @@ describe("slapping down", () => {
    * never appear in anyone else's payload, in any shape.
    *
    * Grace's own windows are hers to be told about — at a table of two she opens them too,
-   * fishing — so what is checked on her side is her view of the position Ada's window is
-   * open in, and that no opponent entry ever carries the flag at all.
+   * fishing — and a window is always the last mover's, so every position Grace heard that
+   * her own move did not produce is checked, and no opponent entry may carry the flag.
    */
   it("never tells the rest of the table that a window is open", async () => {
-    const { ada, grace, adaView, graceView } = await playToAnOpenWindow();
+    const { ada, grace, adaView } = await playToAnOpenWindow();
 
     assert.ok(slapdownOpen(adaView), "Ada really was told about her own window");
-    assert.equal(slapdownOpen(graceView), false, "Grace was told about Ada's window");
-    assert.ok(
-      !JSON.stringify(graceView).includes('"slapdownEligible":true'),
-      "Ada's open window leaked into Grace's payload",
-    );
+    for (const view of grace.heard) {
+      if (view.lastMove?.playerId === grace.id) continue;
+      assert.equal(slapdownOpen(view), false, "Grace was told about a window");
+      assert.ok(
+        !JSON.stringify(view).includes('"slapdownEligible":true'),
+        "an open window leaked into Grace's payload",
+      );
+    }
     for (const view of [...ada.heard, ...grace.heard]) {
       for (const opponent of view.opponents) {
         assert.ok(
@@ -2726,14 +2736,7 @@ describe("bot think time", () => {
     return { close: harness.close, clock, client, watcher, me: playerId, view };
   }
 
-  /**
-   * The seat `n` places behind the human in turn order. Counted from the human rather than
-   * from the front, the seating being drawn at the deal (docs/rules.md §2).
-   */
-  function behind(t: Table, n: number): string {
-    const order = t.view.turnOrder;
-    return order[(order.indexOf(t.me) + n) % order.length]!;
-  }
+  const behind = (t: Table, n: number) => seatBehind(t.view, t.me, n);
 
   /**
    * A full round trip through the server, so "nothing was published" is a fact rather
