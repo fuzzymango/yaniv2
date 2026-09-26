@@ -419,8 +419,10 @@ hands every accepted transition to its observers once stored, and `createSocketS
 one — a human's move, a bot's, the auto-deal and an exit all reach it, none of them calling it.
 It asks the pure `statsEarned(before, after)` (`stats.ts`) what each account is owed — a round
 scored, **the scorecard growing and never the phase leaving `playing`**, credits its caller a
-Yaniv call — every credit through `accountToCredit` (null for a guest and for a bot, two nulls
-kept apart by a name), merged to one delta per account, and starts `recordStats` on it,
+Yaniv call, plus, where the call was Assafed, a call Assafed to the caller and an Assaf to the
+one Assafer `docs/rules.md` §6 names — every credit through `accountToCredit` (null for a guest
+and for a bot, two nulls kept apart by a name), merged to one delta per account, and starts
+`recordStats` on it,
 **never awaited**: a failure is logged naming the account and dropped, so a slow or dead database
 costs a counter and never the table (0023, which still holds but for where the write hangs).
 Nothing counts twice because each fact becomes true in exactly one accepted transition — an

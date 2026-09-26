@@ -41,7 +41,12 @@ export function accountToCredit(state: GameState, playerId: string): AccountId |
  * **A round scored** is the scorecard growing by a row — the key the client's call
  * announcement uses — and never the phase leaving `playing`, which the last opponent
  * leaving can also do, with no round scored and the previous round's result still on the
- * state. It credits the caller one Yaniv call, whether the call stood or was Assafed.
+ * state. It credits the caller one Yaniv call, whether the call stood or was Assafed, and
+ * where it was Assafed, the caller a call Assafed too — one delta, merged — and the Assafer
+ * one Assaf. The Assafer is the one player the result names (`docs/rules.md` §6): anybody
+ * else who was also at or under the call lost the tie-break and gets nothing, so the stat
+ * agrees with the red cell and the banner the table showed. A call that stood is never
+ * stored, being a Yaniv call not Assafed.
  *
  * Nothing is counted twice because each fact becomes true in exactly one accepted
  * transition — a property of the engine, not of this function (docs/adr/0024).
@@ -64,6 +69,10 @@ export function statsEarned(before: GameState, after: GameState): Map<AccountId,
   const result = after.lastRoundResult;
   if (after.scorecard.length > before.scorecard.length && result) {
     credit(result.callerId, { yanivCalls: 1 });
+    if (result.assaferId !== null) {
+      credit(result.callerId, { callsAssafed: 1 });
+      credit(result.assaferId, { assafs: 1 });
+    }
   }
 
   return earned;

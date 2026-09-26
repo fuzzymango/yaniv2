@@ -4043,15 +4043,16 @@ describe("the scorecard on the wire", () => {
 });
 
 /**
- * The one stat, over the wire (docs/adr/0023): a signed-in player's accepted `callYaniv`
- * is counted on their account, and nothing about that write reaches the game.
+ * A scored round's stats, over the wire (docs/adr/0023, 0024): a signed-in player's call is
+ * counted on their account, an Assaf of a bot's call on the account of whoever caught it
+ * out, and nothing about either write reaches the game.
  *
  * Each test builds its own server around a store it can see into — or one that never
  * answers, or always fails — which is the whole reason `startServer` takes one. And each
  * plays a real table out to real calls: `accountToCredit` is unit-tested and the store is
  * contract-tested, and both would pass against a handler that wrote nothing at all.
  */
-describe("a Yaniv call counted on the caller's account", () => {
+describe("a scored round counted on its players' accounts", () => {
   const opened: Harness[] = [];
   after(async () => {
     for (const harness of opened) await harness.close();
@@ -4066,17 +4067,19 @@ describe("a Yaniv call counted on the caller's account", () => {
   }
 
   /**
-   * A player and three bots, dealt in, at a limit nobody reaches: several rounds are
-   * played here, and a table that emptied on the way would stop answering.
+   * A player and `bots` bots (three unless a test says), dealt in, at a limit nobody
+   * reaches: several rounds are played here, and a table that emptied on the way would stop
+   * answering.
    */
   async function sitDown(
     profiles: ProfileStore,
     signedIn = true,
     options: SocketServerOptions = {},
+    bots = 3,
   ): Promise<Player> {
     const harness = await startServer(
       7,
-      3,
+      bots,
       { thinkTimeMs: 0, ...options },
       LONG_MATCH,
       profiles,
@@ -4137,6 +4140,14 @@ describe("a Yaniv call counted on the caller's account", () => {
   }
 
   /**
+   * The scored rounds that owe `player`'s account a write: the ones they called, and the
+   * bots' calls they Assafed. A bot's call anybody else Assafed owes nobody anything.
+   */
+  function credited(player: Player, { mine, bots }: Calls): RoundResultView[] {
+    return [...mine, ...bots.filter((r) => r.assaferId === player.playerId)];
+  }
+
+  /**
    * The memory store with its stats write replaced, and every account that write was asked
    * for recorded in order — whatever the replacement then does with it. The replacement is
    * handed the store underneath, which is where the accounts are.
@@ -4180,19 +4191,36 @@ describe("a Yaniv call counted on the caller's account", () => {
     assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, mine.length);
   });
 
-  it("writes nothing for a bot's call", async () => {
+  /**
+   * The route #210's suite could not reach: a bot's move crediting a human. The call is the
+   * bot's, played on the server's own timer with no handler of the player's under it, and
+   * the Assaf lands on the account of whoever caught it out all the same.
+   */
+  it("counts an Assaf on the account of a player who catches a bot's call", async () => {
+    const profiles = createMemoryProfileStore();
+    const player = await sitDown(profiles, true, {}, 1);
+
+    await playUntil(player, ({ bots }) => bots.some((r) => r.assaferId === player.playerId));
+
+    assert.equal((await profiles.loadAccount(player.accountId!))!.assafs, 1);
+  });
+
+  it("writes nothing for a bot's call the player did not Assaf", async () => {
     const { profiles, asked } = storeWith((id, delta, memory) =>
       memory.recordStats(id, delta),
     );
     const player = await sitDown(profiles);
 
-    const { mine } = await playUntil(
+    const calls = await playUntil(
       player,
       ({ mine, bots }) => mine.length > 0 && bots.length > 0,
     );
 
-    assert.deepEqual(asked, mine.map(() => player.accountId));
-    assert.equal((await profiles.loadAccount(player.accountId!))!.yanivCalls, mine.length);
+    assert.deepEqual(asked, credited(player, calls).map(() => player.accountId));
+    assert.equal(
+      (await profiles.loadAccount(player.accountId!))!.yanivCalls,
+      calls.mine.length,
+    );
   });
 
   it("writes nothing for a guest's call", async () => {
@@ -4213,9 +4241,13 @@ describe("a Yaniv call counted on the caller's account", () => {
     const { profiles, asked } = storeWith(() => new Promise(() => {}));
     const player = await sitDown(profiles);
 
-    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+    const calls = await playUntil(player, ({ mine }) => mine.length === 2);
 
-    assert.deepEqual(asked, mine.map(() => player.accountId), "the store was asked, and hung");
+    assert.deepEqual(
+      asked,
+      credited(player, calls).map(() => player.accountId),
+      "the store was asked, and hung",
+    );
   });
 
   /**
@@ -4229,9 +4261,9 @@ describe("a Yaniv call counted on the caller's account", () => {
     const { profiles } = storeWith(() => Promise.reject(failure));
     const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
 
-    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+    const calls = await playUntil(player, ({ mine }) => mine.length === 2);
 
-    assert.equal(logged.length, mine.length);
+    assert.equal(logged.length, credited(player, calls).length);
     for (const entry of logged) {
       assert.ok(String(entry[0]).includes(player.accountId!), "the log names the account");
       assert.ok(entry.includes(failure), "and carries the failure");
@@ -4251,9 +4283,9 @@ describe("a Yaniv call counted on the caller's account", () => {
     });
     const player = await sitDown(profiles, true, { log: (...args) => logged.push(args) });
 
-    const { mine } = await playUntil(player, ({ mine }) => mine.length === 2);
+    const calls = await playUntil(player, ({ mine }) => mine.length === 2);
 
-    assert.equal(logged.length, mine.length);
+    assert.equal(logged.length, credited(player, calls).length);
     assert.ok(logged.every((entry) => entry.includes(failure)));
   });
 });

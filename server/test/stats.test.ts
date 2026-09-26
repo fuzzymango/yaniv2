@@ -75,12 +75,12 @@ describe("statsEarned", () => {
       ...overrides,
     });
 
-  it("credits a signed-in player's scored call with one Yaniv call", () => {
+  it("credits a call that stood with one Yaniv call and nothing else", () => {
     const before = table();
+    const after = unwrap(callYaniv(before, "ada"));
+    assert.equal(after.lastRoundResult!.assaferId, null, "the call stood");
 
-    const earned = statsEarned(before, unwrap(callYaniv(before, "ada")));
-
-    assert.deepEqual(earned, new Map([["acc-ada", { yanivCalls: 1 }]]));
+    assert.deepEqual(statsEarned(before, after), new Map([["acc-ada", { yanivCalls: 1 }]]));
   });
 
   it("credits a call that was Assafed with a Yaniv call all the same", () => {
@@ -93,16 +93,141 @@ describe("statsEarned", () => {
     assert.equal(statsEarned(before, after).get("acc-ada")?.yanivCalls, 1);
   });
 
+  /**
+   * Every hand is written out: `makeState` deals an unnamed hand no cards, worth 0, and a
+   * hand worth 0 Assafs any call — which would make a bystander the subject of the test.
+   */
   it("credits a bot's call to nobody", () => {
-    const before = table({ currentTurnPlayerId: "bob", hands: { bob: ["clubs-A"] } });
+    const before = table({
+      currentTurnPlayerId: "bob",
+      hands: { ada: ["hearts-K"], grace: ["spades-K"], bob: ["clubs-A"] },
+    });
 
     assert.deepEqual(statsEarned(before, unwrap(callYaniv(before, "bob"))), new Map());
   });
 
   it("credits a guest's call to nobody", () => {
-    const before = table({ currentTurnPlayerId: "grace", hands: { grace: ["spades-A"] } });
+    const before = table({
+      currentTurnPlayerId: "grace",
+      hands: { ada: ["hearts-K"], grace: ["spades-A"], bob: ["clubs-K"] },
+    });
 
     assert.deepEqual(statsEarned(before, unwrap(callYaniv(before, "grace"))), new Map());
+  });
+
+  /**
+   * Ada and Linus signed in, Grace a guest and Bob a bot, seated in that order; Ada's call
+   * at 3 unless a test deals otherwise. Every hand is named, for the reason above.
+   */
+  const assafTable = (hands: Record<string, string[]>, caller = "ada"): GameState =>
+    makeState({
+      players: [
+        { id: "ada", accountId: "acc-ada" },
+        { id: "linus", accountId: "acc-linus" },
+        { id: "grace", accountId: null },
+        { id: "bob", isBot: true },
+      ],
+      hands: {
+        ada: ["hearts-A", "hearts-2"],
+        linus: ["spades-K"],
+        grace: ["clubs-K"],
+        bob: ["diamonds-K"],
+        ...hands,
+      },
+      currentTurnPlayerId: caller,
+    });
+
+  /**
+   * The call `caller` makes from `before`, asserting the round names `assaferId` as its
+   * Assafer — so a fixture dealt wrong fails as a fixture, not as a stat.
+   */
+  const callAssafedBy = (before: GameState, caller: string, assaferId: string | null): GameState => {
+    const after = unwrap(callYaniv(before, caller));
+    assert.equal(after.lastRoundResult!.assaferId, assaferId, "the round's Assafer");
+    return after;
+  };
+
+  it("credits an Assafed call's caller with a call Assafed in the same delta, and the Assafer an Assaf", () => {
+    const before = assafTable({ linus: ["spades-A"] });
+
+    assert.deepEqual(
+      statsEarned(before, callAssafedBy(before, "ada", "linus")),
+      new Map([
+        ["acc-ada", { yanivCalls: 1, callsAssafed: 1 }],
+        ["acc-linus", { assafs: 1 }],
+      ]),
+    );
+  });
+
+  /**
+   * §6 names one Assafer, and the stat agrees with the red cell the table showed. Bob calls
+   * at 3 and both Ada and Linus tie him; Ada sits first after the caller, so the tie is hers.
+   */
+  it("credits no Assaf to a player who tied the Assafer and lost the tie-break", () => {
+    const before = assafTable(
+      { bob: ["diamonds-A", "diamonds-2"], ada: ["hearts-3"], linus: ["spades-A", "spades-2"] },
+      "bob",
+    );
+
+    assert.deepEqual(
+      statsEarned(before, callAssafedBy(before, "bob", "ada")),
+      new Map([["acc-ada", { assafs: 1 }]]),
+    );
+  });
+
+  /** Ada is at or under Bob's call, first after him even, but Linus is lower. */
+  it("credits no Assaf to a player at or under the call who was not the lowest", () => {
+    const before = assafTable(
+      { bob: ["diamonds-A", "diamonds-2"], ada: ["hearts-3"], linus: ["spades-A"] },
+      "bob",
+    );
+
+    assert.deepEqual(
+      statsEarned(before, callAssafedBy(before, "bob", "linus")),
+      new Map([["acc-linus", { assafs: 1 }]]),
+    );
+  });
+
+  it("credits a player who Assafs a bot's call with an Assaf, and the bot nothing", () => {
+    const before = assafTable({ bob: ["diamonds-A", "diamonds-2"], ada: ["hearts-A"] }, "bob");
+
+    assert.deepEqual(
+      statsEarned(before, callAssafedBy(before, "bob", "ada")),
+      new Map([["acc-ada", { assafs: 1 }]]),
+    );
+  });
+
+  it("credits a player whose call a bot Assafs with a call Assafed, and the bot nothing", () => {
+    const before = assafTable({ bob: ["diamonds-A"] });
+
+    assert.deepEqual(
+      statsEarned(before, callAssafedBy(before, "ada", "bob")),
+      new Map([["acc-ada", { yanivCalls: 1, callsAssafed: 1 }]]),
+    );
+  });
+
+  it("credits a guest who Assafs a call with nothing, and the caller all the same", () => {
+    const before = assafTable({ grace: ["clubs-A"] });
+
+    assert.deepEqual(
+      statsEarned(before, callAssafedBy(before, "ada", "grace")),
+      new Map([["acc-ada", { yanivCalls: 1, callsAssafed: 1 }]]),
+    );
+  });
+
+  it("credits a guest whose call is Assafed with nothing, and the Assafer all the same", () => {
+    const before = assafTable({ grace: ["clubs-A", "clubs-2"], ada: ["hearts-A"] }, "grace");
+
+    assert.deepEqual(
+      statsEarned(before, callAssafedBy(before, "grace", "ada")),
+      new Map([["acc-ada", { assafs: 1 }]]),
+    );
+  });
+
+  it("credits nobody where a bot Assafs a guest's call", () => {
+    const before = assafTable({ grace: ["clubs-A", "clubs-2"], bob: ["diamonds-A"] }, "grace");
+
+    assert.deepEqual(statsEarned(before, callAssafedBy(before, "grace", "bob")), new Map());
   });
 
   it("earns nothing for a plain turn", () => {

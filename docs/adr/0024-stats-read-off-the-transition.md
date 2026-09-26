@@ -34,7 +34,10 @@ real one, and "was this route given the wrapper?" is a question somebody has to 
 
 The Yaniv-call fact is **the scorecard growing by a row** across the transition, the key the
 client's call announcement already uses (ADR-0018). The caller is `lastRoundResult.callerId` and
-is credited one Yaniv call, whether the call stood or was Assafed.
+is credited one Yaniv call, whether the call stood or was Assafed. Where `assaferId` is set, the
+same fact credits the caller a call Assafed — merged into that one delta — and the Assafer an
+Assaf (#211): the one player `docs/rules.md` §6 names, so a player who tied and lost the
+tie-break is credited nothing, agreeing with the red cell the table showed.
 
 It is **not** the phase leaving `playing`. The last opponent leaving also does that, and at
 `roundEnd` a departure ends the match with the scored round's result still on the state, so reading
