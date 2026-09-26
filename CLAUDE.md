@@ -299,9 +299,9 @@ guard and one ternary over the seat and a `Claimant` (account or none, token or 
 account seat by its account, its token never consulted; a guest seat by its token. It is the
 one statement of the rule: `resumeSeat` asks it through `claimSeat`, and `joinRoom` presents
 the account with no token, so an account already seated there is handed that seat back and a
-guest never is. The socket layer only builds the claimant from the connection's account
-binding, never the payload. `accountId` is on both views and is the only account fact any
-view carries.
+guest never is. The socket layer only builds the claimant: the account from the connection's
+binding, never the payload, and the token from the payload. `accountId` is on both views and
+is the only account fact any view carries.
 
 ### Room lifecycle
 
