@@ -23,12 +23,12 @@
  *   load there is no button at all, and the menu is what it was before accounts existed.
  * - **Signed in**, the name field is gone — a room is entered under the account's name,
  *   which the session core sends in place of anything typed — and in its place is a
- *   greeting, "Welcome <name>", plain text rather than a second way into anything, with a
- *   way to change the name beside it. A person icon in the corner opens the **profile**
- *   (`ProfileDialog`, #228); Sign out is a small control beside it, here and on no other
- *   screen: it forgets the seat as well as the account (docs/adr/0020), and at a table
- *   that would be the seat being sat in. Change name and Sign out move into the profile
- *   next (#226), and stay here until they do, so no build leaves a player without either.
+ *   greeting, "Welcome <name>", plain text rather than a second way into anything. A
+ *   person icon in the corner opens the **profile** (`ProfileDialog`, #228), where the
+ *   name is changed and nowhere else (#229); Sign out is a small control beside it, here
+ *   and on no other screen: it forgets the seat as well as the account (docs/adr/0020),
+ *   and at a table that would be the seat being sat in. Sign out moves into the profile
+ *   next (#226), and stays here until it does, so no build leaves a player without it.
  *
  * The prompt belongs in the flow and the state in the chrome, which is why the two are
  * drawn in different places rather than one control that changes its label.
@@ -78,18 +78,13 @@ export function MainMenu({
   const [roomCode, setRoomCode] = useState("");
 
   /**
-   * The standing a rename was opened over, and the panel is open for as long as that is
-   * still the standing on the screen. The session core replaces it when a rename lands —
-   * even to the same name — and keeps it when one is refused (pinned in the session
-   * suite), so the panel closes on the answer that means "done" and stays up to show the
-   * one that means "not that", with no effect watching for either. Signing out or being
-   * signed out replaces it too, which closes a panel with no account left to rename.
-   *
-   * The refusal on screen is put down on the way in and on the way out, as "Not now" does
-   * for the confirm step: one left over from the menu is no answer about a name, and one
-   * the panel was showing is about a question nobody is asking once it has closed.
+   * Whether the profile is up — held here rather than in it, because while it is the menu
+   * shows no error (see `ProfileDialog.tsx`). Put down the moment there is no account to
+   * show, as a rename refused for a lapsed session leaves, so the next sign-in does not
+   * land with it already open: state adjusted in render, before anything is drawn from it.
    */
-  const [renamingFrom, setRenamingFrom] = useState<AccountStanding | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  if (profileOpen && account.status !== "signedIn") setProfileOpen(false);
 
   /**
    * Nothing to join until a code has been typed, so joining is inert until then rather
@@ -102,24 +97,11 @@ export function MainMenu({
   const dialog =
     account.status === "nameNeeded" ? (
       <NameDialog
-        confirming
         suggestedName={account.suggestedName}
         error={error}
         busy={busy}
         onSave={onCreateAccount}
         onDismiss={onCancelSignIn}
-      />
-    ) : account.status === "signedIn" && renamingFrom === account ? (
-      <NameDialog
-        confirming={false}
-        suggestedName={account.account.displayName}
-        error={error}
-        busy={busy}
-        onSave={onRenameAccount}
-        onDismiss={() => {
-          onClearError();
-          setRenamingFrom(null);
-        }}
       />
     ) : null;
 
@@ -135,7 +117,17 @@ export function MainMenu({
           >
             Sign out
           </button>
-          <ProfileDialog stats={stats} onOpen={onLoadStats} />
+          <ProfileDialog
+            standing={account}
+            stats={stats}
+            error={error}
+            busy={busy}
+            open={profileOpen}
+            onOpenChange={setProfileOpen}
+            onLoadStats={onLoadStats}
+            onRename={onRenameAccount}
+            onClearError={onClearError}
+          />
         </div>
       )}
 
@@ -163,18 +155,6 @@ export function MainMenu({
             <p className="menu__welcome">
               Welcome <strong className="menu__name">{account.account.displayName}</strong>
             </p>
-            <button
-              className="button"
-              type="button"
-              aria-haspopup="dialog"
-              onClick={() => {
-                onClearError();
-                setRenamingFrom(account);
-              }}
-              disabled={busy}
-            >
-              Change name
-            </button>
           </div>
         ) : (
           <>
@@ -230,8 +210,8 @@ export function MainMenu({
         </button>
       </form>
 
-      {/* The panel's while it is open: see `NameDialog.tsx`. */}
-      {error && dialog === null && (
+      {/* The panel's while one is open: see `NameDialog.tsx` and `ProfileDialog.tsx`. */}
+      {error && dialog === null && !profileOpen && (
         <p className="notice notice--error" role="alert">
           {error.message}
         </p>

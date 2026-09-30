@@ -305,9 +305,9 @@ export interface Session {
   loadStats: () => void;
   /**
    * Put the refusal on screen down, with nothing sent: the player has read it, and the
-   * question it answered is no longer being asked. The rename panel's way in and out —
-   * `cancelSignIn` already does this for the confirm step — so a refused name is not left
-   * at the foot of the menu after the panel that asked it has closed.
+   * question it answered is no longer being asked. The profile's way in and out, and its
+   * name editor's — `cancelSignIn` already does this for the confirm step — so a refused
+   * name is not left at the foot of the menu after the field that asked it has closed.
    */
   clearError: () => void;
   /**

@@ -1,6 +1,7 @@
 /**
  * A signed-in player's own account, held up over the main menu: a person icon in the
- * menu's corner, and the account's six stats behind it (#228, docs/adr/0026).
+ * menu's corner, and behind it the account's name — renamed in place, here and nowhere
+ * else (#229) — over its six stats (#228, docs/adr/0026).
  *
  * The first place the counters this repo has kept since #166 are seen, and the only one —
  * the profile is the main menu's and nowhere else's, so nothing about an account stands
@@ -15,13 +16,21 @@
  * session core's (`stats`) and not state here — it has to go the moment the account does,
  * which is a rule about the account standing, not about a panel.
  *
- * Whether the panel is open is this component's own, as `SettingsDialog`'s is: nothing on
- * the wire knows or cares that somebody is looking at it. It takes no `busy`, since
- * reading stats is not an action and locks nothing.
+ * Whether the panel is open is the main menu's rather than this component's, unlike
+ * `SettingsDialog`'s, for one reason: while it is open the menu shows no error, the panel
+ * showing a refused name under the field instead — one message in the one place the player
+ * is looking, as `NameDialog` does. The error is put down on the way in and on the way out,
+ * so anything on the screen while the panel is open is an answer about a name typed in it.
+ * Nothing on the wire knows or cares that somebody is looking at it.
+ *
+ * **Escape backs out one level.** `Modal` catches it on its wrapper, so the name editor
+ * stops the key there and goes back to showing the name; from there it reaches `Modal` and
+ * closes the profile.
  */
 
 import { useState } from "react";
-import type { Stats } from "@yaniv/shared";
+import type { GameError, Stats } from "@yaniv/shared";
+import type { AccountStanding } from "../session.ts";
 import { Modal } from "../shared/Modal.tsx";
 
 const PROFILE_TITLE = "Profile";
@@ -63,6 +72,192 @@ function PersonIcon() {
   );
 }
 
+/** The pencil: a name that can be changed. */
+function PencilIcon() {
+  return (
+    <svg
+      className="topbar__icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M4 20h4L19 9l-4-4L4 16z" />
+      <path d="M13 7l4 4" />
+    </svg>
+  );
+}
+
+/** The tick: keep what was typed. */
+function CheckIcon() {
+  return (
+    <svg
+      className="topbar__icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M5 12.5l4.5 4.5L19 7" />
+    </svg>
+  );
+}
+
+/** The cross: put back what was there. */
+function CrossIcon() {
+  return (
+    <svg
+      className="topbar__icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
+  );
+}
+
+type SignedIn = Extract<AccountStanding, { status: "signedIn" }>;
+
+interface EditNameProps {
+  standing: SignedIn;
+  error: GameError | null;
+  busy: boolean;
+  onRename: (displayName: string) => void;
+  onClearError: () => void;
+}
+
+/**
+ * The account's name and a pencil beside it, and the pencil swapping the name for a field
+ * with a tick and a cross (#229). The stats below stay where they are either way: renaming
+ * does not take the player anywhere.
+ *
+ * **Editing lasts for as long as the standing it was opened over is still the one on the
+ * screen**, the rule the main menu's rename panel used before this replaced it: the session
+ * replaces the standing when a rename lands — even to the same name — and keeps it when one
+ * is refused (pinned in the session suite), so the field closes on the answer that means
+ * "done" and stays open, the reason under it, on the one that means "not that". No effect
+ * watches for either.
+ *
+ * The draft is this helper's own: a name half-typed is no use outside the field holding it.
+ */
+function EditName({ standing, error, busy, onRename, onClearError }: EditNameProps) {
+  const [editingFrom, setEditingFrom] = useState<SignedIn | null>(null);
+  const [draft, setDraft] = useState("");
+  /**
+   * Whether the field has been open since the profile was, so the pencil takes the focus
+   * back when it closes: an input that unmounts with the focus in it leaves it on the page
+   * behind the panel, where `Modal` would never hear the second Escape. `autoFocus` acts on
+   * mount alone — which is why the pencil and the field are separate returns, the pencil
+   * remounting when the field closes — so the first open still gives the focus to Close.
+   */
+  const [returnFocus, setReturnFocus] = useState(false);
+  const editing = editingFrom === standing;
+  const { displayName } = standing.account;
+
+  const cancel = () => {
+    onClearError();
+    setEditingFrom(null);
+  };
+
+  if (!editing) {
+    return (
+      <div className="profile__name">
+        <strong className="menu__name">{displayName}</strong>
+        <button
+          className="topbar__button"
+          type="button"
+          aria-label="Change name"
+          title="Change name"
+          autoFocus={returnFocus}
+          onClick={() => {
+            onClearError();
+            setDraft(displayName);
+            setEditingFrom(standing);
+            setReturnFocus(true);
+          }}
+        >
+          <PencilIcon />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      className="profile__edit"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onRename(draft);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        // One level at a time: the edit, not the profile around it.
+        event.stopPropagation();
+        cancel();
+      }}
+    >
+      <div className="profile__name">
+        <input
+          className="field__input profile__input"
+          aria-label="Your name"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          autoComplete="nickname"
+          enterKeyHint="done"
+          autoFocus
+          // Selected as well as focused, so retyping a name does not start by clearing it.
+          onFocus={(event) => event.target.select()}
+          // Read-only rather than disabled while the rename is out: a disabled control drops
+          // the focus, and with it Escape and the chance to retype after a refusal. The two
+          // buttons are left enabled for the same reason — the session ignores a rename sent
+          // while one is out, and cancelling one leaves nothing on screen for its answer.
+          readOnly={busy}
+        />
+        <button
+          className="topbar__button"
+          type="submit"
+          aria-label="Save name"
+          title="Save name"
+          // The field keeps the focus through a click: Safari gives none to a clicked button,
+          // so it would otherwise fall to the page, and a refusal — which leaves the field up —
+          // would leave Escape with nowhere to land.
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <CheckIcon />
+        </button>
+        <button
+          className="topbar__button"
+          type="button"
+          aria-label="Cancel"
+          title="Cancel"
+          onClick={cancel}
+        >
+          <CrossIcon />
+        </button>
+      </div>
+
+      {error && (
+        <p className="notice notice--error" role="alert">
+          {error.message}
+        </p>
+      )}
+    </form>
+  );
+}
+
 /**
  * Every row laid out from the first frame, with a dash where a number has not arrived:
  * the panel neither jumps when the answer lands nor spins while it waits, and a read that
@@ -82,14 +277,37 @@ function StatsTable({ stats }: { stats: Stats | null }) {
 }
 
 interface ProfileDialogProps {
+  /** Whose profile it is — the standing, not only the account, so a rename can see it land. */
+  standing: SignedIn;
   /** The account's stats as last read, or null while they are being read or were refused. */
   stats: Stats | null;
+  /** The session's, shown under the name while it is being edited. */
+  error: GameError | null;
+  busy: boolean;
+  /** Whether the panel is up — the main menu's to hold, for the reason above. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   /** Read the stats afresh — called every time the profile opens. */
-  onOpen: () => void;
+  onLoadStats: () => void;
+  onRename: (displayName: string) => void;
+  onClearError: () => void;
 }
 
-export function ProfileDialog({ stats, onOpen }: ProfileDialogProps) {
-  const [open, setOpen] = useState(false);
+export function ProfileDialog({
+  standing,
+  stats,
+  error,
+  busy,
+  open,
+  onOpenChange,
+  onLoadStats,
+  onRename,
+  onClearError,
+}: ProfileDialogProps) {
+  const close = () => {
+    onClearError();
+    onOpenChange(false);
+  };
 
   return (
     <>
@@ -101,8 +319,9 @@ export function ProfileDialog({ stats, onOpen }: ProfileDialogProps) {
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => {
-          onOpen();
-          setOpen(true);
+          onClearError();
+          onLoadStats();
+          onOpenChange(true);
         }}
       >
         <PersonIcon />
@@ -110,10 +329,18 @@ export function ProfileDialog({ stats, onOpen }: ProfileDialogProps) {
 
       {open && (
         // The backdrop, the Close below and Escape all land here — see `Modal.tsx`.
-        <Modal title={PROFILE_TITLE} onDismiss={() => setOpen(false)}>
+        <Modal title={PROFILE_TITLE} onDismiss={close}>
+          <EditName
+            standing={standing}
+            error={error}
+            busy={busy}
+            onRename={onRename}
+            onClearError={onClearError}
+          />
+
           <StatsTable stats={stats} />
 
-          <button className="button" type="button" autoFocus onClick={() => setOpen(false)}>
+          <button className="button" type="button" autoFocus onClick={close}>
             Close
           </button>
         </Modal>

@@ -651,6 +651,36 @@ body {
 }
 
 /*
+ * The profile's name and the pencil beside it, and the field that swaps in for both: one
+ * row the same height either way, so the stats below do not move when editing starts.
+ */
+.profile__name {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: var(--tap);
+  /* A twenty-character name with no spaces in it still has to fit a phone. */
+  overflow-wrap: anywhere;
+}
+
+.profile__name > .menu__name {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* The field takes the row, the tick and the cross only what their icons need. */
+.profile__input {
+  flex: 1;
+  min-width: 0;
+}
+
+/*
  * The corner of every in-match screen, and the settings once they are locked are the whole
  * of it: nothing else about the room is anywhere on the screen, and nothing else belongs
  * up here — the close-room icon that used to sit beside it went with docs/adr/0012.

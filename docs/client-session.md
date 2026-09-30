@@ -157,9 +157,10 @@ lapsed session does, below.
 
 **A refusal is put down when the panel that asked for it closes.** `cancelSignIn` clears `error`
 on its way back to a guest, and `clearError` — nothing sent, nothing else touched, the account
-standing included — is the rename panel's way in and out: a refusal left over from the menu is
-no answer about a name, and one the panel was showing is about a question nobody is asking once
-it has closed. Neither panel is the session's; the menu decides when they open.
+standing included — is the profile's way in and out, and its name editor's (#229): a refusal
+left over from the menu is no answer about a name, and one the editor was showing is about a
+question nobody is asking once it has closed. None of them is the session's: the menu decides
+when the panels open, the profile when its editor does.
 
 **Stats are read fresh, and belong to one account** (docs/adr/0026). `loadStats()` blanks
 `stats`, emits, and fills it from the ack — only the latest read's, and only while the account it

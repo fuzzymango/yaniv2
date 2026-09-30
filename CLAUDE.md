@@ -571,12 +571,18 @@ no use outside the screen holding it.
 ### The main menu signs a player in, and asks nobody else
 
 The one screen where identity is asked about (#174): signed out, Google's button tops the form
-and a guest is told nothing else; signed in, "Welcome <name>" and Change name replace the name
-field, and the corner holds the **profile**'s person icon (`ProfileDialog`, #228 — the six stats
-over the menu, read fresh on every open, dashes until they land) with Sign out beside it, **on
-this screen only** — it forgets the seat too. The name panel is one `NameDialog` for a first sign-in (`Modal`'s `dismissible={false}`, with a
-"Not now") and a rename; while it is open it shows `error` and the menu none. Google's script
-is fetched when the signed-out form mounts and a failure draws **nothing** (`google.ts`,
+and a guest is told nothing else; signed in, "Welcome <name>" replaces the name field, and the
+corner holds the **profile**'s person icon (`ProfileDialog`, #228 — the six stats over the menu,
+read fresh on every open, dashes until they land) with Sign out beside it, **on this screen
+only** — it forgets the seat too. **The profile is the one place an account is renamed** (#229):
+a pencil swaps the name for a field, ✓/Enter saves, ✕ cancels, and the field stays open while
+the standing it was opened over is still the one on screen — the session replaces it when a
+rename lands and keeps it on a refusal, shown under the field. Escape backs out one level, the
+editor stopping the key before `Modal` sees it. `NameDialog` is confirm-only, the first
+sign-in's non-dismissible step with a "Not now". While either is open the menu shows no
+`error` — the panel does, the profile under its name field — which is why the menu, not the
+profile, holds whether the profile is open. Google's script is fetched when the signed-out form
+mounts and a failure draws **nothing** (`google.ts`,
 docs/adr/0020) — sign-in is an option, never a wall.
 
 ### The client's session core
