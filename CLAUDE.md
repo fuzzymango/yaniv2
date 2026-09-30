@@ -53,9 +53,9 @@ holds across the trees, and is not discoverable by reading one file:
   "(bot)" label is the server's own and never asked about. `account.ts` is the
   account on the wire and **types only** (`AccountView`, deliberately no stat, the `signIn`
   ack, and `Stats`, the six counters the store keeps and `loadStats` answers — one list for
-  both, `docs/adr/0026`) — verifying, minting and storing are the server's (`docs/adr/0021`). Every function there is
-  pure over values the wire already carries, so this costs `shared` none of its
-  dependency-freedom.
+  both, `docs/adr/0026`) — verifying, minting and storing are the server's
+  (`docs/adr/0021`). Every function there is pure over values the wire already carries, so
+  this costs `shared` none of its dependency-freedom.
 - **`profiles.ts` is a seam, and its in-memory store is shipped code** (`docs/adr/0019`): the
   one shape anything above it sees a remembered player through, so no file but the SQL
   implementation behind it learns what a database is. The memory store is not a test double —
@@ -275,11 +275,12 @@ object rather than two optional fields, so a half-bound connection is unrepresen
 made it three.
 
 **`socket.data.account = { accountId, displayName, sessionToken }` sits beside it,
-independent**: an account binds at the main menu before any room and survives leaving one. Six
+independent**: an account binds at the main menu before any room and survives leaving one. Five
 acked events drive it — `signIn`, `createAccount`, `resumeSession`, `signOut`, `renameAccount`
-(docs/adr/0021) and `loadStats`, the account's stats read fresh, never carried on `AccountView`
-(0026) — no HTTP surface and no `handshake.auth`. Each handler is a flow from `auth/flows.ts` and a binding,
-holding no auth logic; all six are accepted seated or not, and **binding an account over
+(docs/adr/0021) — and a sixth, `loadStats`, reads the account's stats through it, fresh, never
+carried on `AccountView` (0026); no HTTP surface and no `handshake.auth`. Each handler is a
+flow from `auth/flows.ts` and a binding, holding no auth logic; all six are accepted seated or
+not, and **binding an account over
 another replaces it** without error, an account binding orphaning nobody. **Newer wins at
 bind**: binding an account puts down any other connection bound to it. The session token
 reaches the wire in exactly one payload, its `signIn`/`createAccount` ack — the marked-token
@@ -573,9 +574,7 @@ The one screen where identity is asked about (#174): signed out, Google's button
 and a guest is told nothing else; signed in, "Welcome <name>" and Change name replace the name
 field, and the corner holds the **profile**'s person icon (`ProfileDialog`, #228 — the six stats
 over the menu, read fresh on every open, dashes until they land) with Sign out beside it, **on
-this screen only** — it forgets the seat too. Change name and Sign out move into the profile
-next (#226). The
-name panel is one `NameDialog` for a first sign-in (`Modal`'s `dismissible={false}`, with a
+this screen only** — it forgets the seat too. The name panel is one `NameDialog` for a first sign-in (`Modal`'s `dismissible={false}`, with a
 "Not now") and a rename; while it is open it shows `error` and the menu none. Google's script
 is fetched when the signed-out form mounts and a failure draws **nothing** (`google.ts`,
 docs/adr/0020) — sign-in is an option, never a wall.
@@ -594,15 +593,15 @@ it, which `docs/code-map.md` names.
 Snapshots are **replaced wholesale, never mutated**, `useSyncExternalStore` comparing by
 identity. Ten fields, each answering a different question: `view` (null *is* the main menu),
 `account` (tagged: `guest` / `nameNeeded` / `signedIn`), `stats` (read by `loadStats`, dropped
-whenever the signed-in account changes, so one account never reads another's), `error`, `notice`, `connected`,
-`resuming`, `selection` (surviving the views that arrive underneath it), and the two
+whenever the signed-in account changes, so one account never reads another's), `error`,
+`notice`, `connected`, `resuming`, `selection` (surviving the views that arrive underneath
+it), and the two
 **one-shots**, `flight` and `announcement`. **No credential is on it**: the Google ID token a
 first sign-in resends is held privately, and the session token sits in a second injected store
 beside the seat's (`tokens.ts`). A cold boot resumes the **account, then the seat**, `resuming`
 up across both. **`busy` locks on emit and settles two ways** — on the ack for entering,
 leaving, the five account events that act (`loadStats` is a read and locks nothing) and
-anything producing a new position, on a strictly newer
-position for a move — so a control is never released over a position still showing the
+anything producing a new position, on a strictly newer position for a move — so a control is never released over a position still showing the
 mover's own turn. **The client never enforces a rule the server owns**: what is
 legal about the cards is all it applies ahead of the server (ADR-0002), and everything else it
 offers is sent and refused.

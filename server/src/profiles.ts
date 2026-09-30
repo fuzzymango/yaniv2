@@ -36,8 +36,6 @@
  * (docs/adr/0019); the seam need not carry one until something calls it.
  */
 
-// The six counters are `shared`'s, so the store counts exactly the list the wire answers
-// (docs/adr/0026).
 import type { Stats } from "@yaniv/shared";
 import { randomUUID } from "node:crypto";
 

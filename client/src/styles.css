@@ -138,8 +138,7 @@ body {
 /*
  * The profile's icon and Sign out, in the corner of the menu and on no other screen (#174
  * §2, #228). Pinned rather than placed in the column, so the menu below stays centred
- * exactly as a guest's is. The icon is the corner's own; Sign out sits beside it until it
- * moves into the profile (#226).
+ * exactly as a guest's is.
  */
 .menu__corner {
   position: absolute;

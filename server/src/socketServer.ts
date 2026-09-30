@@ -270,6 +270,7 @@ export function createSocketServer(
     const alreadySeated = () =>
       err("ALREADY_IN_ROOM", "This connection is already in a room");
     const notSeated = () => err("PLAYER_NOT_FOUND", "This connection is not in a room");
+    const notSignedIn = () => err("INVALID_SESSION", "This connection is not signed in");
 
     /*
      * The account, from the main menu (docs/adr/0021). Each handler is a flow and a
@@ -351,7 +352,7 @@ export function createSocketServer(
     socket.on("renameAccount", async (displayName, ack) => {
       const account = socket.data.account;
       if (!account) {
-        ack(err("INVALID_SESSION", "This connection is not signed in"));
+        ack(notSignedIn());
         return;
       }
       const result = await renameAccount(auth, account.accountId, displayName);
@@ -371,7 +372,7 @@ export function createSocketServer(
     socket.on("loadStats", async (ack) => {
       const account = socket.data.account;
       if (!account) {
-        ack(err("INVALID_SESSION", "This connection is not signed in"));
+        ack(notSignedIn());
         return;
       }
       ack(await loadStats(auth, account.accountId));
