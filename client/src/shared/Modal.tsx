@@ -35,7 +35,8 @@ interface ModalProps {
    * Whether that name is also drawn at the top of the panel. Default yes: a question asked
    * behind one of these usually needs its heading. The scorecard is the exception — it is a
    * sheet of paper whose names and numbers are the whole document, and a caption over it
-   * would be the panel talking about itself.
+   * would be the panel talking about itself. The profile turns it off too, for another
+   * reason: it draws the same heading itself, so its sign-out icon can share the row.
    */
   showTitle?: boolean;
   /**

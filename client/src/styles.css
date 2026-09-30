@@ -144,9 +144,6 @@ body {
   position: absolute;
   top: max(0.5rem, env(safe-area-inset-top));
   right: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
 }
 
 .field {
@@ -633,6 +630,13 @@ body {
   align-items: center;
   justify-content: space-between;
   min-height: var(--tap);
+}
+
+/* The question that stands in for the profile's contents, spaced as the panel's own are. */
+.profile__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 /* "Sign out of <name>?" — a twenty-character name with no spaces still has to fit a phone. */

@@ -34,7 +34,10 @@
  * **The panel does one thing at a time** — showing, editing the name, or confirming the
  * sign-out. The confirmation is drawn *instead of* the editor, so tapping sign-out mid-rename
  * unmounts the field and its draft with it, and cancelling comes back to the name, not to
- * the field. Whether it is confirming is this component's, reset every time it opens.
+ * the field. Whether it is confirming is this component's, reset every time it opens. A
+ * rename already sent is not a draft and is not called back: tapping sign-out while one is
+ * out leaves Sign out disabled until it is answered, and a refusal of it is cleared unseen
+ * on the way back — a race of one tap against one round trip, accepted.
  *
  * **Escape backs out one level.** `Modal` catches it on its wrapper, so the name editor and
  * the confirmation each stop the key there and go back to showing the profile; from there
@@ -326,7 +329,7 @@ interface ConfirmSignOutProps {
 function ConfirmSignOut({ displayName, busy, onSignOut, onCancel }: ConfirmSignOutProps) {
   return (
     <div
-      className="modal__form"
+      className="profile__confirm"
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         // One level at a time: the question, not the profile around it.
