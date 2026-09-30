@@ -399,12 +399,15 @@ export interface Session {
  * knows will be refused, not the client deciding a rule of its own.
  *
  * The sentence is this screen's own, and asks for a name rather than reporting on the
- * one that was typed: both ways of failing the rule are answered here, and the commoner
- * of them by far is a field nobody has typed into yet.
+ * one that was typed: every way of failing the rule is answered here, and the commoner
+ * of them by far is a field nobody has typed into yet. It says what a name may be made
+ * of, because a refused character is not something a player finds by counting.
  */
 const UNUSABLE_NAME: GameError = {
   code: "INVALID_NAME",
-  message: `Enter a name of 1-${MAX_DISPLAY_NAME_LENGTH} characters to create or join a room`,
+  message:
+    `Enter a name of 1-${MAX_DISPLAY_NAME_LENGTH} letters, digits and single spaces ` +
+    "to create or join a room",
 };
 
 /**
@@ -426,7 +429,7 @@ const UNAVAILABLE = "That game is no longer available.";
  */
 const UNUSABLE_ACCOUNT_NAME: GameError = {
   code: "INVALID_NAME",
-  message: `Enter a name of 1-${MAX_DISPLAY_NAME_LENGTH} characters`,
+  message: `Enter a name of 1-${MAX_DISPLAY_NAME_LENGTH} letters, digits and single spaces`,
 };
 
 /**

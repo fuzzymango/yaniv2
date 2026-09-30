@@ -12,7 +12,7 @@
  * Prefilled — with Google's name the first time, the account's own after — and the player's
  * to change before anything is saved: a real name is not put in front of strangers at a card
  * table without their say-so. Names are never unique (see "Display name" in CONTEXT.md), so
- * there is no "already taken" to be told; the only refusal is the shared 1–20 rule.
+ * there is no "already taken" to be told; the only refusal is the shared display-name rule.
  *
  * **The panel shows the session's `error` while it is open**, and the menu behind it shows
  * none: a refused name is about what was typed here, and one message belongs in the one

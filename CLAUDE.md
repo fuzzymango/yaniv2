@@ -48,7 +48,9 @@ holds across the trees, and is not discoverable by reading one file:
   between them. The rulebook lives there for the same reason — a client must offer exactly the
   moves the server will accept (`docs/adr/0002`) — as does `standings`, a finished match not
   being allowed to end two ways depending on who is looking, and `displayName.ts`, the one
-  trimmed-1–20 rule every name a player can be known by goes through. `account.ts` is the
+  rule every name a player chooses goes through — trimmed, then 1–20 letters and digits of any
+  script with single spaces between words, refused and never tidied (#227); a bot's
+  "(bot)" label is the server's own and never asked about. `account.ts` is the
   account on the wire and **types only** (`AccountView`, deliberately no stat, and the `signIn`
   ack) — verifying, minting and storing are the server's (`docs/adr/0021`). Every function there is
   pure over values the wire already carries, so this costs `shared` none of its

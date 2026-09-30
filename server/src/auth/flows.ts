@@ -54,8 +54,9 @@ export interface Auth {
  * Google's `name` goes into the suggestion and no further — it is the only thing read off
  * the token besides the `sub`, and nothing below stores it. It goes through the same
  * display-name rule an account's name does, and a name that fails it (missing, blank,
- * longer than the limit) suggests **nothing** rather than some fixed default: a prefill
- * the player never chose is one they would have to notice and delete.
+ * longer than the limit, or with a character the rule refuses) suggests **nothing** —
+ * neither some fixed default nor Google's name stripped into a legal one: a prefill the
+ * player never chose is one they would have to notice and delete.
  */
 export async function signIn(auth: Auth, idToken: unknown): Promise<Result<SignInResult>> {
   const identity = await verify(auth, idToken);
@@ -200,5 +201,8 @@ function invalidCredential<T>(): Result<T> {
 }
 
 function invalidName<T>(): Result<T> {
-  return err("INVALID_NAME", `Name must be 1-${MAX_DISPLAY_NAME_LENGTH} characters`);
+  return err(
+    "INVALID_NAME",
+    `Name must be 1-${MAX_DISPLAY_NAME_LENGTH} letters, digits and single spaces`,
+  );
 }

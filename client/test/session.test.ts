@@ -642,15 +642,18 @@ describe("the session core", () => {
     try {
       const session = await server.openSession();
 
-      // Both ways a name can fail the shared rule, refused by the same check (ADR-0002):
+      // Every way a name can fail the shared rule, refused by the same check (ADR-0002):
       // a name the server would turn away costs no round trip to be turned away here.
-      for (const unusable of ["   ", "x".repeat(MAX_DISPLAY_NAME_LENGTH + 1)]) {
+      for (const unusable of ["   ", "x".repeat(MAX_DISPLAY_NAME_LENGTH + 1), "Ada$"]) {
         session.createRoom(unusable);
 
         // Asserted without awaiting anything, which is the proof that nothing was sent:
         // an answer that had come from the server could not be on the snapshot yet.
         const refused = session.getSnapshot();
-        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${unusable.length}`);
+        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${JSON.stringify(unusable)}`);
+        // Saying what a name may be, since a symbol is not something a player can see
+        // they got wrong by counting.
+        assert.match(refused.error!.message, /letters, digits and single spaces/);
         assert.equal(refused.busy, false, "nothing is in flight to wait for");
         assert.equal(refused.view, null);
       }
@@ -687,17 +690,21 @@ describe("the session core", () => {
     }
   });
 
-  it("refuses to join under an empty name too", async () => {
+  it("refuses to join under an unusable name too, without asking the server", async () => {
     const server = await startServer(26);
     try {
       const [, roomCode] = await hostARoom(server, "Ada");
 
       const guest = await server.openSession();
-      guest.joinRoom(roomCode, "");
+      for (const unusable of ["", "Grace$"]) {
+        guest.joinRoom(roomCode, unusable);
 
-      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "INVALID_NAME");
-      assert.equal(refused.view, null);
+        // Read straight off, as for a create: nothing was sent for an answer to come from.
+        const refused = guest.getSnapshot();
+        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${JSON.stringify(unusable)}`);
+        assert.equal(refused.busy, false, "nothing is in flight to wait for");
+        assert.equal(refused.view, null);
+      }
     } finally {
       await server.close();
     }
@@ -2949,6 +2956,16 @@ describe("an account", () => {
       assert.equal(tooLong.busy, false);
       assert.equal(
         tooLong.account.status === "signedIn" && tooLong.account.account.displayName,
+        "Ada",
+      );
+
+      session.renameAccount("Ada$");
+      const symbol = session.getSnapshot();
+      assert.equal(symbol.error?.code, "INVALID_NAME");
+      assert.match(symbol.error!.message, /letters, digits and single spaces/);
+      assert.equal(symbol.busy, false);
+      assert.equal(
+        symbol.account.status === "signedIn" && symbol.account.account.displayName,
         "Ada",
       );
     } finally {

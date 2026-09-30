@@ -24,7 +24,8 @@ identity. Nine fields, and each answers a different question:
 - **`view`** — the position, or `null`. Null *is* the main menu: the one screen not a function of
   `view.phase`, there being nothing sent before a room exists — `resuming` qualifies it, below.
 - **`account`** — where the connection stands on identity, **tagged**: `guest`, `nameNeeded`
-  (Google vouched, a name to confirm, prefilled with `suggestedName`) or `signedIn` with its
+  (Google vouched, a name to confirm, prefilled with `suggestedName` — blank where Google's
+  name breaks the display-name rule, never stripped into one that passes) or `signedIn` with its
   `AccountView`. Tagged on `SelfView`'s precedent, so "signed in with no name" is unrepresentable.
   Independent of `view`, as the server's two bindings are. See "Accounts" below.
 - **`error`** — a `GameError`: something the player asked for and was refused, or one the server
@@ -96,7 +97,9 @@ itself. The CLI needs those nudges only because its frames scroll apart.
 alone is a courtesy, so a guest is not hunting for a button that was never theirs; the rule is
 `NOT_HOST` and the server says it. The deal is the same — drawn for a viewer still in the match,
 enforced by `NOT_IN_MATCH`. Refusing an unusable name — for a room, or for an account — is the
-one exception, the rule being `shared`'s (ADR-0002). What the client declines to *send* for its
+one exception, the rule being `shared`'s (ADR-0002), refused before anything is sent and in
+a sentence that says what a name may be — 1–20 letters, digits and single spaces — since a
+refused character is not something a player finds by counting. What the client declines to *send* for its
 own sake is another thing: sign-out off the menu or over a dead socket, and the account events
 from a standing that has nothing to send (no name to confirm, no account to rename) — see
 "Accounts" below.

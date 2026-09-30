@@ -323,6 +323,17 @@ describe("createRoom", () => {
       botCount: MAX_PLAYERS - 1,
     });
   });
+
+  /*
+   * Refused rather than tidied (#227), and refused before anything is bound: the same
+   * connection can go on to create a room under a name the rule allows.
+   */
+  it("refuses a name the display-name rule does not allow", async () => {
+    const client = await server.connect();
+
+    assert.equal(expectError(await ask(client, "createRoom", "Ada$")).code, "INVALID_NAME");
+    expectOk(await ask(client, "createRoom", "Ada"));
+  });
 });
 
 describe("joinRoom", () => {
@@ -364,6 +375,15 @@ describe("joinRoom", () => {
     const client = await server.connect();
 
     const result = await ask(client, "joinRoom", roomCode, "   ");
+
+    assert.equal(expectError(result).code, "INVALID_NAME");
+  });
+
+  it("rejects a name with a symbol in it", async () => {
+    const roomCode = await createRoom();
+    const client = await server.connect();
+
+    const result = await ask(client, "joinRoom", roomCode, "Grace$");
 
     assert.equal(expectError(result).code, "INVALID_NAME");
   });
@@ -581,7 +601,15 @@ describe("signing in", () => {
       "INVALID_NAME",
     );
     assert.equal(
+      expectError(await ask(client, "createAccount", "id-token-unnamed", "Ada$")).code,
+      "INVALID_NAME",
+    );
+    assert.equal(
       expectError(await ask(client, "renameAccount", "x".repeat(21))).code,
+      "INVALID_NAME",
+    );
+    assert.equal(
+      expectError(await ask(client, "renameAccount", "Ada$")).code,
       "INVALID_NAME",
     );
     assert.deepEqual(expectOk(await resumeFresh(created.sessionToken)), {
