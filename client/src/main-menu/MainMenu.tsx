@@ -22,23 +22,28 @@
  *   Playing without an account is not the consolation path. Where Google's script cannot
  *   load there is no button at all, and the menu is what it was before accounts existed.
  * - **Signed in**, the name field is gone — a room is entered under the account's name,
- *   which the session core sends in place of anything typed — and in its place is who
- *   they are playing as, with a way to change it. Sign out is a small control in the
- *   corner, here and on no other screen: it forgets the seat as well as the account
- *   (docs/adr/0020), and at a table that would be the seat being sat in.
+ *   which the session core sends in place of anything typed — and in its place is a
+ *   greeting, "Welcome <name>", plain text rather than a second way into anything, with a
+ *   way to change the name beside it. A person icon in the corner opens the **profile**
+ *   (`ProfileDialog`, #228); Sign out is a small control beside it, here and on no other
+ *   screen: it forgets the seat as well as the account (docs/adr/0020), and at a table
+ *   that would be the seat being sat in. Change name and Sign out move into the profile
+ *   next (#226), and stay here until they do, so no build leaves a player without either.
  *
  * The prompt belongs in the flow and the state in the chrome, which is why the two are
  * drawn in different places rather than one control that changes its label.
  */
 
 import { useState } from "react";
-import type { GameError } from "@yaniv/shared";
+import type { GameError, Stats } from "@yaniv/shared";
 import type { AccountStanding } from "../session.ts";
 import { GoogleButton } from "./GoogleButton.tsx";
 import { NameDialog } from "./NameDialog.tsx";
+import { ProfileDialog } from "./ProfileDialog.tsx";
 
 interface MainMenuProps {
   account: AccountStanding;
+  stats: Stats | null;
   error: GameError | null;
   notice: string | null;
   busy: boolean;
@@ -50,10 +55,12 @@ interface MainMenuProps {
   onRenameAccount: (displayName: string) => void;
   onClearError: () => void;
   onSignOut: () => void;
+  onLoadStats: () => void;
 }
 
 export function MainMenu({
   account,
+  stats,
   error,
   notice,
   busy,
@@ -65,6 +72,7 @@ export function MainMenu({
   onRenameAccount,
   onClearError,
   onSignOut,
+  onLoadStats,
 }: MainMenuProps) {
   const [name, setName] = useState("");
   const [roomCode, setRoomCode] = useState("");
@@ -118,14 +126,17 @@ export function MainMenu({
   return (
     <main className="screen menu">
       {account.status === "signedIn" && (
-        <button
-          className="menu__sign-out"
-          type="button"
-          onClick={onSignOut}
-          disabled={busy}
-        >
-          Sign out
-        </button>
+        <div className="menu__corner">
+          <button
+            className="menu__sign-out"
+            type="button"
+            onClick={onSignOut}
+            disabled={busy}
+          >
+            Sign out
+          </button>
+          <ProfileDialog stats={stats} onOpen={onLoadStats} />
+        </div>
       )}
 
       <h1 className="menu__title">Yaniv</h1>
@@ -149,8 +160,8 @@ export function MainMenu({
       >
         {account.status === "signedIn" ? (
           <div className="menu__identity">
-            <p className="menu__playing-as">
-              Playing as <strong className="menu__name">{account.account.displayName}</strong>
+            <p className="menu__welcome">
+              Welcome <strong className="menu__name">{account.account.displayName}</strong>
             </p>
             <button
               className="button"

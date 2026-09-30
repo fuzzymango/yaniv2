@@ -69,7 +69,7 @@ body {
 /* --- main menu --- */
 
 .menu {
-  /* The corner Sign out is pinned against — see `.menu__sign-out`. */
+  /* The corner the profile and Sign out are pinned against — see `.menu__corner`. */
   position: relative;
   justify-content: center;
 }
@@ -123,7 +123,7 @@ body {
   min-height: var(--tap);
 }
 
-.menu__playing-as {
+.menu__welcome {
   margin: 0;
   color: var(--ink-dim);
   /* A twenty-character name with no spaces in it still has to fit a phone. */
@@ -136,15 +136,26 @@ body {
 }
 
 /*
- * Sign out, in the corner of the menu and on no other screen (#174 §2). Small and dim, like
- * the in-match corner icons, because it is there to be found rather than noticed — but in
- * words, there being no icon for "sign out" that reads as nothing else. Pinned rather than
- * placed in the column, so the menu below it stays centred exactly as a guest's is.
+ * The profile's icon and Sign out, in the corner of the menu and on no other screen (#174
+ * §2, #228). Pinned rather than placed in the column, so the menu below stays centred
+ * exactly as a guest's is. The icon is the corner's own; Sign out sits beside it until it
+ * moves into the profile (#226).
  */
-.menu__sign-out {
+.menu__corner {
   position: absolute;
   top: max(0.5rem, env(safe-area-inset-top));
   right: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/*
+ * Small and dim, like the in-match corner icons, because it is there to be found rather
+ * than noticed — but in words, there being no icon for "sign out" that reads as nothing
+ * else.
+ */
+.menu__sign-out {
   min-height: 2.75rem;
   padding: 0 0.75rem;
   border: 0;

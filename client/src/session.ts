@@ -25,6 +25,7 @@ import type {
   ResumeRequest,
   RoomSettings,
   ServerToClientEvents,
+  Stats,
 } from "@yaniv/shared";
 import { MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
@@ -172,6 +173,17 @@ export interface SessionSnapshot {
    */
   readonly account: AccountStanding;
   /**
+   * The signed-in account's stats, as last read, or null — not read yet, being read, or
+   * refused. Read only when asked for (`loadStats`), and blanked on the way in, so a profile
+   * opened twice never shows the first answer as the second's (docs/adr/0026).
+   *
+   * **One account's and never the next's**: whenever `account` stops being the same
+   * signed-in account — signed out, by the player or the server, or another bound over it —
+   * this goes back to null in the same publication. A rename keeps it, being the same
+   * account under another name.
+   */
+  readonly stats: Stats | null;
+  /**
    * The last rejection worth showing the player, cleared the moment they try again. A
    * refused action costs them nothing, so this is news rather than a state to recover
    * from.
@@ -284,6 +296,13 @@ export interface Session {
   cancelSignIn: () => void;
   /** Change the account's name, from the next room on. Signed in only. */
   renameAccount: (displayName: string) => void;
+  /**
+   * Read the account's stats afresh: `stats` blanked now and filled from the answer, or
+   * left blank if the server refuses — a connection not signed in. A read, not an action:
+   * it leaves `busy` alone, and is not refused for being made while something else is in
+   * flight.
+   */
+  loadStats: () => void;
   /**
    * Put the refusal on screen down, with nothing sent: the player has read it, and the
    * question it answered is no longer being asked. The rename panel's way in and out —
@@ -443,6 +462,13 @@ const UNUSABLE_ACCOUNT_NAME: GameError = {
  */
 const SESSION_LAPSED = "You've been signed out. Sign in again to pick up where you left off.";
 
+/**
+ * Whether two standings are the one signed-in account — the question `stats` is kept or
+ * dropped by, a rename answering yes and everything else that replaces a standing no.
+ */
+const sameAccount = (was: AccountStanding, now: AccountStanding): boolean =>
+  was.status === "signedIn" && now.status === "signedIn" && was.account.id === now.account.id;
+
 export function createSession(
   socket: YanivClientSocket,
   { seat: tokens = NO_STORE, account: sessionTokens = NO_ACCOUNT, google = NO_GOOGLE }:
@@ -451,6 +477,7 @@ export function createSession(
   let snapshot: SessionSnapshot = {
     view: null,
     account: GUEST,
+    stats: null,
     error: null,
     notice: null,
     busy: false,
@@ -470,7 +497,10 @@ export function createSession(
    * last call to be announced twice.
    */
   const publish = (next: Partial<SessionSnapshot>): void => {
-    snapshot = { ...snapshot, flight: null, announcement: null, ...next };
+    const stats = sameAccount(snapshot.account, next.account ?? snapshot.account)
+      ? snapshot.stats
+      : null;
+    snapshot = { ...snapshot, flight: null, announcement: null, stats, ...next };
     for (const listener of listeners) listener();
   };
 
@@ -610,6 +640,9 @@ export function createSession(
    * the step ends, whichever way it ends.
    */
   let idToken: string | null = null;
+
+  /** Which `loadStats` is the latest, so only its answer fills `stats`. */
+  let statsAsked = 0;
 
   /**
    * Signed in: what goes on the snapshot for it, and — as the name's verb says — the
@@ -1069,6 +1102,22 @@ export function createSession(
           settle(result.error);
         }),
       );
+    },
+
+    /*
+     * Blanked before the emit, and filled only by the answer to the latest read made while
+     * the same account was signed in: an older read answered behind a newer one, or a read
+     * answered after the account went, is somebody's numbers that are not these.
+     */
+    loadStats: () => {
+      const asked = ++statsAsked;
+      const reading = snapshot.account;
+      publish({ stats: null });
+      socket.emit("loadStats", (result) => {
+        if (!result.ok || asked !== statsAsked) return;
+        if (!sameAccount(reading, snapshot.account)) return;
+        publish({ stats: result.value.stats });
+      });
     },
 
     /*

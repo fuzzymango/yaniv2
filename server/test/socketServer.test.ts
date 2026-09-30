@@ -21,6 +21,7 @@ import type {
   RoomSettings,
   SignedIn,
   SignInResult,
+  Stats,
 } from "@yaniv/shared";
 import {
   HAND_SIZE,
@@ -757,6 +758,7 @@ describe("session tokens on the wire", () => {
     await adaViews.until((v) => v.phase === "playing", "ada's deal");
     await graceViews.until((v) => v.phase === "playing", "grace's deal");
     await recorded("ada", ada, "renameAccount", "Countess");
+    expectOk(await recorded("ada", ada, "loadStats"));
 
     // A second tab: resumed — taking the account, and so the seat, over from the first —
     // then signed in afresh with a session of its own, and sat back down at the table.
@@ -766,6 +768,7 @@ describe("session tokens on the wire", () => {
     assert.equal(again.status, "signedIn");
     if (again.status !== "signedIn") return;
     expectOk(await recorded("tab", tab, "joinRoom", roomCode, "Ada"));
+    expectOk(await recorded("tab", tab, "loadStats"));
 
     await recorded("tab", tab, "signOut");
     await recorded("tab", tab, "exitToMenu");
@@ -821,6 +824,130 @@ describe("stats on the wire", () => {
     const stats = (await profiles.loadAccount(account.id))!;
     assert.equal(stats.gamesCompleted, 1);
     assert.equal(stats.gamesWon, 1);
+  });
+});
+
+/**
+ * The one read of an account's stats (docs/adr/0026): a sixth account event, answered off
+ * the store fresh every time it is asked, and to nobody not signed in. Whose stats is the
+ * binding's to say, never the payload's — there is no payload.
+ */
+describe("loadStats", () => {
+  const profiles = createMemoryProfileStore();
+  let table: Harness;
+  before(async () => {
+    table = await startServer(undefined, 0, { thinkTimeMs: 0 }, {}, profiles);
+  });
+  after(async () => {
+    await table.close();
+  });
+
+  const NO_STATS: Stats = {
+    yanivCalls: 0,
+    callsAssafed: 0,
+    assafs: 0,
+    gamesCompleted: 0,
+    gamesWon: 0,
+    slapdowns: 0,
+  };
+
+  it("answers six zeros for a new account", async () => {
+    const client = await table.connect();
+    await signUp(client, "Ada", table);
+    assert.deepEqual(expectOk(await ask(client, "loadStats")), { stats: NO_STATS });
+  });
+
+  it("answers the signed-in account's counters as the store holds them now", async () => {
+    const client = await table.connect();
+    const { account } = await signUp(client, "Ada", table);
+    const other = await table.connect();
+    await signUp(other, "Grace", table);
+    const counted: Stats = {
+      yanivCalls: 4,
+      callsAssafed: 1,
+      assafs: 2,
+      gamesCompleted: 3,
+      gamesWon: 1,
+      slapdowns: 6,
+    };
+
+    assert.deepEqual(expectOk(await ask(client, "loadStats")), { stats: NO_STATS });
+    await profiles.recordStats(account.id, counted);
+    assert.deepEqual(
+      expectOk(await ask(client, "loadStats")),
+      { stats: counted },
+      "read fresh, not remembered from the first answer",
+    );
+    assert.deepEqual(
+      expectOk(await ask(other, "loadStats")),
+      { stats: NO_STATS },
+      "and the binding's own account, nobody else's",
+    );
+  });
+
+  it("refuses a connection never signed in, and one signed out", async () => {
+    const guest = await table.connect();
+    assert.equal(expectError(await ask(guest, "loadStats")).code, "INVALID_SESSION");
+
+    const client = await table.connect();
+    await signUp(client, "Ada", table);
+    expectOk(await ask(client, "signOut"));
+    assert.equal(expectError(await ask(client, "loadStats")).code, "INVALID_SESSION");
+  });
+
+  it("is answered seated, mid-match, as well as at the menu", async () => {
+    const client = await table.connect();
+    await signUp(client, "Ada", table);
+    const { roomCode } = expectOk(await ask<{ roomCode: string }>(client, "createRoom", "Ada"));
+    const grace = await table.connect();
+    expectOk(await ask(grace, "joinRoom", roomCode, "Grace"));
+    expectOk(await ask(client, "startGame"));
+
+    assert.deepEqual(expectOk(await ask(client, "loadStats")), { stats: NO_STATS });
+  });
+
+  /*
+   * The whole road a stat travels, over the wire at both ends: a signed-in seat's call,
+   * credited off the transition, written to the store, and read back. A bot at the table
+   * so there is a round to play; a limit nobody reaches, so a round the bot calls first is
+   * only followed by another.
+   */
+  it("counts a Yaniv call a signed-in seat played over the wire", async () => {
+    const yaniv = await startServer(29, 1, { thinkTimeMs: 0 }, { maxScore: 100_000 });
+    try {
+      const client = await yaniv.connect();
+      await signUp(client, "Ada", yaniv);
+      const watcher = watch(client);
+      expectOk(await ask(client, "createRoom", "Ada"));
+      expectOk(await ask(client, "startGame"));
+
+      const settled = (v: PlayerGameView) =>
+        v.phase === "playing" ? v.currentTurnPlayerId === v.you.id : v.phase !== "lobby";
+      let current = await watcher.until(settled, "the table to come to the player");
+
+      for (let step = 0; ; step++) {
+        assert.ok(step < 500, "the player got to call Yaniv");
+        assert.notEqual(current.phase, "gameEnd", "the match outlasted the call");
+        watcher.reset();
+        if (current.phase === "roundEnd") {
+          expectOk(await ask(client, "startNextRound"));
+        } else {
+          const decision = decideTurn(current);
+          if (decision.type === "yaniv") {
+            expectOk(await ask(client, "callYaniv"));
+            break;
+          }
+          expectOk(await ask(client, "takeTurn", decision.action));
+        }
+        current = await watcher.until(settled, "the turn to come back, or the round to end");
+      }
+
+      // Only the call: whether the bot Assafed it is the seed's to say, and not this test's.
+      const { stats } = expectOk(await ask<{ stats: Stats }>(client, "loadStats"));
+      assert.equal(stats.yanivCalls, 1);
+    } finally {
+      await yaniv.close();
+    }
   });
 });
 

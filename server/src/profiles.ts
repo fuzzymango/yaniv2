@@ -36,6 +36,9 @@
  * (docs/adr/0019); the seam need not carry one until something calls it.
  */
 
+// The six counters are `shared`'s, so the store counts exactly the list the wire answers
+// (docs/adr/0026).
+import type { Stats } from "@yaniv/shared";
 import { randomUUID } from "node:crypto";
 
 /** An account's own id — a UUID, as `Player.id` already is, and never anything Google issued. */
@@ -43,26 +46,6 @@ export type AccountId = string;
 
 /** The ways a person can prove who they are. Google is the only one V0 builds. */
 export type CredentialKind = "google";
-
-/**
- * An account's six counters, each only ever going up (`CONTEXT.md`'s **Stats**). Only what
- * cannot be worked out from the others is kept: a call that stood is a Yaniv call not
- * Assafed, and a loss is a game completed and not won.
- */
-export interface Stats {
-  /** Times this player has called Yaniv — the call, never the verdict (docs/adr/0023). */
-  yanivCalls: number;
-  /** Of those calls, the ones that were Assafed. */
-  callsAssafed: number;
-  /** Rounds this player was the Assafer — the one player `docs/rules.md` §6 names. */
-  assafs: number;
-  /** Matches played to their end from this seat: eliminated from, or won. */
-  gamesCompleted: number;
-  /** Matches won. */
-  gamesWon: number;
-  /** Slapdowns made. */
-  slapdowns: number;
-}
 
 /**
  * What one write adds: any of the counters, by any amount, and a counter left out is a

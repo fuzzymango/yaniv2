@@ -19,7 +19,7 @@ modules beside it (`turn.ts`, `seating.ts`, `fan.ts`, `flight.ts`, `ghosts.ts`, 
 `useSession`.
 
 Snapshots are **replaced wholesale, never mutated**: `useSyncExternalStore` compares by
-identity. Nine fields, and each answers a different question:
+identity. Ten fields, and each answers a different question:
 
 - **`view`** — the position, or `null`. Null *is* the main menu: the one screen not a function of
   `view.phase`, there being nothing sent before a room exists — `resuming` qualifies it, below.
@@ -28,6 +28,9 @@ identity. Nine fields, and each answers a different question:
   name breaks the display-name rule, never stripped into one that passes) or `signedIn` with its
   `AccountView`. Tagged on `SelfView`'s precedent, so "signed in with no name" is unrepresentable.
   Independent of `view`, as the server's two bindings are. See "Accounts" below.
+- **`stats`** — the signed-in account's six counters as last read, or `null`: not read yet, being
+  read, or refused. Read only when asked for (`loadStats`), and **one account's and never the
+  next's** — see "Accounts" below.
 - **`error`** — a `GameError`: something the player asked for and was refused, or one the server
   pushed as `errorMessage`. Cleared the moment they try again — a refusal costs them nothing.
 - **`notice`** — news that is *not* a refusal: a seat that could not be claimed back, or a session
@@ -55,7 +58,7 @@ identity. Nine fields, and each answers a different question:
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room settles
 on the **ack**: entry has been broadcast before it is acked, and a departing connection is
-published to no longer. All five account events settle on the ack too, producing no position at
+published to no longer. The five account events that act settle on the ack too (`loadStats`, a read, locks nothing), producing no position at
 all, so there is no newer broadcast to wait for. So do dealing the next round, dealing another match,
 and editing the room's settings, which produce a position rather than moving within one —
 and, in the settings case, none at all when refused, since a rejected edit is broadcast to
@@ -157,6 +160,16 @@ on its way back to a guest, and `clearError` — nothing sent, nothing else touc
 standing included — is the rename panel's way in and out: a refusal left over from the menu is
 no answer about a name, and one the panel was showing is about a question nobody is asking once
 it has closed. Neither panel is the session's; the menu decides when they open.
+
+**Stats are read fresh, and belong to one account** (docs/adr/0026). `loadStats()` blanks
+`stats`, emits, and fills it from the ack — only the latest read's, and only while the account it
+was made for is still the one signed in, so an answer landing after a sign-out or behind a newer
+read fills nothing. A refused read leaves `null`, with no error. **`publish` drops `stats`
+whenever the standing stops being the same signed-in account** — sign-out, a lapsed session,
+another account signed in over it, a first sign-in's name step — in the same publication; a
+rename keeps it, being the same account. It is the one intent that **leaves `busy` alone**: a
+read is not an action, and locking the menu's doors behind it would protect nothing. The profile
+calls it every time it opens, which is why it opens on dashes.
 
 ## Claiming an account and a seat back
 

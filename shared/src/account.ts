@@ -10,8 +10,10 @@
 /**
  * What a signed-in menu draws: who you are, and the name you are known by.
  *
- * **No stat**, though the account counts one: viewing stats is out of scope for V0, so the
- * wire never carries a number, and a type is the cheapest place to make that true.
+ * **No stat**, though the account counts six: every ack carrying one of these is answered
+ * at the main menu or on the way into it, never after a match, so a number here would be
+ * stale by the time a profile showed it. Stats are read on their own, fresh, by
+ * `loadStats` (docs/adr/0026), and a type is the cheapest place to keep them off this one.
  */
 export interface AccountView {
   id: string;
@@ -44,3 +46,26 @@ export interface NameNeeded {
 
 /** The answer to `signIn`: an account we know, or one still to be created. */
 export type SignInResult = SignedIn | NameNeeded;
+
+/**
+ * An account's six counters, each only ever going up (`CONTEXT.md`'s **Stats**). Only what
+ * cannot be worked out from the others is kept: a call that stood is a Yaniv call not
+ * Assafed, and a loss is a game completed and not won.
+ *
+ * Here rather than in the server's store so the store and the wire share one list: the
+ * store counts them, `loadStats` answers them, and a profile draws them (docs/adr/0026).
+ */
+export interface Stats {
+  /** Times this player has called Yaniv — the call, never the verdict (docs/adr/0023). */
+  yanivCalls: number;
+  /** Of those calls, the ones that were Assafed. */
+  callsAssafed: number;
+  /** Rounds this player was the Assafer — the one player `docs/rules.md` §6 names. */
+  assafs: number;
+  /** Matches played to their end from this seat: eliminated from, or won. */
+  gamesCompleted: number;
+  /** Matches won. */
+  gamesWon: number;
+  /** Slapdowns made. */
+  slapdowns: number;
+}

@@ -289,7 +289,7 @@ draws a signed-out form; where it cannot, there is simply no button and the game
 
 Persistence for rooms (they are in-memory, so a restart or redeploy drops games in progress;
 accounts are not, and live in Postgres), and any policy for a seat whose player never comes
-back. A match plays end to end in the browser now: sign in with Google or don't, create or join,
+back. A match plays end to end in the browser now: sign in with Google or don't — and, signed in, open your profile to see your stats — create or join,
 set the room up, deal, take turns, watch a run of bot turns a move at a time, call Yaniv, and
 finish on the standings with another match one tap away. Reconnect is whole — a
 drop leaves the room and the seat alone, and the page presents the seat's token and picks up

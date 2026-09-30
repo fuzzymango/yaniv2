@@ -56,7 +56,9 @@ live where neither can drift from it.
 
 - `AccountView { id, displayName }` — what a signed-in menu draws. **No Yaniv count**: viewing
   stats is out of scope, so the wire never carries it, and a type is the cheapest place to make
-  that true.
+  that true. *Amended by ADR-0026:* stats reach the wire through a sixth event of their own, `loadStats`,
+  read fresh when a profile opens; `AccountView` stays stat-free, and the `Stats` type joins
+  `account.ts`.
 - The `signIn` ack: `{ status: 'signedIn', sessionToken, account }` or
   `{ status: 'nameNeeded', suggestedName }` — the confirm-name step (ADR-0020).
 

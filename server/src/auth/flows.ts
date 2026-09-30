@@ -1,6 +1,7 @@
 /**
- * From a Google sign-in to an account and a session — the four things a player does with
- * an account, with no transport under them (docs/adr/0021).
+ * From a Google sign-in to an account and a session — the things a player does with an
+ * account, with no transport under them (docs/adr/0021), and the stats it has counted
+ * (docs/adr/0026).
  *
  * Each flow is a function over `Auth` — the verifier, the store, a clock and the session
  * generator — returning a `Result`, so `socketServer.ts`'s handlers call these and hold no
@@ -26,6 +27,7 @@ import {
   type AccountView,
   type SignedIn,
   type SignInResult,
+  type Stats,
 } from "@yaniv/shared";
 import type { Clock } from "../clock.ts";
 import type { Account, AccountId, ProfileStore } from "../profiles.ts";
@@ -147,6 +149,27 @@ export async function renameAccount(
   return ok({ account: { id: accountId, displayName: name } });
 }
 
+/**
+ * The account's stats, as the store holds them now — read fresh on every ask, since a
+ * match played since any earlier answer has moved them (docs/adr/0026). The caller is
+ * whoever the socket is signed in as, as for `renameAccount`.
+ *
+ * A missing account is refused rather than thrown for, unlike a rename: a read changes
+ * nothing, so there is nothing a stale binding could corrupt, and the answer is the one a
+ * connection signed in as nobody gets.
+ *
+ * A write begun a moment before this read may not have landed yet — stat writes are never
+ * awaited (docs/adr/0023, 0024) — which is accepted.
+ */
+export async function loadStats(
+  auth: Auth,
+  accountId: AccountId,
+): Promise<Result<{ stats: Stats }>> {
+  const account = await auth.store.loadAccount(accountId);
+  if (!account) return err("INVALID_SESSION", "This connection is not signed in");
+  return ok({ stats: statsOf(account) });
+}
+
 /** Who Google says presented this, or `null` — a non-string being no token at all. */
 function verify(auth: Auth, idToken: unknown): Promise<VerifiedIdentity | null> {
   return typeof idToken === "string" ? auth.verifier.verify(idToken) : Promise.resolve(null);
@@ -190,10 +213,25 @@ async function requireAccount(auth: Auth, id: AccountId): Promise<Account> {
 
 /**
  * What the wire is told about an account, picked field by field rather than spread: the
- * stat is on `Account` and must not reach a client (docs/adr/0021).
+ * stats are on `Account` and ride only `loadStats`' answer (docs/adr/0021, 0026).
  */
 function toView(account: Account): AccountView {
   return { id: account.id, displayName: account.displayName };
+}
+
+/**
+ * The six counters, picked field by field for `toView`'s reason: the id and the name are
+ * on `Account` too, and the wire answers the stats and nothing else.
+ */
+function statsOf(account: Account): Stats {
+  return {
+    yanivCalls: account.yanivCalls,
+    callsAssafed: account.callsAssafed,
+    assafs: account.assafs,
+    gamesCompleted: account.gamesCompleted,
+    gamesWon: account.gamesWon,
+    slapdowns: account.slapdowns,
+  };
 }
 
 function invalidCredential<T>(): Result<T> {
