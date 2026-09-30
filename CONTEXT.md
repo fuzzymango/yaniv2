@@ -25,9 +25,9 @@ Two distinct concepts, easy to conflate because both sit "before the game":
 
 - **Main menu** — a client-side, room-less screen. No `GameState` exists yet; there is no
   room code and nothing on a server to point at. Its two doors are to create a lobby or join
-  one by code (or to quit the application). It is also the one screen where a player signs in
-  or out: an account binds before any room exists, so identity is asked about here and nowhere
-  else, and the two doors are unchanged by it.
+  one by code (or to quit the application). It is also where identity is asked about: a
+  player signs in here, and signs out from the **profile** opened off it — both before any
+  room exists, and neither anywhere else — and the two doors are unchanged by either.
 - **Lobby** — `GameState.phase === "lobby"` (see above): a room already exists
   server-side, has a code, and players are staged in it up to the player cap.
 
@@ -514,9 +514,28 @@ a Yaniv call not Assafed, and a loss is a game completed and not won. A stat bel
 account, never to a seat, so a guest's play and a bot's count towards nothing.
 
 **Display name** — the name a player is known by at a table. A guest types one per room; an
-account carries its own, the same in every room, changed only by renaming the account.
+account carries its own, the same in every room, changed only by renaming the account. One
+rule for both: 1–20 characters of letters and digits, in any script, with single spaces
+between words — no punctuation, no symbols, no emoji. A name that breaks it is refused, never
+tidied into one that doesn't: nobody is seated under a name they did not choose. The rule is
+about names a person chooses; a bot's name is the server's own label, and its "(bot)" is what
+says so.
 **Never unique** — two players may share one, at the same table. Identity is the account id
 and never the name, which is what lets a player choose any name they like.
+
+## Profile
+
+**Profile** — a signed-in player's view of their own account: its display name and its stats,
+opened from the main menu and nowhere else. A way of looking at an **account**, not a second
+thing beside it — there is no profile that is not an account's, and nothing is kept about a
+profile that is not kept about its account. **Your own only**: no player opens another's. It is
+where an account is renamed and where a player signs out, and neither is offered anywhere else.
+
+A **guest** has none, and is offered none: with no stats to show, a profile would be a name
+field and nothing else.
+
+The profile store is named for what it *remembers* and the profile for what it *shows*; both
+are about accounts. _Avoid_: player profile, for the data — that is the account.
 
 ## Resume token
 

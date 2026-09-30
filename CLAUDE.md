@@ -101,7 +101,7 @@ holds across the trees, and is not discoverable by reading one file:
   root. **No barrel `index.ts`** anywhere. Two exemptions and only these: private single-use
   render helpers stay inline with their one component (`table/MoveHistory.tsx`), and two
   exported components share a file only where splitting them would lose an invariant, the
-  file's own header saying which (`table/Seat.tsx` is the one).
+  file's own header saying which (`table/Seat.tsx` is the one). It's acceptable to have more than 1 component in a file, however, files should only export one component. It's acceptable to add additional one-off non-exported components to a file to improve readability. 
 
 ## Key decisions from the build
 
