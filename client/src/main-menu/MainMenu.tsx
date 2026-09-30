@@ -25,10 +25,9 @@
  *   which the session core sends in place of anything typed — and in its place is a
  *   greeting, "Welcome <name>", plain text rather than a second way into anything. A
  *   person icon in the corner opens the **profile** (`ProfileDialog`, #228), where the
- *   name is changed and nowhere else (#229); Sign out is a small control beside it, here
- *   and on no other screen: it forgets the seat as well as the account (docs/adr/0020),
- *   and at a table that would be the seat being sat in. Sign out moves into the profile
- *   next (#226), and stays here until it does, so no build leaves a player without it.
+ *   name is changed (#229) and the player signs out (#230), and nowhere else. Signing out
+ *   forgets the seat as well as the account (docs/adr/0020), and at a table that would be
+ *   the seat being sat in — which is why it sits behind a panel this screen alone opens.
  *
  * The prompt belongs in the flow and the state in the chrome, which is why the two are
  * drawn in different places rather than one control that changes its label.
@@ -109,14 +108,6 @@ export function MainMenu({
     <main className="screen menu">
       {account.status === "signedIn" && (
         <div className="menu__corner">
-          <button
-            className="menu__sign-out"
-            type="button"
-            onClick={onSignOut}
-            disabled={busy}
-          >
-            Sign out
-          </button>
           <ProfileDialog
             standing={account}
             stats={stats}
@@ -127,6 +118,7 @@ export function MainMenu({
             onLoadStats={onLoadStats}
             onRename={onRenameAccount}
             onClearError={onClearError}
+            onSignOut={onSignOut}
           />
         </div>
       )}

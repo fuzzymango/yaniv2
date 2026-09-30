@@ -311,9 +311,9 @@ export interface Session {
    */
   clearError: () => void;
   /**
-   * Sign out, from the main menu: both credentials forgotten, Google told not to sign
-   * straight back in, and a guest from here on. No confirmation — no room is on screen,
-   * and signing back in is one tap.
+   * Sign out, from the profile over the main menu: both credentials forgotten, Google told
+   * not to sign straight back in, and a guest from here on. The profile asks first (#230);
+   * this does not — no room is on screen, and a mis-tap is the panel's to guard against.
    */
   signOut: () => void;
   /**

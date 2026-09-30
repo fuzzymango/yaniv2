@@ -1,7 +1,7 @@
 /**
  * A signed-in player's own account, held up over the main menu: a person icon in the
  * menu's corner, and behind it the account's name — renamed in place, here and nowhere
- * else (#229) — over its six stats (#228, docs/adr/0026).
+ * else (#229) — over its six stats (#228, docs/adr/0026), and the way to sign out (#230).
  *
  * The first place the counters this repo has kept since #166 are seen, and the only one —
  * the profile is the main menu's and nowhere else's, so nothing about an account stands
@@ -23,9 +23,22 @@
  * so anything on the screen while the panel is open is an answer about a name typed in it.
  * Nothing on the wire knows or cares that somebody is looking at it.
  *
- * **Escape backs out one level.** `Modal` catches it on its wrapper, so the name editor
- * stops the key there and goes back to showing the name; from there it reaches `Modal` and
- * closes the profile.
+ * **Signing out is asked before it is done, and asked here alone** (#230): an icon in the
+ * header, opposite the title and as far from Close as the panel allows, swaps the panel's
+ * contents for "Sign out of <name>?" with Cancel holding the focus, so a mis-tap on an icon
+ * or an Enter pressed out of habit costs nothing. It forgets the seat as well as the account
+ * (docs/adr/0020), which is why it lives on a panel the main menu alone opens. Confirmed, the
+ * standing becomes a guest's at once and the menu puts the profile down in render; nothing
+ * here closes it.
+ *
+ * **The panel does one thing at a time** — showing, editing the name, or confirming the
+ * sign-out. The confirmation is drawn *instead of* the editor, so tapping sign-out mid-rename
+ * unmounts the field and its draft with it, and cancelling comes back to the name, not to
+ * the field. Whether it is confirming is this component's, reset every time it opens.
+ *
+ * **Escape backs out one level.** `Modal` catches it on its wrapper, so the name editor and
+ * the confirmation each stop the key there and go back to showing the profile; from there
+ * it reaches `Modal` and closes it.
  */
 
 import { useState } from "react";
@@ -68,6 +81,27 @@ function PersonIcon() {
     >
       <circle cx="12" cy="8" r="4" />
       <path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" />
+    </svg>
+  );
+}
+
+/** A door with an arrow leaving it: the account, not the panel, being left. */
+function SignOutIcon() {
+  return (
+    <svg
+      className="topbar__icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M10 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4" />
+      <path d="M16 8l4 4-4 4" />
+      <line x1="20" y1="12" x2="10" y2="12" />
     </svg>
   );
 }
@@ -276,6 +310,46 @@ function StatsTable({ stats }: { stats: Stats | null }) {
   );
 }
 
+interface ConfirmSignOutProps {
+  displayName: string;
+  busy: boolean;
+  onSignOut: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * The question in place of the profile's contents. Cancel is first and takes the focus, as
+ * the leave-table question's Stay does — the answer an accidental tap wants, and somewhere
+ * inside the panel for Escape to be caught. Sign out is disabled while anything else is out,
+ * the session ignoring an account event sent over one.
+ */
+function ConfirmSignOut({ displayName, busy, onSignOut, onCancel }: ConfirmSignOutProps) {
+  return (
+    <div
+      className="modal__form"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        // One level at a time: the question, not the profile around it.
+        event.stopPropagation();
+        onCancel();
+      }}
+    >
+      <p className="profile__question">
+        Sign out of <strong>{displayName}</strong>?
+      </p>
+
+      <div className="modal__choice">
+        <button className="button" type="button" autoFocus onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="button" type="button" onClick={onSignOut} disabled={busy}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 interface ProfileDialogProps {
   /** Whose profile it is — the standing, not only the account, so a rename can see it land. */
   standing: SignedIn;
@@ -291,6 +365,7 @@ interface ProfileDialogProps {
   onLoadStats: () => void;
   onRename: (displayName: string) => void;
   onClearError: () => void;
+  onSignOut: () => void;
 }
 
 export function ProfileDialog({
@@ -303,7 +378,16 @@ export function ProfileDialog({
   onLoadStats,
   onRename,
   onClearError,
+  onSignOut,
 }: ProfileDialogProps) {
+  const [confirming, setConfirming] = useState(false);
+
+  /** Back to showing: a refusal left over from anything cancelled has nothing to answer. */
+  const showProfile = () => {
+    onClearError();
+    setConfirming(false);
+  };
+
   const close = () => {
     onClearError();
     onOpenChange(false);
@@ -321,6 +405,7 @@ export function ProfileDialog({
         onClick={() => {
           onClearError();
           onLoadStats();
+          setConfirming(false);
           onOpenChange(true);
         }}
       >
@@ -329,20 +414,51 @@ export function ProfileDialog({
 
       {open && (
         // The backdrop, the Close below and Escape all land here — see `Modal.tsx`.
-        <Modal title={PROFILE_TITLE} onDismiss={close}>
-          <EditName
-            standing={standing}
-            error={error}
-            busy={busy}
-            onRename={onRename}
-            onClearError={onClearError}
-          />
+        // The title is drawn here rather than by `Modal`, so the sign-out icon can share its row.
+        <Modal title={PROFILE_TITLE} showTitle={false} onDismiss={close}>
+          <div className="profile__header">
+            <h2 className="modal__title">{PROFILE_TITLE}</h2>
+            {!confirming && (
+              <button
+                className="topbar__button"
+                type="button"
+                aria-label="Sign out"
+                title="Sign out"
+                onClick={() => {
+                  onClearError();
+                  setConfirming(true);
+                }}
+              >
+                <SignOutIcon />
+              </button>
+            )}
+          </div>
 
-          <StatsTable stats={stats} />
+          {confirming ? (
+            <ConfirmSignOut
+              displayName={standing.account.displayName}
+              busy={busy}
+              onSignOut={onSignOut}
+              onCancel={showProfile}
+            />
+          ) : (
+            <>
+              <EditName
+                standing={standing}
+                error={error}
+                busy={busy}
+                onRename={onRename}
+                onClearError={onClearError}
+              />
 
-          <button className="button" type="button" autoFocus onClick={close}>
-            Close
-          </button>
+              <StatsTable stats={stats} />
+
+              {/* Remounted on the way back from the question, so it takes the focus again. */}
+              <button className="button" type="button" autoFocus onClick={close}>
+                Close
+              </button>
+            </>
+          )}
         </Modal>
       )}
     </>

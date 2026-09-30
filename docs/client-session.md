@@ -147,7 +147,8 @@ snapshot of a sign-in and of a resume for both, by marked token.
 name and never read the one passed in, so the menu needs no field and no branch; the server
 ignores a signed-in payload's name anyway (docs/adr/0022).
 
-**Sign-out is the main menu's.** It sends nothing from a table (#174 §2): it forgets **both**
+**Sign-out is the main menu's** — its profile's, behind a confirmation the intent knows nothing
+of (#230). It sends nothing from a table (#174 §2): it forgets **both**
 keys (docs/adr/0020), and at a table the seat is the one being sat in. Both are cleared before
 the emit and Google's `disableAutoSelect()` is called — injected as `GoogleSignIn`, `google.ts`
 being the one file that knows `window.google` — so a reload mid-flight cannot sign back in. It is

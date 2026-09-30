@@ -573,12 +573,14 @@ no use outside the screen holding it.
 The one screen where identity is asked about (#174): signed out, Google's button tops the form
 and a guest is told nothing else; signed in, "Welcome <name>" replaces the name field, and the
 corner holds the **profile**'s person icon (`ProfileDialog`, #228 — the six stats over the menu,
-read fresh on every open, dashes until they land) with Sign out beside it, **on this screen
-only** — it forgets the seat too. **The profile is the one place an account is renamed** (#229):
-a pencil swaps the name for a field, ✓/Enter saves, ✕ cancels, and the field stays open while
-the standing it was opened over is still the one on screen — the session replaces it when a
-rename lands and keeps it on a refusal, shown under the field. Escape backs out one level, the
-editor stopping the key before `Modal` sees it. `NameDialog` is confirm-only, the first
+read fresh on every open, dashes until they land), **on this screen only**. **The profile is
+the one place an account is renamed or signed out of** (#229, #230): a pencil swaps the name for
+a field, ✓/Enter saves, ✕ cancels, and the field stays open while the standing it was opened
+over is still the one on screen — the session replaces it when a rename lands and keeps it on a
+refusal, shown under the field. A sign-out icon opposite the title asks "Sign out of <name>?",
+Cancel focused — sign-out forgets the seat too, hence a panel only the menu opens. Showing,
+editing and confirming are exclusive, and Escape backs out one level, the editor and the
+question each stopping the key before `Modal` sees it. `NameDialog` is confirm-only, the first
 sign-in's non-dismissible step with a "Not now". While either is open the menu shows no
 `error` — the panel does, the profile under its name field — which is why the menu, not the
 profile, holds whether the profile is open. Google's script is fetched when the signed-out form

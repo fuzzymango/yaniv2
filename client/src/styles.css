@@ -69,7 +69,7 @@ body {
 /* --- main menu --- */
 
 .menu {
-  /* The corner the profile and Sign out are pinned against — see `.menu__corner`. */
+  /* The corner the profile's icon is pinned against — see `.menu__corner`. */
   position: relative;
   justify-content: center;
 }
@@ -136,9 +136,9 @@ body {
 }
 
 /*
- * The profile's icon and Sign out, in the corner of the menu and on no other screen (#174
- * §2, #228). Pinned rather than placed in the column, so the menu below stays centred
- * exactly as a guest's is.
+ * The profile's icon, in the corner of the menu and on no other screen (#174 §2, #228).
+ * Pinned rather than placed in the column, so the menu below stays centred exactly as a
+ * guest's is.
  */
 .menu__corner {
   position: absolute;
@@ -147,33 +147,6 @@ body {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-}
-
-/*
- * Small and dim, like the in-match corner icons, because it is there to be found rather
- * than noticed — but in words, there being no icon for "sign out" that reads as nothing
- * else.
- */
-.menu__sign-out {
-  min-height: 2.75rem;
-  padding: 0 0.75rem;
-  border: 0;
-  border-radius: 0.5rem;
-  background: none;
-  color: var(--ink-dim);
-  font: inherit;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-.menu__sign-out:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.menu__sign-out:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 .field {
@@ -648,6 +621,24 @@ body {
   margin: 0;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The profile's title and its sign-out icon across the top (#230): the icon in the corner
+ * opposite the title, the panel's full height away from Close at its foot. One row the
+ * height of a tap whether the icon is there or not, so the question under it does not jump.
+ */
+.profile__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--tap);
+}
+
+/* "Sign out of <name>?" — a twenty-character name with no spaces still has to fit a phone. */
+.profile__question {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /*
