@@ -53,6 +53,14 @@ function claims(player: Player, claimant: Claimant): boolean {
     : claimant.resumeToken === player.resumeToken;
 }
 
+/** The refusal of a name `normalizeDisplayName` has no name in, for both front doors. */
+function invalidName<T>(): Result<T> {
+  return err(
+    "INVALID_NAME",
+    `Name must be 1-${MAX_DISPLAY_NAME_LENGTH} letters, digits and single spaces`,
+  );
+}
+
 interface Room {
   state: GameState;
   /** Per-room rng, so one room's shuffles are reproducible independently. */
@@ -167,9 +175,7 @@ export class RoomManager {
     state: GameState;
   }> {
     const name = normalizeDisplayName(hostName);
-    if (name === null) {
-      return err("INVALID_NAME", `Name must be 1-${MAX_DISPLAY_NAME_LENGTH} characters`);
-    }
+    if (name === null) return invalidName();
 
     const roomCode = this.generateRoomCode();
     const host = this.newSeat(name, false, accountId);
@@ -236,9 +242,7 @@ export class RoomManager {
     }
 
     const name = normalizeDisplayName(playerName);
-    if (name === null) {
-      return err("INVALID_NAME", `Name must be 1-${MAX_DISPLAY_NAME_LENGTH} characters`);
-    }
+    if (name === null) return invalidName();
     if (room.state.phase !== "lobby") {
       return err("WRONG_PHASE", "That game has already started");
     }

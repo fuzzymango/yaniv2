@@ -642,15 +642,18 @@ describe("the session core", () => {
     try {
       const session = await server.openSession();
 
-      // Both ways a name can fail the shared rule, refused by the same check (ADR-0002):
+      // Every way a name can fail the shared rule, refused by the same check (ADR-0002):
       // a name the server would turn away costs no round trip to be turned away here.
-      for (const unusable of ["   ", "x".repeat(MAX_DISPLAY_NAME_LENGTH + 1)]) {
+      for (const unusable of ["   ", "x".repeat(MAX_DISPLAY_NAME_LENGTH + 1), "Ada$"]) {
         session.createRoom(unusable);
 
         // Asserted without awaiting anything, which is the proof that nothing was sent:
         // an answer that had come from the server could not be on the snapshot yet.
         const refused = session.getSnapshot();
-        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${unusable.length}`);
+        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${JSON.stringify(unusable)}`);
+        // Saying what a name may be, since a symbol is not something a player can see
+        // they got wrong by counting.
+        assert.match(refused.error!.message, /letters, digits and single spaces/);
         assert.equal(refused.busy, false, "nothing is in flight to wait for");
         assert.equal(refused.view, null);
       }
@@ -687,17 +690,21 @@ describe("the session core", () => {
     }
   });
 
-  it("refuses to join under an empty name too", async () => {
+  it("refuses to join under an unusable name too, without asking the server", async () => {
     const server = await startServer(26);
     try {
       const [, roomCode] = await hostARoom(server, "Ada");
 
       const guest = await server.openSession();
-      guest.joinRoom(roomCode, "");
+      for (const unusable of ["", "Grace$"]) {
+        guest.joinRoom(roomCode, unusable);
 
-      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "INVALID_NAME");
-      assert.equal(refused.view, null);
+        // Read straight off, as for a create: nothing was sent for an answer to come from.
+        const refused = guest.getSnapshot();
+        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${JSON.stringify(unusable)}`);
+        assert.equal(refused.busy, false, "nothing is in flight to wait for");
+        assert.equal(refused.view, null);
+      }
     } finally {
       await server.close();
     }
@@ -2951,6 +2958,16 @@ describe("an account", () => {
         tooLong.account.status === "signedIn" && tooLong.account.account.displayName,
         "Ada",
       );
+
+      session.renameAccount("Ada$");
+      const symbol = session.getSnapshot();
+      assert.equal(symbol.error?.code, "INVALID_NAME");
+      assert.match(symbol.error!.message, /letters, digits and single spaces/);
+      assert.equal(symbol.busy, false);
+      assert.equal(
+        symbol.account.status === "signedIn" && symbol.account.account.displayName,
+        "Ada",
+      );
     } finally {
       await server.close();
     }
@@ -3128,6 +3145,153 @@ describe("an account", () => {
       session.createRoom("");
       const lobby = await seated(session, "the account");
       assert.ok(lobby.view!.you.accountId);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The profile's numbers (docs/adr/0026): read on asking and not otherwise, blanked on the
+ * way in so a reopened profile never shows the last answer as this one, and never carried
+ * from one account to the next. A read and not an action, so the controls stay live.
+ */
+describe("the account's stats", () => {
+  const NO_STATS = {
+    yanivCalls: 0,
+    callsAssafed: 0,
+    assafs: 0,
+    gamesCompleted: 0,
+    gamesWon: 0,
+    slapdowns: 0,
+  };
+
+  const filled = (session: Session, what = "the stats") =>
+    waitForSnapshot(session, what, (s) => s.stats !== null);
+
+  it("starts every session with none", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      assert.equal(session.getSnapshot().stats, null, "nothing is read until it is asked for");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("fills them from the answer, leaving the controls alone throughout", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      const seen = recordSnapshots(session);
+
+      session.loadStats();
+      const answered = await filled(session);
+
+      assert.deepEqual(answered.stats, NO_STATS);
+      assert.ok(seen.every((s) => !s.busy), "a read locks nothing");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("blanks them on the way in, so a reopened profile starts from dashes", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.loadStats();
+      await filled(session);
+
+      session.loadStats();
+      assert.equal(session.getSnapshot().stats, null, "the last answer is not this one");
+      assert.deepEqual((await filled(session, "the second answer")).stats, NO_STATS);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("leaves them blank when the read is refused", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await server.openSession();
+
+      session.loadStats();
+      // A refused sign-in behind it, on the same socket, is answered after the read was.
+      session.signIn("a token nobody vouched for");
+      const after = await settled(session, "both answers");
+
+      assert.equal(after.stats, null);
+      assert.equal(after.error?.code, "INVALID_CREDENTIAL", "the read added no error of its own");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps them across a rename, the account being the same one", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.loadStats();
+      await filled(session);
+
+      session.renameAccount("Countess");
+      const renamed = await settled(session, "the rename");
+      assert.deepEqual(renamed.stats, NO_STATS);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("forgets them on signing out", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.loadStats();
+      await filled(session);
+
+      session.signOut();
+      assert.equal(session.getSnapshot().stats, null, "from the moment the account goes");
+      assert.equal((await settled(session, "the sign-out")).stats, null);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not fill them from a read answered after signing out", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+
+      session.loadStats();
+      session.signOut();
+      const out = await settled(session, "the sign-out");
+
+      assert.deepEqual(out.account, { status: "guest" });
+      assert.equal(out.stats, null, "a guest reads nobody's numbers");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("forgets them when another account signs in on the connection", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.loadStats();
+      await filled(session);
+
+      const grace = `${ID_TOKEN_MARK}google-grace`;
+      server.vouchFor(grace, { sub: "google-grace", name: "Grace" });
+      session.signIn(grace);
+      await waitForSnapshot(session, "the name to confirm", (s) => s.account.status === "nameNeeded");
+      assert.equal(session.getSnapshot().stats, null, "Ada's numbers went with Ada");
+      session.createAccount("Grace");
+      const graceIn = await waitForSnapshot(
+        session,
+        "Grace's account",
+        (s) => s.account.status === "signedIn" && !s.busy,
+      );
+      assert.equal(graceIn.stats, null);
     } finally {
       await server.close();
     }

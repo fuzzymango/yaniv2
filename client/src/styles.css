@@ -69,7 +69,7 @@ body {
 /* --- main menu --- */
 
 .menu {
-  /* The corner Sign out is pinned against — see `.menu__sign-out`. */
+  /* The corner the profile's icon is pinned against — see `.menu__corner`. */
   position: relative;
   justify-content: center;
 }
@@ -123,7 +123,7 @@ body {
   min-height: var(--tap);
 }
 
-.menu__playing-as {
+.menu__welcome {
   margin: 0;
   color: var(--ink-dim);
   /* A twenty-character name with no spaces in it still has to fit a phone. */
@@ -136,34 +136,14 @@ body {
 }
 
 /*
- * Sign out, in the corner of the menu and on no other screen (#174 §2). Small and dim, like
- * the in-match corner icons, because it is there to be found rather than noticed — but in
- * words, there being no icon for "sign out" that reads as nothing else. Pinned rather than
- * placed in the column, so the menu below it stays centred exactly as a guest's is.
+ * The profile's icon, in the corner of the menu and on no other screen (#174 §2, #228).
+ * Pinned rather than placed in the column, so the menu below stays centred exactly as a
+ * guest's is.
  */
-.menu__sign-out {
+.menu__corner {
   position: absolute;
   top: max(0.5rem, env(safe-area-inset-top));
   right: 0.5rem;
-  min-height: 2.75rem;
-  padding: 0 0.75rem;
-  border: 0;
-  border-radius: 0.5rem;
-  background: none;
-  color: var(--ink-dim);
-  font: inherit;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-.menu__sign-out:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.menu__sign-out:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 .field {
@@ -638,6 +618,61 @@ body {
   margin: 0;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The profile's title and its sign-out icon across the top (#230): the icon in the corner
+ * opposite the title, the panel's full height away from Close at its foot. One row the
+ * height of a tap whether the icon is there or not, so the question under it does not jump.
+ */
+.profile__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--tap);
+}
+
+/* The question that stands in for the profile's contents, spaced as the panel's own are. */
+.profile__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* "Sign out of <name>?" — a twenty-character name with no spaces still has to fit a phone. */
+.profile__question {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The profile's name and the pencil beside it, and the field that swaps in for both: one
+ * row the same height either way, so the stats below do not move when editing starts.
+ */
+.profile__name {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: var(--tap);
+  /* A twenty-character name with no spaces in it still has to fit a phone. */
+  overflow-wrap: anywhere;
+}
+
+.profile__name > .menu__name {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* The field takes the row, the tick and the cross only what their icons need. */
+.profile__input {
+  flex: 1;
+  min-width: 0;
 }
 
 /*

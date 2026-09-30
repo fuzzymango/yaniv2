@@ -24,7 +24,14 @@ import type {
 } from "@yaniv/shared";
 import { GOOGLE_CLIENT_ID } from "@yaniv/shared";
 import { Server, type Socket } from "socket.io";
-import { createAccount, renameAccount, resumeSession, signIn, type Auth } from "./auth/flows.ts";
+import {
+  createAccount,
+  loadStats,
+  renameAccount,
+  resumeSession,
+  signIn,
+  type Auth,
+} from "./auth/flows.ts";
 import { googleVerifier } from "./auth/google.ts";
 import { endSession, randomSessionToken, type SessionTokenGenerator } from "./auth/session.ts";
 import type { TokenVerifier } from "./auth/verifier.ts";
@@ -263,6 +270,7 @@ export function createSocketServer(
     const alreadySeated = () =>
       err("ALREADY_IN_ROOM", "This connection is already in a room");
     const notSeated = () => err("PLAYER_NOT_FOUND", "This connection is not in a room");
+    const notSignedIn = () => err("INVALID_SESSION", "This connection is not signed in");
 
     /*
      * The account, from the main menu (docs/adr/0021). Each handler is a flow and a
@@ -344,7 +352,7 @@ export function createSocketServer(
     socket.on("renameAccount", async (displayName, ack) => {
       const account = socket.data.account;
       if (!account) {
-        ack(err("INVALID_SESSION", "This connection is not signed in"));
+        ack(notSignedIn());
         return;
       }
       const result = await renameAccount(auth, account.accountId, displayName);
@@ -354,6 +362,20 @@ export function createSocketServer(
         socket.data.account = { ...account, displayName: result.value.account.displayName };
       }
       ack(result);
+    });
+
+    /**
+     * Whose stats is the binding's to say, as whose name is — there is no payload to claim
+     * otherwise. Read off the store on every ask, so a profile opened after a match shows
+     * the match (docs/adr/0026).
+     */
+    socket.on("loadStats", async (ack) => {
+      const account = socket.data.account;
+      if (!account) {
+        ack(notSignedIn());
+        return;
+      }
+      ack(await loadStats(auth, account.accountId));
     });
 
     /**

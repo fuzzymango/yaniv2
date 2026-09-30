@@ -1,5 +1,5 @@
 /**
- * The four auth flows, over a fake verifier, the in-memory store and a test clock — no
+ * The auth flows, over a fake verifier, the in-memory store and a test clock — no
  * socket, no Google (docs/adr/0021).
  *
  * Everything is observed through the flows themselves: a session is proved to exist by
@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   createAccount,
+  loadStats,
   renameAccount,
   resumeSession,
   signIn,
@@ -66,9 +67,26 @@ describe("signIn", () => {
     const { auth, google } = setup();
     google.vouchFor("id-nameless", { sub: "sub-nameless" });
     google.vouchFor("id-blank", { sub: "sub-blank", name: "   " });
-    google.vouchFor("id-long", { sub: "sub-long", name: "Augusta Ada King, Countess of Lovelace" });
+    google.vouchFor("id-long", { sub: "sub-long", name: "Augusta Ada King Countess of Lovelace" });
 
     for (const idToken of ["id-nameless", "id-blank", "id-long"]) {
+      assert.deepEqual(unwrap(await signIn(auth, idToken)), {
+        status: "nameNeeded",
+        suggestedName: "",
+      });
+    }
+  });
+
+  /*
+   * Refused, never tidied (#227): "OBrien" would be a legal name, and one the player never
+   * chose — a prefill they would have to notice was not theirs.
+   */
+  it("suggests nothing where Google's name has a character the rule refuses", async () => {
+    const { auth, google } = setup();
+    google.vouchFor("id-apostrophe", { sub: "sub-apostrophe", name: "Grace O'Brien" });
+    google.vouchFor("id-emoji", { sub: "sub-emoji", name: "Ada 🃏" });
+
+    for (const idToken of ["id-apostrophe", "id-emoji"]) {
       assert.deepEqual(unwrap(await signIn(auth, idToken)), {
         status: "nameNeeded",
         suggestedName: "",
@@ -198,6 +216,38 @@ describe("renameAccount", () => {
     assert.deepEqual(unwrap(await resumeSession(auth, created.sessionToken)), {
       account: created.account,
     });
+  });
+});
+
+describe("loadStats", () => {
+  it("answers the account's six counters, and nothing else about it", async () => {
+    const { auth, google } = setup();
+    google.vouchFor("id-ada", { sub: "sub-ada", name: "Ada Lovelace" });
+    const { account } = unwrap(await createAccount(auth, "id-ada", "Ada"));
+    await auth.store.recordStats(account.id, {
+      yanivCalls: 3,
+      callsAssafed: 1,
+      assafs: 2,
+      gamesCompleted: 4,
+      gamesWon: 1,
+      slapdowns: 5,
+    });
+
+    assert.deepEqual(unwrap(await loadStats(auth, account.id)), {
+      stats: {
+        yanivCalls: 3,
+        callsAssafed: 1,
+        assafs: 2,
+        gamesCompleted: 4,
+        gamesWon: 1,
+        slapdowns: 5,
+      },
+    });
+  });
+
+  it("refuses an account that is not there", async () => {
+    const { auth } = setup();
+    expectErr(await loadStats(auth, "no-such-account"), "INVALID_SESSION");
   });
 });
 

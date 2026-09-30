@@ -1,12 +1,12 @@
 /**
  * A panel over whatever screen opened it, and the three ways back out of it.
  *
- * Four things are held up behind one of these — what the room's settings are, whether a
- * player means to leave the table, the match's scorecard, and the name an account goes by —
- * and the only reason they share a component is the part that is not visible: a dialog has
- * to be announced as one, has to take the focus, and has to be dismissable by the backdrop,
- * by a control and by Escape. Two copies of that contract is two places for it to drift, and
- * the half that drifts is the half nobody can see.
+ * Five things are held up behind one of these — what the room's settings are, whether a
+ * player means to leave the table, the match's scorecard, the name a new account goes by,
+ * and a player's own profile — and the only reason they share a component is the part that
+ * is not visible: a dialog has to be announced as one, has to take the focus, and has to be
+ * dismissable by the backdrop, by a control and by Escape. Two copies of that contract is two
+ * places for it to drift, and the half that drifts is the half nobody can see.
  *
  * One of them is dismissable by its control alone (`dismissible`): the name a first sign-in
  * confirms, where there is no account yet for a stray tap on the backdrop to fall back to.
@@ -35,7 +35,8 @@ interface ModalProps {
    * Whether that name is also drawn at the top of the panel. Default yes: a question asked
    * behind one of these usually needs its heading. The scorecard is the exception — it is a
    * sheet of paper whose names and numbers are the whole document, and a caption over it
-   * would be the panel talking about itself.
+   * would be the panel talking about itself. The profile turns it off too, for another
+   * reason: it draws the same heading itself, so its sign-out icon can share the row.
    */
   showTitle?: boolean;
   /**

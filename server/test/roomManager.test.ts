@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MAX_PLAYERS } from "@yaniv/shared";
+import { MAX_PLAYERS, normalizeDisplayName } from "@yaniv/shared";
 import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "../src/config.ts";
 import { removePlayer, startGame } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
@@ -384,6 +384,28 @@ describe("seatBots", () => {
 
     assert.equal(state.players.length, 4, "the host plus three bots");
     assert.equal(state.players.filter((p) => p.isBot).length, 3);
+  });
+
+  /*
+   * A bot's name is the server's own label, not a name a person chose, so the display-name
+   * rule is never asked about it (#227) — which is what lets "(bot)" say so, parentheses
+   * and all, where no player could type them.
+   */
+  it("seats each bot as '<Name> (bot)', a label the display-name rule is not asked about", () => {
+    const rooms = manager();
+    const lobby = makeState({
+      phase: "lobby",
+      players: [{ id: "p1", name: "Ada" }],
+      settings: { botCount: MAX_PLAYERS - 1 },
+    });
+
+    const bots = rooms.seatBots(lobby).players.filter((p) => p.isBot);
+
+    assert.equal(bots.length, MAX_PLAYERS - 1);
+    for (const bot of bots) {
+      assert.match(bot.name, /^[A-Z][a-z]+ \(bot\)$/);
+      assert.equal(normalizeDisplayName(bot.name), null, `${bot.name} is no player's name`);
+    }
   });
 
   it("never seats past MAX_PLAYERS even when botCount asks for more", () => {

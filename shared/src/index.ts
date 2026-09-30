@@ -36,7 +36,7 @@ export { MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from "./displayName.ts"
 
 export type { GameErrorCode, GameError } from "./errors.ts";
 
-export type { AccountView, SignedIn, NameNeeded, SignInResult } from "./account.ts";
+export type { AccountView, SignedIn, NameNeeded, SignInResult, Stats } from "./account.ts";
 
 export type {
   Phase,

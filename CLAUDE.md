@@ -48,11 +48,14 @@ holds across the trees, and is not discoverable by reading one file:
   between them. The rulebook lives there for the same reason — a client must offer exactly the
   moves the server will accept (`docs/adr/0002`) — as does `standings`, a finished match not
   being allowed to end two ways depending on who is looking, and `displayName.ts`, the one
-  trimmed-1–20 rule every name a player can be known by goes through. `account.ts` is the
-  account on the wire and **types only** (`AccountView`, deliberately no stat, and the `signIn`
-  ack) — verifying, minting and storing are the server's (`docs/adr/0021`). Every function there is
-  pure over values the wire already carries, so this costs `shared` none of its
-  dependency-freedom.
+  rule every name a player chooses goes through — trimmed, then 1–20 letters and digits of any
+  script with single spaces between words, refused and never tidied (#227); a bot's
+  "(bot)" label is the server's own and never asked about. `account.ts` is the
+  account on the wire and **types only** (`AccountView`, deliberately no stat, the `signIn`
+  ack, and `Stats`, the six counters the store keeps and `loadStats` answers — one list for
+  both, `docs/adr/0026`) — verifying, minting and storing are the server's
+  (`docs/adr/0021`). Every function there is pure over values the wire already carries, so
+  this costs `shared` none of its dependency-freedom.
 - **`profiles.ts` is a seam, and its in-memory store is shipped code** (`docs/adr/0019`): the
   one shape anything above it sees a remembered player through, so no file but the SQL
   implementation behind it learns what a database is. The memory store is not a test double —
@@ -98,7 +101,7 @@ holds across the trees, and is not discoverable by reading one file:
   root. **No barrel `index.ts`** anywhere. Two exemptions and only these: private single-use
   render helpers stay inline with their one component (`table/MoveHistory.tsx`), and two
   exported components share a file only where splitting them would lose an invariant, the
-  file's own header saying which (`table/Seat.tsx` is the one).
+  file's own header saying which (`table/Seat.tsx` is the one). It's acceptable to have more than 1 component in a file, however, files should only export one component. It's acceptable to add additional one-off non-exported components to a file to improve readability. 
 
 ## Key decisions from the build
 
@@ -274,8 +277,10 @@ made it three.
 **`socket.data.account = { accountId, displayName, sessionToken }` sits beside it,
 independent**: an account binds at the main menu before any room and survives leaving one. Five
 acked events drive it — `signIn`, `createAccount`, `resumeSession`, `signOut`, `renameAccount`
-(docs/adr/0021) — no HTTP surface and no `handshake.auth`. Each handler is a flow from `auth/flows.ts` and a binding,
-holding no auth logic; all five are accepted seated or not, and **binding an account over
+(docs/adr/0021) — and a sixth, `loadStats`, reads the account's stats through it, fresh, never
+carried on `AccountView` (0026); no HTTP surface and no `handshake.auth`. Each handler is a
+flow from `auth/flows.ts` and a binding, holding no auth logic; all six are accepted seated or
+not, and **binding an account over
 another replaces it** without error, an account binding orphaning nobody. **Newer wins at
 bind**: binding an account puts down any other connection bound to it. The session token
 reaches the wire in exactly one payload, its `signIn`/`createAccount` ack — the marked-token
@@ -387,7 +392,7 @@ so no handler can apply a transition without the publication, the reconsideratio
 turns behind it. `Rooms` constructs the timer registry, the bot runner, the auto-dealer, the
 sweeper and the stats observer itself. What stays in the adapter is what only a transport knows:
 binding and clearing the seat, `ALREADY_IN_ROOM`, socket.io room membership, eviction and newer
-wins, the five account events, acks, `playerJoined`/`playerLeft`, and **calling
+wins, the six account events, acks, `playerJoined`/`playerLeft`, and **calling
 `attendanceChanged` after a seat binds and on a seated disconnect** — seating publishes nothing,
 because an arrival is not connected until its socket is in the room. The bots-only harness
 `play.ts` does not use `Rooms`, on purpose (above).
@@ -566,11 +571,20 @@ no use outside the screen holding it.
 ### The main menu signs a player in, and asks nobody else
 
 The one screen where identity is asked about (#174): signed out, Google's button tops the form
-and a guest is told nothing else; signed in, "Playing as" and Change name replace the name
-field and Sign out sits in the corner, **on this screen only** — it forgets the seat too. The
-name panel is one `NameDialog` for a first sign-in (`Modal`'s `dismissible={false}`, with a
-"Not now") and a rename; while it is open it shows `error` and the menu none. Google's script
-is fetched when the signed-out form mounts and a failure draws **nothing** (`google.ts`,
+and a guest is told nothing else; signed in, "Welcome <name>" replaces the name field, and the
+corner holds the **profile**'s person icon (`ProfileDialog`, #228 — the six stats over the menu,
+read fresh on every open, dashes until they land), **on this screen only**. **The profile is
+the one place an account is renamed or signed out of** (#229, #230): a pencil swaps the name for
+a field, ✓/Enter saves, ✕ cancels, and the field stays open while the standing it was opened
+over is still the one on screen — the session replaces it when a rename lands and keeps it on a
+refusal, shown under the field. A sign-out icon opposite the title asks "Sign out of <name>?",
+Cancel focused — sign-out forgets the seat too, hence a panel only the menu opens. Showing,
+editing and confirming are exclusive, and Escape backs out one level, the editor and the
+question each stopping the key before `Modal` sees it. `NameDialog` is confirm-only, the first
+sign-in's non-dismissible step with a "Not now". While either is open the menu shows no
+`error` — the panel does, the profile under its name field — which is why the menu, not the
+profile, holds whether the profile is open. Google's script is fetched when the signed-out form
+mounts and a failure draws **nothing** (`google.ts`,
 docs/adr/0020) — sign-in is an option, never a wall.
 
 ### The client's session core
@@ -585,15 +599,17 @@ gap — behaviour worth testing belongs in the session core or in one of the pur
 it, which `docs/code-map.md` names.
 
 Snapshots are **replaced wholesale, never mutated**, `useSyncExternalStore` comparing by
-identity. Nine fields, each answering a different question: `view` (null *is* the main menu),
-`account` (tagged: `guest` / `nameNeeded` / `signedIn`), `error`, `notice`, `connected`,
-`resuming`, `selection` (surviving the views that arrive underneath it), and the two
+identity. Ten fields, each answering a different question: `view` (null *is* the main menu),
+`account` (tagged: `guest` / `nameNeeded` / `signedIn`), `stats` (read by `loadStats`, dropped
+whenever the signed-in account changes, so one account never reads another's), `error`,
+`notice`, `connected`, `resuming`, `selection` (surviving the views that arrive underneath
+it), and the two
 **one-shots**, `flight` and `announcement`. **No credential is on it**: the Google ID token a
 first sign-in resends is held privately, and the session token sits in a second injected store
 beside the seat's (`tokens.ts`). A cold boot resumes the **account, then the seat**, `resuming`
 up across both. **`busy` locks on emit and settles two ways** — on the ack for entering,
-leaving, the five account events and anything producing a new position, on a strictly newer
-position for a move — so a control is never released over a position still showing the
+leaving, the five account events that act (`loadStats` is a read and locks nothing) and
+anything producing a new position, on a strictly newer position for a move — so a control is never released over a position still showing the
 mover's own turn. **The client never enforces a rule the server owns**: what is
 legal about the cards is all it applies ahead of the server (ADR-0002), and everything else it
 offers is sent and refused.

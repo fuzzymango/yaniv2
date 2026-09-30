@@ -28,6 +28,7 @@ export function App({ session }: { session: Session }) {
   const {
     view,
     account,
+    stats,
     error,
     notice,
     busy,
@@ -60,6 +61,7 @@ export function App({ session }: { session: Session }) {
     return (
       <MainMenu
         account={account}
+        stats={stats}
         error={error}
         notice={notice}
         busy={busy}
@@ -71,6 +73,7 @@ export function App({ session }: { session: Session }) {
         onRenameAccount={session.renameAccount}
         onClearError={session.clearError}
         onSignOut={session.signOut}
+        onLoadStats={session.loadStats}
       />
     );
   }

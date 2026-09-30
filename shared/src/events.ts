@@ -1,4 +1,4 @@
-import type { AccountView, SignedIn, SignInResult } from "./account.ts";
+import type { AccountView, SignedIn, SignInResult, Stats } from "./account.ts";
 import type { GameError } from "./errors.ts";
 import type { RoomSettings } from "./settings.ts";
 import type { PlayerGameView } from "./views.ts";
@@ -68,6 +68,13 @@ export interface ClientToServerEvents {
    * `INVALID_SESSION` from a connection not signed in.
    */
   renameAccount: (displayName: string, ack: Ack<{ account: AccountView }>) => void;
+  /**
+   * The bound account's six stats, as the store holds them at this moment — read fresh
+   * each time a profile opens, rather than carried on an `AccountView` answered before the
+   * match that moved them (docs/adr/0026). `INVALID_SESSION` from a connection not signed
+   * in. A read, not an action: it changes nothing, seated or not.
+   */
+  loadStats: (ack: Ack<{ stats: Stats }>) => void;
   /**
    * The ack of the event that seats a player is the one place their resume token is
    * handed over — never a broadcast, never another player's view. See CONTEXT.md.
