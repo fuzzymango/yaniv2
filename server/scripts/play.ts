@@ -13,7 +13,7 @@
 
 import { handValue, sortHand } from "@yaniv/shared";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
-import { RoomManager } from "../src/roomManager.ts";
+import { RoomManager, type Occupant } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { NO_CONNECTIONS, serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState, RoundState } from "../src/state.ts";
@@ -40,6 +40,14 @@ interface Table {
   roomCode: string;
 }
 
+/** A seat for the harness: a guest, there being no accounts at a terminal. */
+const guest = (name: string): Occupant => ({
+  name,
+  accountId: null,
+  customYanivCall: null,
+  customAssafCall: null,
+});
+
 function setUp(playerCount: number, seed: number): Table {
   const names = ["Ada", "Grace", "Alan", "Edsger", "Barbara", "Tony"];
   const rooms = new RoomManager({
@@ -47,12 +55,12 @@ function setUp(playerCount: number, seed: number): Table {
     newRoomRng: () => mulberry32(seed + 1),
   });
 
-  const created = rooms.createRoom({ name: names[0]!, accountId: null });
+  const created = rooms.createRoom(guest(names[0]!));
   if (!created.ok) throw new Error(created.error.message);
   const { roomCode } = created.value;
 
   for (let i = 1; i < playerCount; i++) {
-    const joined = rooms.joinRoom(roomCode, { name: names[i]!, accountId: null });
+    const joined = rooms.joinRoom(roomCode, guest(names[i]!));
     if (!joined.ok) throw new Error(joined.error.message);
   }
 

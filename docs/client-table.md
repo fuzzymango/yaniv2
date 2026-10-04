@@ -397,7 +397,8 @@ decisions behind it are in [ADR-0018](adr/0018-the-call-announcement.md). Five o
 about this table in particular:
 
 - **It is anchored to the person, not to the felt.** `YANIV` over the caller's seat, `ASSAF`
-  over the assafer's, and over the viewer's own hand row when it is the viewer. Position is
+  over the assafer's — or that seat's custom call for the kind, in the same colour (#238) —
+  and over the viewer's own hand row when it is the viewer. Position is
   what says who, which is the whole difference between this and a larger copy of the line
   above the felt — and it is why the banner carries no name and no number, so it is glanced at
   rather than read. *Where* over the seat is decided by the screen's edges, so that no banner
@@ -417,6 +418,17 @@ about this table in particular:
   cards. That takes two: the announcing seat is raised, and every seat isolates its own cards
   (#234), whose inline z-indexes would otherwise be ranked against the raised seat beside them
   — a five-card cascade outranks it.
+- **A long word shrinks, then wraps** (#234's measured numbers, applied by #238). The size
+  steps down by the length of the text as drawn — upper-cased in the viewer's locale — as a
+  share of the full shout: up to 5 characters 1 (so `YANIV`/`ASSAF` are unchanged), 6 → 0.8,
+  7–8 → 0.65, 9 and over 0.5, which is the floor (32.4px on a 360px phone). From there it
+  wraps: as wide as its words up to `min(90vw, 27rem)`, centred, balanced, breaking mid-word
+  where it must (`overflow-wrap: anywhere`). The custom-call rule's cap of 24 is what keeps the
+  worst case — 24 of the widest Latin letter — within three lines over the most cramped seat,
+  so nothing clamps or cuts the text; long runs of the few scripts wider than `W`, and
+  `W`-heavy text with hostile spacing, may go past three lines downward and stay on screen
+  sideways, an accepted exception. The step is chosen in `CallAnnouncement.tsx` and handed to
+  the stylesheet as `--announce-scale`; still sized off the viewport, never off `--card-w`.
 - **An Assafed round is staged, and both banners leave together.** The call, a beat, then the
   answer to it, so the round reads in the order it happened rather than as two simultaneous
   claims; then both held and both faded out at once, so the two seats the round turned on can

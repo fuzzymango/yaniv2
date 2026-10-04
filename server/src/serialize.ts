@@ -108,6 +108,9 @@ function selfViewOf(
     name: viewer.name,
     score: viewer.score,
     accountId: viewer.accountId,
+    // Public, and no redaction: words chosen to be shouted at the table (issue #238).
+    customYanivCall: viewer.customYanivCall,
+    customAssafCall: viewer.customAssafCall,
     // Connected, and not asked: see `connectedTo`. A viewer is by definition somebody
     // there to be sent this, which is also what makes their own shape decidable here.
     ...standingOf(viewer, true),
@@ -137,6 +140,9 @@ function opponentViewOf(
     name: player.name,
     score: player.score,
     accountId: player.accountId,
+    // Public, and no redaction: words chosen to be shouted at the table (issue #238).
+    customYanivCall: player.customYanivCall,
+    customAssafCall: player.customAssafCall,
     ...standingOf(player, connected),
     spectating: spectating(player, connected),
     handSize,

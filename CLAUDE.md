@@ -283,7 +283,7 @@ and survives leaving one. Six acked events drive it — `signIn`, `createAccount
 text unsetting a call, `INVALID_CUSTOM_CALL` for what `shared`'s `customCall.ts` rule refuses) —
 and a seventh, `loadStats`, reads the account's stats through it, fresh, never carried on
 `AccountView` (0026), where the two custom calls are; no HTTP surface and no `handshake.auth`.
-The binding carries the custom calls because a seat will copy them from it, as it copies the
+The binding carries the custom calls because a seat copies them from it, as it copies the
 name (#238). Each handler is a flow from `auth/flows.ts` and a binding, holding no auth logic;
 all seven are accepted seated or not, and **binding an account over
 another replaces it** without error, an account binding orphaning nobody. **Newer wins at
@@ -315,7 +315,15 @@ one statement of the rule: `resumeSeat` asks it through `claimSeat`, and `joinRo
 the account with no token, so an account already seated there is handed that seat back and a
 guest never is. The socket layer only builds the claimant: the account from the connection's
 binding, never the payload, and the token from the payload. `accountId` is on both views and
-is the only account fact any view carries.
+is the only account *id* any view carries.
+
+**Beside it, `Player.customYanivCall`/`customAssafCall`** (`string | null`, required on
+`isBot`'s grounds, #238): copied from the account binding through the `Occupant` when a
+signed-in `createRoom`/`joinRoom` takes a seat, as the name is, and fixed for the life of the
+room — `updatePlayer` cannot patch them, so a resumed seat, a seat handed back by `joinRoom`
+and `playAgain` keep them, and a profile change mid-match is heard from the next room on.
+Guests and bots get `null`; signing in while seated leaves a guest seat on `null`. Public, on
+both views in every phase, with no redaction.
 
 ### Room lifecycle
 
@@ -550,7 +558,10 @@ already out. Offered while a round is played or scored, watchers included; not o
 is over, the standings answering it over the very bar the button would sit in.
 
 **And the call that ended the round is announced over the seat that made it** (#124, #156,
-docs/adr/0018): `YANIV` in yellow, `ASSAF` in red a beat later, both faded out together. A one-shot
+docs/adr/0018): `YANIV` in yellow, `ASSAF` in red a beat later, both faded out together — or
+each seat's custom call for that kind (#238), resolved in `announcement.ts` off the arriving
+roster, upper-cased in the viewer's locale, shrunk then wrapped to #234's steps, and **still
+coloured by the kind**, so a red banner is an Assaf whatever it says. A one-shot
 like the flight, keyed on the scorecard growing so no republish replays it, on a second timing root
 deliberately not the flight's, in the two colours the scorecard now speaks. **The deal that
 replaces the call is held disabled for three seconds** (`DEAL_HOLD_MS`, #205), a third timing root

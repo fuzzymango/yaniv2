@@ -1,6 +1,8 @@
 /**
  * The call, said loudly and briefly over the seat it belongs to: `YANIV` in the table's
- * yellow, `ASSAF` in its red (issue #156).
+ * yellow, `ASSAF` in its red (issue #156) — or the seat's custom call for that kind in the
+ * same colour (issue #238). The colour is the kind's and never the text's, so a red banner is
+ * an Assaf whatever it says.
  *
  * **Position is what says who.** The banner is not centred on the felt and carries no name
  * and no number — it is drawn inside the box of the seat it is about, so a player learns who
@@ -23,14 +25,21 @@
  * none to fire against a table that has moved on.
  *
  * Presentational throughout, like `PlayingCard`: it decides nothing. Which seats get a
- * banner, in which order, is `announcement.ts`'s and is asserted there — this maps one
- * `PlacedBanner` onto a word, a colour and two delays, and holds no conditional of its own.
- * The durations come down from `timing.ts` as custom properties rather than being written
- * into the stylesheet, so the chain stays in the one place a test can assert it.
+ * banner, in which order and saying what, is `announcement.ts`'s and is asserted there — this
+ * maps one `PlacedBanner` onto capitals, a size, a colour and two delays, and holds no
+ * conditional of its own. The durations come down from `timing.ts` as custom properties
+ * rather than being written into the stylesheet, so the chain stays in the one place a test
+ * can assert it.
+ *
+ * **Long words shrink, then wrap** (#234's measured numbers): a size stepped down by the
+ * length of what is drawn, to half the shout at the smallest, and wrapping from there. The
+ * custom-call rule's cap (`MAX_CUSTOM_CALL_LENGTH`) is what keeps that within three lines, so
+ * nothing here clamps or cuts — a banner that clipped words would be saying something
+ * nobody chose. Styling, set by a prototype, and so not asserted anywhere.
  */
 
 import type { CSSProperties } from "react";
-import { CALL_WORD, type PlacedBanner } from "../announcement.ts";
+import type { PlacedBanner } from "../announcement.ts";
 import {
   ANNOUNCE_ENTER_MS,
   ANNOUNCE_EXIT_MS,
@@ -38,7 +47,30 @@ import {
   announceLeaveAt,
 } from "../timing.ts";
 
+/**
+ * The shout's size, as a share of the full banner's, for a text of this many characters as
+ * drawn — #234's steps, longest first. Up to five letters is full size, so `YANIV` and
+ * `ASSAF` are exactly what they were; from nine, half, which is the floor.
+ */
+const SHRINK_STEPS: readonly (readonly [fromLength: number, scale: number])[] = [
+  [9, 0.5],
+  [7, 0.65],
+  [6, 0.8],
+  [0, 1],
+];
+
+/** The step a text of this length falls on. Total: the last step starts from nothing. */
+const shoutScale = (length: number): number =>
+  SHRINK_STEPS.find(([fromLength]) => length >= fromLength)![1];
+
 export function CallAnnouncement({ banner }: { banner: PlacedBanner }) {
+  /*
+   * Capitals in the viewer's own locale, so a Turkish `i` becomes `İ` for a Turkish reader.
+   * Sized off what is drawn, not what was typed — upper-casing can lengthen a text (`ß` is
+   * `SS`), which is also why the rule's cap is counted the same way.
+   */
+  const shout = banner.text.toLocaleUpperCase();
+
   /*
    * When this banner arrives, and when every banner leaves — asked of `timing.ts`, which is
    * where the arithmetic of the sequence lives and where a test can reach it. The entrance
@@ -54,8 +86,8 @@ export function CallAnnouncement({ banner }: { banner: PlacedBanner }) {
       /*
        * Hidden from a screen reader, deliberately. The line above the felt already announces
        * the round as news, in a sentence that names both players — which is the better
-       * telling of it — and a live region here would say `YANIV` over the top of it, twice on
-       * an Assafed round. The banner is the *visual* half of one fact, not a second fact.
+       * telling of it — and a live region here would shout over the top of it, twice on an
+       * Assafed round. The banner is the *visual* half of one fact, not a second fact.
        */
       aria-hidden="true"
       style={
@@ -64,10 +96,11 @@ export function CallAnnouncement({ banner }: { banner: PlacedBanner }) {
           "--announce-exit": `${ANNOUNCE_EXIT_MS}ms`,
           "--announce-in-delay": `${enterAt}ms`,
           "--announce-out-delay": `${leaveAt}ms`,
+          "--announce-scale": shoutScale(shout.length),
         } as CSSProperties
       }
     >
-      {CALL_WORD[banner.call]}
+      {shout}
     </span>
   );
 }

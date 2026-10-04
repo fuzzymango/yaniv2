@@ -36,6 +36,17 @@ export interface Player {
    */
   accountId: string | null;
   /**
+   * What the call announcement says over this seat when it calls Yaniv, or `null` for the
+   * banner's own word (issue #238). Copied from the account at seating, as the name is, and
+   * fixed for the life of the room on the same grounds: signing in while seated binds the
+   * connection and never the seat, so a guest seat keeps `null`, and a change made in the
+   * profile mid-match is heard from the next room on. `null` for a bot's, a bot choosing no
+   * words. Required rather than optional, on `isBot`'s grounds below. Public, on every view.
+   */
+  customYanivCall: string | null;
+  /** The same, for a round this seat is the Assafer of. */
+  customAssafCall: string | null;
+  /**
    * Whether the server plays this seat itself. Required rather than optional so a seat
    * can never be ambiguously controlled — every construction has to say which it is.
    *
@@ -363,13 +374,15 @@ export function getPlayer(state: GameState, playerId: string): Player | undefine
 
 /**
  * Returns a new players array with one player's fields patched. Not the id, the resume
- * token or the account: all three are fixed at the seat's creation, and a transition that
- * could rewrite one would be a seat quietly becoming a different one.
+ * token, the account or the custom calls: all are fixed at the seat's creation, and a
+ * transition that could rewrite one would be a seat quietly becoming a different one.
  */
 export function updatePlayer(
   players: Player[],
   playerId: string,
-  patch: Partial<Omit<Player, "id" | "resumeToken" | "accountId">>,
+  patch: Partial<
+    Omit<Player, "id" | "resumeToken" | "accountId" | "customYanivCall" | "customAssafCall">
+  >,
 ): Player[] {
   return players.map((p) => (p.id === playerId ? { ...p, ...patch } : p));
 }

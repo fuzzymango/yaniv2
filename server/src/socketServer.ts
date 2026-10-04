@@ -85,7 +85,7 @@ interface Seat {
  *
  * The display name and the custom calls ride along so seating a signed-in player never
  * waits on the store: they are what every bind was just answered with, and `renameAccount`
- * and `setCustomCall` keep them current — the custom calls being what a seat will copy, as
+ * and `setCustomCall` keep them current — the custom calls being what a seat copies, as
  * it copies the name. None can go stale behind another connection's back, an account being
  * bound to one at a time.
  */
@@ -406,16 +406,22 @@ export function createSocketServer(
 
     /**
      * Who a new seat is taken by: the account bound to this connection, under its own
-     * display name, or a guest under the name they typed. **A signed-in player is never
-     * asked for a name** — whatever the payload claims is ignored — because identity is one
-     * answer and not one per table (docs/adr/0019), and the seat label is then always a
+     * display name and with its own custom calls, or a guest under the name they typed and
+     * with none. **A signed-in player is never asked for a name** — whatever the payload
+     * claims is ignored — because identity is one answer and not one per table
+     * (docs/adr/0019), and the seat label is then always a
      * reliable "who is that".
      */
     function seatedAs(typedName: string): Occupant {
       const account = socket.data.account;
       return account
-        ? { name: account.displayName, accountId: account.accountId }
-        : { name: typedName, accountId: null };
+        ? {
+            name: account.displayName,
+            accountId: account.accountId,
+            customYanivCall: account.customYanivCall,
+            customAssafCall: account.customAssafCall,
+          }
+        : { name: typedName, accountId: null, customYanivCall: null, customAssafCall: null };
     }
 
     /**

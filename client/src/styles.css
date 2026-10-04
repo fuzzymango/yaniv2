@@ -1172,8 +1172,8 @@ body {
 }
 
 /*
- * The call, over the seat it belongs to: `YANIV` for a call that stood, `ASSAF` for one that
- * did not (issue #156). No name and no number — position is what says who, which is the whole
+ * The call, over the seat it belongs to: `YANIV` for the call, `ASSAF` for the Assaf that
+ * answered it (issue #156), or the seat's custom call for either (issue #238). No name and no number — position is what says who, which is the whole
  * reason this sits in a seat's box rather than in the middle of the felt.
  *
  * Color is deliberately not set here: `.announce--yaniv` and `.announce--assaf` (below) each
@@ -1214,13 +1214,30 @@ body {
     announce-in var(--announce-enter) cubic-bezier(0.2, 1.6, 0.4, 1) var(--announce-in-delay)
       both,
     announce-out var(--announce-exit) ease-in var(--announce-out-delay) forwards;
-  font-size: clamp(2.1rem, 18vw, 4.4rem);
+  /*
+   * The full shout, scaled by `--announce-scale` from `CallAnnouncement.tsx`: 1 for up to five
+   * letters, stepping down to 0.5 — half the shout, 32.4px on a 360px phone — from nine
+   * (#234's measured steps). Still sized off the viewport at every step.
+   */
+  font-size: calc(clamp(2.1rem, 18vw, 4.4rem) * var(--announce-scale, 1));
   font-weight: 800;
   letter-spacing: 0.12em;
   line-height: 1;
   padding: 0.15em 0.4em;
   border-radius: 0.3em;
-  white-space: nowrap;
+  /*
+   * Then it wraps, as wide as its words up to 90% of a phone's width, every line centred
+   * and balanced. `overflow-wrap: anywhere` is what the custom-call cap was measured
+   * against: twenty-four of the widest letter with no space fit three lines only by breaking
+   * mid-word. Nothing clamps the line count — the cap keeps it to three, and the few scripts
+   * wider than `W` grow downward rather than being cut (#234's accepted exceptions).
+   */
+  white-space: normal;
+  width: max-content;
+  max-width: min(90vw, 27rem);
+  text-align: center;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
   pointer-events: none;
   -webkit-text-stroke: 0.16em color-mix(in oklab, currentColor 70%, #000);
   paint-order: stroke fill;

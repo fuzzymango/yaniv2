@@ -52,7 +52,8 @@ identity. Ten fields, and each answers a different question:
   The **one-shot**: `publish` clears it unless the publication being made is the one drawing that
   move, so a tap, a refusal or a reconnect never flies a card again. Decided in `show`, by asking
   `flight.ts`. See "Card flight" in `CONTEXT.md`.
-- **`announcement`** — the call a scored round arrived on, ordered, and null otherwise. The same
+- **`announcement`** — the call a scored round arrived on, ordered, each banner with its words
+  (the seat's custom call, else `YANIV`/`ASSAF`, #238), and null otherwise. The same
   one-shot in the same place, asking `announcement.ts` — which keys on the **scorecard growing**,
   never on a round result standing. See "Call announcement" in `CONTEXT.md` and docs/adr/0018.
 

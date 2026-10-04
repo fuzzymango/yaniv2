@@ -44,6 +44,10 @@ export interface SeatView extends MatchStanding {
   score: number;
   /** The account that took this seat, or null for a guest's. See `OpponentView.accountId`. */
   accountId: string | null;
+  /** The seat's custom Yaniv call, or null. See `OpponentView.customYanivCall`. */
+  customYanivCall: string | null;
+  /** The seat's custom Assaf call, or null. See `OpponentView.customYanivCall`. */
+  customAssafCall: string | null;
 }
 
 /** The viewing player, while they are still in the match. Always includes their own hand. */
@@ -102,6 +106,16 @@ export interface OpponentView extends MatchStanding {
    * draws it in V0.
    */
   accountId: string | null;
+  /**
+   * What the call announcement says over this seat when it calls Yaniv, or null for the
+   * banner's own word (issue #238) — copied from the account at seating and fixed for the
+   * life of the room, as the name is, so null for a guest's and a bot's. Public, and sent to
+   * everyone in every phase: words chosen to be shouted at the table are no secret from it.
+   * Named *custom* always, beside a `yanivCalls` stat it must never be read as.
+   */
+  customYanivCall: string | null;
+  /** The same, for a round this seat is the Assafer of. */
+  customAssafCall: string | null;
   handSize: number;
   /**
    * Whether this seat is *watching* the match rather than playing it: out of it, not gone,

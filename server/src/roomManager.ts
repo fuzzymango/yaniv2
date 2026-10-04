@@ -36,11 +36,15 @@ const RESUME_TOKEN_BYTES = 32;
  *
  * `accountId` is who took the seat, `null` for a guest, and **required** rather than
  * defaulted on ADR-0013's grounds: a call site that forgot it would seat every signed-in
- * player as a guest, and nothing would say so.
+ * player as a guest, and nothing would say so. The custom calls are the account's words for
+ * the banner (issue #238), `null` for a guest and a bot, required on the same grounds — a
+ * call site that forgot them would announce every signed-in player with the default.
  */
 export interface Occupant {
   name: string;
   accountId: string | null;
+  customYanivCall: string | null;
+  customAssafCall: string | null;
 }
 
 /**
@@ -145,13 +149,18 @@ export class RoomManager {
    * The occupant's name is taken as it is: a human's has been through the display-name rule
    * by now, and a bot's is the server's own.
    */
-  private newSeat({ name, accountId }: Occupant, isBot: boolean): Player {
+  private newSeat(
+    { name, accountId, customYanivCall, customAssafCall }: Occupant,
+    isBot: boolean,
+  ): Player {
     return {
       id: this.newPlayerId(),
       name,
       score: 0,
       isBot,
       accountId,
+      customYanivCall,
+      customAssafCall,
       // A fresh seat is in the match and has given nothing up. Written out rather than
       // defaulted anywhere, on the same grounds as `isBot`: a seat whose standing has to
       // be inferred is a seat somebody has to remember to fill in.
@@ -325,7 +334,12 @@ export class RoomManager {
       // bots cannot end up sharing a name. Safe to index directly: a table holds at most
       // MAX_PLAYERS seats and its creator is human, so BOT_NAMES has a name for each.
       const taken = players.filter((p) => p.isBot).length;
-      players.push(this.newSeat({ name: BOT_NAMES[taken]!, accountId: null }, true));
+      players.push(
+        this.newSeat(
+          { name: BOT_NAMES[taken]!, accountId: null, customYanivCall: null, customAssafCall: null },
+          true,
+        ),
+      );
       seated++;
     }
     return { ...state, players };

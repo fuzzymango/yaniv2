@@ -90,6 +90,9 @@ export interface StateOptions {
     departed?: boolean;
     /** The account that took the seat. Omitted means a guest's (or a bot's). */
     accountId?: string | null;
+    /** The seat's custom calls. Omitted means none chosen, as for a guest. */
+    customYanivCall?: string | null;
+    customAssafCall?: string | null;
   }>;
   /** playerId -> card ids. */
   hands?: Record<string, string[]>;
@@ -125,6 +128,8 @@ export function makeState(options: StateOptions = {}): GameState {
     // it expects never to see. `RESUME_TOKEN_MARK` is what identifies one on the wire.
     resumeToken: `${RESUME_TOKEN_MARK}${p.id}`,
     accountId: p.accountId ?? null,
+    customYanivCall: p.customYanivCall ?? null,
+    customAssafCall: p.customAssafCall ?? null,
   }));
   // Only the seats still in the match are dealt to and take turns — the roster keeps
   // whoever has gone out, in the place they were sitting. docs/rules.md §7.
@@ -210,11 +215,19 @@ export function allCardIds(state: GameState): string[] {
 }
 
 /**
- * Who sits down in a fixture's seat: a guest under `name`, unless an account is named. The
- * fixture's convenience only — `Occupant` itself defaults nothing.
+ * Who sits down in a fixture's seat: a guest under `name`, unless an account is named, with
+ * no custom calls unless some are given. The fixture's convenience only — `Occupant` itself
+ * defaults nothing.
  */
-export function occupant(name: string, accountId: string | null = null): Occupant {
-  return { name, accountId };
+export function occupant(
+  name: string,
+  accountId: string | null = null,
+  calls: Pick<Occupant, "customYanivCall" | "customAssafCall"> = {
+    customYanivCall: null,
+    customAssafCall: null,
+  },
+): Occupant {
+  return { name, accountId, ...calls };
 }
 
 export function unwrap<T>(result: Result<T>): T {
