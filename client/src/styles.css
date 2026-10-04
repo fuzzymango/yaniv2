@@ -2267,15 +2267,11 @@ body {
  */
 .table-zone--top > .table-seat:first-child:not(:only-child) > .announce--proto {
   left: 0;
-
-  --announce-anchor: translateY(-50%);
 }
 
 .table-zone--top > .table-seat:last-child:not(:only-child) > .announce--proto {
   right: 0;
   left: auto;
-
-  --announce-anchor: translateY(-50%);
 }
 
 /*
@@ -2292,4 +2288,14 @@ body {
 .table-zone--top > .table-seat:first-child:not(:only-child) > .announce--proto,
 .table-zone--top > .table-seat:last-child:not(:only-child) > .announce--proto {
   --announce-anchor: translate(0, 0);
+}
+
+/*
+ * PROTOTYPE #234 — every seat its own stacking context, so a neighbour's face-up cascade
+ * (inline z-indexes counting up from 0) cannot rise above an announcing seat's `z-index: 3`
+ * and paint over a banner that overflows onto it. Without it, cards 4 and 5 of the next top
+ * seat cover the banner at round end — today's `YANIV` included.
+ */
+.table-seat {
+  isolation: isolate;
 }

@@ -45,7 +45,11 @@ function measure(): Measured[] {
     const lineH = parseFloat(style.lineHeight) || fontPx;
     const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     const lines = Math.round((el.offsetHeight - padY) / lineH);
-    const offscreen = rect.left < -0.5 || rect.right > window.innerWidth + 0.5;
+    const offscreen =
+      rect.left < -0.5 ||
+      rect.right > window.innerWidth + 0.5 ||
+      rect.top < -0.5 ||
+      rect.bottom > window.innerHeight + 0.5;
     const tooTall = lines > Number(el.dataset.protoLines);
     el.style.outline = offscreen || tooTall ? "3px dashed magenta" : "";
     const seat = el.closest(".table-seat");
