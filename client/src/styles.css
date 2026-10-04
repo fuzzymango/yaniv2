@@ -15,6 +15,15 @@
   --danger: #fca5a5;
   --surface: rgb(0 0 0 / 25%);
 
+  /*
+   * The call banner's two colors, scoped to themselves rather than aliasing `--accent`/
+   * `--danger` directly — those two are shared by outlines, the turn indicator and the
+   * scorecard, and tuning the banner alone must not tune all of those along with it.
+   * Default to the same colors those use today, so this split is a no-op on its own.
+   */
+  --announce-yaniv: #ffda1f;
+  --announce-assaf: #ff2626;
+
   /* The smallest comfortable tap target, used for every control. */
   --tap: 3.75rem;
 
@@ -1111,10 +1120,14 @@ body {
 }
 
 /*
- * The call, over the seat it belongs to: `YANIV` in the accent yellow the table already
- * uses for a call that stood, `ASSAF` in the danger red it already uses for one that did not
- * (issue #156). No name and no number — position is what says who, which is the whole reason
- * this sits in a seat's box rather than in the middle of the felt.
+ * The call, over the seat it belongs to: `YANIV` for a call that stood, `ASSAF` for one that
+ * did not (issue #156). No name and no number — position is what says who, which is the whole
+ * reason this sits in a seat's box rather than in the middle of the felt.
+ *
+ * Color is deliberately not set here: `.announce--yaniv` and `.announce--assaf` (below) each
+ * set their own, off `--announce-yaniv`/`--announce-assaf` rather than off this shared rule,
+ * so the two can be tuned independently of one another and of everything else `--accent`/
+ * `--danger` touch.
  *
  * **Sized off the viewport and not off `--card-w`**, which is the one thing the two parents
  * must not be allowed to supply: the seat band and the viewer's own hand row set that
@@ -1149,8 +1162,7 @@ body {
     announce-in var(--announce-enter) cubic-bezier(0.2, 1.6, 0.4, 1) var(--announce-in-delay)
       both,
     announce-out var(--announce-exit) ease-in var(--announce-out-delay) forwards;
-  color: var(--accent);
-  font-size: clamp(1.1rem, 7vw, 2.4rem);
+  font-size: clamp(2.1rem, 18vw, 4.4rem);
   font-weight: 800;
   letter-spacing: 0.12em;
   line-height: 1;
@@ -1162,9 +1174,13 @@ body {
   paint-order: stroke fill;
 }
 
+.announce--yaniv {
+  color: var(--announce-yaniv);
+}
+
 /* Red is the Assaf, on the table and on the scorecard alike. */
 .announce--assaf {
-  color: var(--danger);
+  color: var(--announce-assaf);
 }
 
 /*
@@ -1976,8 +1992,7 @@ body {
 /* Chosen, and not yet sent anywhere. */
 .pick--chosen {
   transform: translateY(-0.5rem);
-  outline: 3px solid var(--accent);
-  outline-offset: 2px;
+  outline: 5px solid var(--accent);
 }
 
 /*
