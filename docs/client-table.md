@@ -400,7 +400,11 @@ about this table in particular:
   over the assafer's, and over the viewer's own hand row when it is the viewer. Position is
   what says who, which is the whole difference between this and a larger copy of the line
   above the felt — and it is why the banner carries no name and no number, so it is glanced at
-  rather than read.
+  rather than read. *Where* over the seat is decided by the screen's edges, so that no banner
+  is ever off them (#234): a side seat's banner grows inward from its own edge, a top seat's
+  hangs from the top of the screen and grows down into the felt, and a *pair* of top seats
+  grows outward-in as the sides do, since a word centred on the outer half of either starts
+  off a phone's screen. A lone top seat is centred on the screen and stays centred.
 - **The viewer's own anchor is the hand actually shown, not the live hand.** The caller can be
   the player the round has just knocked out, and at that scored round their hand is still on
   the screen, read off the round's own record — being dimmed out of the *next* round does not
@@ -410,7 +414,9 @@ about this table in particular:
   genuinely travels between two distant boxes, which is why `CardsInFlight.tsx` measures; a
   banner does not travel. What the seat gives up for it is its bounds — the word is wider than
   a cramped top-zone seat — and a stacking context, so it is never drawn under a neighbour's
-  cards.
+  cards. That takes two: the announcing seat is raised, and every seat isolates its own cards
+  (#234), whose inline z-indexes would otherwise be ranked against the raised seat beside them
+  — a five-card cascade outranks it.
 - **An Assafed round is staged, and both banners leave together.** The call, a beat, then the
   answer to it, so the round reads in the order it happened rather than as two simultaneous
   claims; then both held and both faded out at once, so the two seats the round turned on can

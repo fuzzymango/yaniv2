@@ -169,6 +169,12 @@ caller then.
 Two pieces of real CSS work follow: seats allow the banner to overflow their bounds, and a
 stacking context puts it above neighbouring seats' cards.
 
+*Amended by #234:* the second needs every seat to isolate its own cards, not only the
+announcing seat to be raised — a neighbour's cascade otherwise outranks it card by card. And
+anchoring to the person is bounded by the screen: a top seat's banner hangs from the top edge,
+and a pair of top seats anchors outward as the side seats do, because centred on the outer half
+of either, the word started off a phone's screen.
+
 ## Reduced motion keeps the banner and the beat
 
 `prefers-reduced-motion` is a request not to be moved, not a request to be told less. The same

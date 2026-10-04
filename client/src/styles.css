@@ -1051,6 +1051,13 @@ body {
 .table-seat {
   /* The box the call announcement is placed against — see `.announce` (issue #156). */
   position: relative;
+  /*
+   * A seat's cards stack among themselves and nowhere else (#234). A fan's and a cascade's
+   * cards carry inline z-indexes counting up from 0, and without a context of the seat's own
+   * they would be ranked against the seat beside them — where a five-card cascade outranks an
+   * announcing seat's `z-index: 3` and paints over the banner overflowing onto it.
+   */
+  isolation: isolate;
 
   display: flex;
   flex-direction: column;
@@ -1198,6 +1205,37 @@ body {
   left: auto;
 
   --announce-anchor: translateY(-50%);
+}
+
+/*
+ * A top seat's banner hangs from the top of the screen and grows down into the felt, rather
+ * than being centred on the seat (#234). The seat's box starts at the screen's top edge, so a
+ * banner centred on it and taller than it would grow up off the screen by as much as it grew
+ * down — which a custom call wrapped onto a second line is.
+ */
+.table-seat--top > .announce {
+  top: 0.25rem;
+
+  --announce-anchor: translateX(-50%);
+}
+
+/*
+ * And a pair of top seats grows outward-in, off each seat's outer edge, as the side seats do
+ * (#234). Two top seats on a phone each sit in half the screen, and a word centred on the
+ * outer half of either one starts off the screen — `YANIV` by about 50px at 360px wide. A lone
+ * top seat is centred on the screen, where centring is the right answer and stays.
+ */
+.table-zone--top > .table-seat:first-child:not(:only-child) > .announce {
+  left: 0;
+
+  --announce-anchor: translate(0, 0);
+}
+
+.table-zone--top > .table-seat:last-child:not(:only-child) > .announce {
+  right: 0;
+  left: auto;
+
+  --announce-anchor: translate(0, 0);
 }
 
 /*
