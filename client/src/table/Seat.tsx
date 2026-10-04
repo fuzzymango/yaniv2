@@ -327,11 +327,13 @@ export function OpponentSeat({
   opponent,
   isTurn,
   isOut,
+  banner = null,
 }: {
   zone: Zone;
   opponent: OpponentView;
   isTurn: boolean;
   isOut: boolean;
+  banner?: ReactNode; // PROTOTYPE #234
 }) {
   return (
     <Seat
@@ -340,6 +342,7 @@ export function OpponentSeat({
       isTurn={isTurn}
       isOut={isOut}
       status={seatStatus(opponent)}
+      banner={banner}
       detail={
         <>
           <span className="player__cards">{opponent.handSize} cards</span>

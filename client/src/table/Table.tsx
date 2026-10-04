@@ -62,6 +62,9 @@ import { Scorecard } from "./Scorecard.tsx";
 import type { Announcement } from "../announcement.ts";
 import { bannerAt } from "../announcement.ts";
 import { CallAnnouncement } from "./CallAnnouncement.tsx";
+import { ProtoBanner } from "./ProtoBanner.tsx";
+import { BannerPrototypeBar } from "./BannerPrototypeBar.tsx";
+import { useProto } from "../bannerPrototype.ts";
 import type { CardFlight } from "../flight.ts";
 import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
@@ -169,6 +172,7 @@ export function Table({
   onExit,
 }: TableProps) {
   const yourTurn = view.currentTurnPlayerId === view.you.id;
+  const proto = useProto(); // PROTOTYPE #234
 
   /**
    * The viewer's own seat, narrowed once and here (issue #143): the hand they are holding,
@@ -340,7 +344,9 @@ export function Table({
    * animation and gone from the next publication: a deal landing over the top of it unmounts
    * it mid-sequence, which is the accepted price of the tension beat (issue #156).
    */
-  const announcedAt = (playerId: string) => {
+  const announcedAt = (playerId: string, zone: Zone | "me" = "me") => {
+    // PROTOTYPE #234
+    if (proto.on) return proto.seats.includes(zone) ? <ProtoBanner /> : null;
     const banner = bannerAt(announcement, playerId);
     return banner === null ? null : <CallAnnouncement banner={banner} />;
   };
@@ -354,6 +360,7 @@ export function Table({
           opponent={opponent}
           isTurn={opponent.id === view.currentTurnPlayerId}
           isOut={isOut(opponent)}
+          banner={announcedAt(opponent.id, zone)}
           key={opponent.id}
         />
       );
@@ -370,7 +377,7 @@ export function Table({
         status={seatStatus(opponent)}
         // The call over their seat, where there is one: position is what says who called
         // (issue #156), so it goes in the seat's own box rather than anywhere central.
-        banner={announcedAt(opponent.id)}
+        banner={announcedAt(opponent.id, zone)}
         detail={<ScoredDetail player={row} wentOut={wentOut(opponent)} />}
         key={opponent.id}
       >
@@ -417,6 +424,7 @@ export function Table({
 
   return (
     <>
+      {proto.on && <BannerPrototypeBar />}
       {/*
         The table, and — for the length of a slapdown's aftershock — the table being knocked
         (issue #95). The class is worn by the whole felt rather than by the pile, because what

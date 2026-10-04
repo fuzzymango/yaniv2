@@ -2245,3 +2245,51 @@ body {
   font-size: 1.5rem;
   font-weight: 700;
 }
+
+/* PROTOTYPE #234 — the shrink-and-wrap under trial. Throwaway, never merged. */
+.announce--proto {
+  animation: none;
+  opacity: 1;
+  font-size: calc(clamp(2.1rem, 18vw, 4.4rem) * var(--announce-scale));
+  white-space: normal;
+  width: max-content;
+  /* 90% of the column, which is the viewport on a phone and 30rem past it. */
+  max-width: min(var(--announce-width), 27rem);
+  text-align: center;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+/*
+ * PROTOTYPE #234 — a pair of top seats anchors outward, as the side seats do: centred, a
+ * banner over the outer of two top seats on a 360px phone starts ~50px off the screen —
+ * even today's `YANIV`.
+ */
+.table-zone--top > .table-seat:first-child:not(:only-child) > .announce--proto {
+  left: 0;
+
+  --announce-anchor: translateY(-50%);
+}
+
+.table-zone--top > .table-seat:last-child:not(:only-child) > .announce--proto {
+  right: 0;
+  left: auto;
+
+  --announce-anchor: translateY(-50%);
+}
+
+/*
+ * PROTOTYPE #234 — a top seat's banner hangs from the top of the screen rather than being
+ * centred on the seat, so a wrapped banner grows down into the felt and never up off the
+ * screen. The seat box starts at the screen's top edge, so this is the screen's edge.
+ */
+.table-zone--top > .table-seat > .announce--proto {
+  top: 0.25rem;
+
+  --announce-anchor: translateX(-50%);
+}
+
+.table-zone--top > .table-seat:first-child:not(:only-child) > .announce--proto,
+.table-zone--top > .table-seat:last-child:not(:only-child) > .announce--proto {
+  --announce-anchor: translate(0, 0);
+}
