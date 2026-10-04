@@ -525,7 +525,7 @@ describe("signing in", () => {
     assert.equal(created.status, "signedIn");
     assert.equal(created.account.displayName, "Ada");
 
-    const renamed = { id: created.account.id, displayName: "Countess" };
+    const renamed = { ...created.account, displayName: "Countess" };
     assert.deepEqual(expectOk(await ask(client, "renameAccount", " Countess ")), {
       account: renamed,
     });
@@ -758,6 +758,7 @@ describe("session tokens on the wire", () => {
     await adaViews.until((v) => v.phase === "playing", "ada's deal");
     await graceViews.until((v) => v.phase === "playing", "grace's deal");
     await recorded("ada", ada, "renameAccount", "Countess");
+    expectOk(await recorded("ada", ada, "setCustomCall", "yaniv", "I WIN"));
     expectOk(await recorded("ada", ada, "loadStats"));
 
     // A second tab: resumed — taking the account, and so the seat, over from the first —
@@ -832,6 +833,42 @@ describe("stats on the wire", () => {
  * the store fresh every time it is asked, and to nobody not signed in. Whose stats is the
  * binding's to say, never the payload's — there is no payload.
  */
+/**
+ * Whose custom call is set is the binding's to say, as whose name is: a connection with no
+ * account is told its session is not valid, and one with an account is answered whether or
+ * not it holds a seat — the rule's own refusals are `auth/flows.ts`'s, proved there.
+ */
+describe("setCustomCall", () => {
+  it("refuses a guest, and a connection that has signed out", async () => {
+    const guest = await server.connect();
+    assert.equal(
+      expectError(await ask(guest, "setCustomCall", "yaniv", "I WIN")).code,
+      "INVALID_SESSION",
+    );
+
+    const client = await server.connect();
+    await signUp(client, "Ada");
+    expectOk(await ask(client, "signOut"));
+    assert.equal(
+      expectError(await ask(client, "setCustomCall", "yaniv", "I WIN")).code,
+      "INVALID_SESSION",
+    );
+  });
+
+  it("sets a call from a seat as from the menu, answering the account as it stands", async () => {
+    const client = await server.connect();
+    const created = await signUp(client, "Ada");
+    expectOk(await ask(client, "createRoom", "Ada"));
+
+    assert.deepEqual(expectOk(await ask(client, "setCustomCall", "assaf", " GOTCHA ")), {
+      account: { ...created.account, customAssafCall: "GOTCHA" },
+    });
+    assert.deepEqual(expectOk(await resumeFresh(created.sessionToken)), {
+      account: { ...created.account, customAssafCall: "GOTCHA" },
+    });
+  });
+});
+
 describe("loadStats", () => {
   const profiles = createMemoryProfileStore();
   let table: Harness;

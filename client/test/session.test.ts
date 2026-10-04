@@ -21,6 +21,7 @@ import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import {
   HAND_SIZE,
+  MAX_CUSTOM_CALL_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_PLAYERS,
   MAX_SCORE,
@@ -3145,6 +3146,163 @@ describe("an account", () => {
       session.createRoom("");
       const lobby = await seated(session, "the account");
       assert.ok(lobby.view!.you.accountId);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The words an account's seat will shout (`CONTEXT.md`, **Custom calls**): set over the wire
+ * one call at a time, kept on the account, and on every `AccountView` the server answers.
+ * The session sends what it is handed and lets the server judge it — the profile asks the
+ * shared rule before it sends — so a refusal here is the server's, as an off-contract
+ * client would meet it.
+ */
+describe("custom calls", () => {
+  /** The account standing's custom calls, or a failed assertion where there is no account. */
+  function customCalls(snapshot: SessionSnapshot) {
+    assert.equal(snapshot.account.status, "signedIn");
+    if (snapshot.account.status !== "signedIn") throw new Error("unreachable");
+    const { customYanivCall, customAssafCall } = snapshot.account.account;
+    return { customYanivCall, customAssafCall };
+  }
+
+  it("sets each custom call, locked until its own ack, and shows it on the account", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+
+      session.setCustomCall("yaniv", " I WIN! ");
+      assert.equal(session.getSnapshot().busy, true, "locked on the way out");
+      const yaniv = await settled(session, "setCustomCall's ack");
+      assert.equal(yaniv.error, null);
+      assert.deepEqual(customCalls(yaniv), { customYanivCall: "I WIN!", customAssafCall: null });
+      assert.equal(yaniv.view, null, "still the main menu");
+
+      session.setCustomCall("assaf", "GOTCHA");
+      const assaf = await settled(session, "setCustomCall's ack");
+      assert.deepEqual(customCalls(assaf), {
+        customYanivCall: "I WIN!",
+        customAssafCall: "GOTCHA",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("puts the banner's own word back on an empty text, leaving the other call alone", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.setCustomCall("yaniv", "I WIN");
+      await settled(session, "the custom Yaniv call");
+      session.setCustomCall("assaf", "GOTCHA");
+      await settled(session, "the custom Assaf call");
+
+      session.setCustomCall("yaniv", "   ");
+      const unset = await settled(session, "the custom Yaniv call unset");
+
+      assert.equal(unset.error, null);
+      assert.deepEqual(customCalls(unset), { customYanivCall: null, customAssafCall: "GOTCHA" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("never changes one call by setting the other", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.setCustomCall("assaf", "GOTCHA");
+      await settled(session, "the custom Assaf call");
+
+      session.setCustomCall("yaniv", "MINE");
+      const yaniv = await settled(session, "the custom Yaniv call");
+      assert.equal(customCalls(yaniv).customAssafCall, "GOTCHA");
+
+      session.setCustomCall("assaf", "   ");
+      const unset = await settled(session, "the custom Assaf call unset");
+      assert.equal(customCalls(unset).customYanivCall, "MINE");
+    } finally {
+      await server.close();
+    }
+  });
+
+  /*
+   * The profile's editor stays open on exactly this — the standing it was opened over still
+   * being the one on screen — as the rename panel does, so it is pinned by identity.
+   */
+  it("keeps the standing and says why when the server refuses a text", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.setCustomCall("yaniv", "I WIN");
+      const asked = (await settled(session, "the custom Yaniv call")).account;
+
+      for (const [what, text] of [
+        ["too long", "W".repeat(MAX_CUSTOM_CALL_LENGTH + 1)],
+        ["an emoji", "I WIN 🃏"],
+        ["a doubled space", "I  WIN"],
+        ["not a string", 42 as unknown as string],
+      ] as const) {
+        session.setCustomCall("yaniv", text);
+        const refused = await settled(session, `the refusal of ${what}`);
+        assert.equal(refused.error?.code, "INVALID_CUSTOM_CALL", what);
+        assert.equal(refused.account, asked, `${what}: the same standing`);
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("sends nothing for a guest, there being no account to keep a call on", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await server.openSession();
+
+      session.setCustomCall("yaniv", "I WIN");
+
+      assert.equal(session.getSnapshot().busy, false, "nothing sent");
+      assert.deepEqual(session.getSnapshot().account, { status: "guest" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("comes back with the account however it is answered", async () => {
+    const server = await startServer(26);
+    try {
+      const account = fakeAccount();
+      const first = await signUp(
+        server,
+        { sub: "google-ada", name: "Ada" },
+        { account: account.store },
+      );
+      assert.deepEqual(
+        customCalls(first.getSnapshot()),
+        { customYanivCall: null, customAssafCall: null },
+        "a new account, from createAccount, has chosen no words",
+      );
+      first.setCustomCall("yaniv", "I WIN");
+      await settled(first, "the custom Yaniv call");
+      first.setCustomCall("assaf", "GOTCHA");
+      await settled(first, "the custom Assaf call");
+      const chosen = { customYanivCall: "I WIN", customAssafCall: "GOTCHA" };
+
+      first.renameAccount("Countess");
+      assert.deepEqual(customCalls(await settled(first, "the rename")), chosen, "a rename");
+
+      const again = await server.openSession();
+      again.signIn(`${ID_TOKEN_MARK}google-ada`);
+      assert.deepEqual(customCalls(await settled(again, "the sign-in")), chosen, "a sign-in");
+
+      const back = server.bootSession({ account: account.store });
+      assert.deepEqual(
+        customCalls(await settled(back, "the resumed session")),
+        chosen,
+        "a resumed session",
+      );
     } finally {
       await server.close();
     }

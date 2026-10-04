@@ -14,9 +14,11 @@ import {
   loadStats,
   renameAccount,
   resumeSession,
+  setCustomCall,
   signIn,
   type Auth,
 } from "../../src/auth/flows.ts";
+import { MAX_CUSTOM_CALL_LENGTH } from "@yaniv/shared";
 import { createMemoryProfileStore } from "../../src/profiles.ts";
 import { SESSION_TOKEN_MARK, expectErr, markedSessionTokens, unwrap } from "../helpers.ts";
 import { fakeVerifier, type FakeVerifier } from "./verifier.ts";
@@ -117,7 +119,14 @@ describe("createAccount", () => {
     assert.equal(created.status, "signedIn");
     assert.equal(created.sessionToken, FIRST_SESSION);
     assert.equal(created.account.displayName, "Ada");
-    assert.deepEqual(Object.keys(created.account).sort(), ["displayName", "id"]);
+    assert.deepEqual(Object.keys(created.account).sort(), [
+      "customAssafCall",
+      "customYanivCall",
+      "displayName",
+      "id",
+    ]);
+    assert.equal(created.account.customYanivCall, null, "a new account has chosen no words");
+    assert.equal(created.account.customAssafCall, null);
   });
 
   it("stores the credential as Google's sub, with no secret", async () => {
@@ -195,7 +204,7 @@ describe("renameAccount", () => {
     const { auth, google } = setup();
     google.vouchFor("id-ada", { sub: "sub-ada", name: "Ada Lovelace" });
     const created = unwrap(await createAccount(auth, "id-ada", "Ada"));
-    const renamed = { id: created.account.id, displayName: "Countess" };
+    const renamed = { ...created.account, displayName: "Countess" };
 
     assert.deepEqual(unwrap(await renameAccount(auth, created.account.id, " Countess ")), {
       account: renamed,
@@ -212,6 +221,73 @@ describe("renameAccount", () => {
 
     expectErr(await renameAccount(auth, created.account.id, ""), "INVALID_NAME");
     expectErr(await renameAccount(auth, created.account.id, "x".repeat(21)), "INVALID_NAME");
+
+    assert.deepEqual(unwrap(await resumeSession(auth, created.sessionToken)), {
+      account: created.account,
+    });
+  });
+});
+
+describe("setCustomCall", () => {
+  /** A signed-up account, and the session that resumes it — the flows' way of reading back. */
+  async function signedUp() {
+    const { auth, google } = setup();
+    google.vouchFor("id-ada", { sub: "sub-ada", name: "Ada Lovelace" });
+    const created = unwrap(await createAccount(auth, "id-ada", "Ada"));
+    return { auth, created };
+  }
+
+  it("sets each custom call, trimmed, and answers the account as it now stands", async () => {
+    const { auth, created } = await signedUp();
+    const id = created.account.id;
+
+    assert.deepEqual(unwrap(await setCustomCall(auth, id, "yaniv", " I WIN! ")), {
+      account: { id, displayName: "Ada", customYanivCall: "I WIN!", customAssafCall: null },
+    });
+    const both = {
+      account: { id, displayName: "Ada", customYanivCall: "I WIN!", customAssafCall: "GOTCHA" },
+    };
+    assert.deepEqual(unwrap(await setCustomCall(auth, id, "assaf", "GOTCHA")), both);
+    assert.deepEqual(unwrap(await resumeSession(auth, created.sessionToken)), both);
+  });
+
+  it("unsets a call on an empty text, leaving the other alone", async () => {
+    const { auth, created } = await signedUp();
+    const id = created.account.id;
+    await setCustomCall(auth, id, "yaniv", "I WIN");
+    await setCustomCall(auth, id, "assaf", "GOTCHA");
+
+    const unset = unwrap(await setCustomCall(auth, id, "yaniv", "   "));
+
+    assert.equal(unset.account.customYanivCall, null, "unset, never an empty string");
+    assert.equal(unset.account.customAssafCall, "GOTCHA");
+    assert.equal((await auth.store.loadAccount(id))?.customYanivCall, null);
+  });
+
+  it("refuses a text the custom-call rule does not allow, and keeps the old one", async () => {
+    const { auth, created } = await signedUp();
+    const id = created.account.id;
+    await setCustomCall(auth, id, "yaniv", "I WIN");
+
+    for (const text of ["W".repeat(MAX_CUSTOM_CALL_LENGTH + 1), "I WIN 🃏", "I  WIN", "I\tWIN"]) {
+      const refused = await setCustomCall(auth, id, "yaniv", text);
+      expectErr(refused, "INVALID_CUSTOM_CALL");
+      assert.match(!refused.ok ? refused.error.message : "", new RegExp(`up to ${MAX_CUSTOM_CALL_LENGTH}`));
+    }
+
+    assert.equal(
+      unwrap(await resumeSession(auth, created.sessionToken)).account.customYanivCall,
+      "I WIN",
+    );
+  });
+
+  it("refuses a call that is neither Yaniv nor Assaf, and sets nothing", async () => {
+    const { auth, created } = await signedUp();
+    const id = created.account.id;
+
+    for (const call of ["slapdown", "YANIV", "", undefined, null, 1, { call: "yaniv" }]) {
+      expectErr(await setCustomCall(auth, id, call, "I WIN"), "INVALID_CUSTOM_CALL");
+    }
 
     assert.deepEqual(unwrap(await resumeSession(auth, created.sessionToken)), {
       account: created.account,
@@ -284,6 +360,19 @@ describe("a payload that is not a string", () => {
     for (const displayName of offContract) {
       expectErr(await createAccount(auth, "id-grace", displayName), "INVALID_NAME");
       expectErr(await renameAccount(auth, created.account.id, displayName), "INVALID_NAME");
+    }
+  });
+
+  it("is a custom call the rule refuses", async () => {
+    const { auth, google } = setup();
+    google.vouchFor("id-ada", { sub: "sub-ada" });
+    const created = unwrap(await createAccount(auth, "id-ada", "Ada"));
+
+    for (const text of offContract) {
+      expectErr(
+        await setCustomCall(auth, created.account.id, "yaniv", text),
+        "INVALID_CUSTOM_CALL",
+      );
     }
   });
 });

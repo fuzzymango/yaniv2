@@ -50,7 +50,9 @@ holds across the trees, and is not discoverable by reading one file:
   being allowed to end two ways depending on who is looking, and `displayName.ts`, the one
   rule every name a player chooses goes through — trimmed, then 1–20 letters and digits of any
   script with single spaces between words, refused and never tidied (#227); a bot's
-  "(bot)" label is the server's own and never asked about. `account.ts` is the
+  "(bot)" label is the server's own and never asked about. `customCall.ts` is its sibling for
+  a custom call — the same words plus `! ? . , ' -`, capped at 24 on the upper-cased text the
+  banner draws, and empty meaning **unset** rather than refused. `account.ts` is the
   account on the wire and **types only** (`AccountView`, deliberately no stat, the `signIn`
   ack, and `Stats`, the six counters the store keeps and `loadStats` answers — one list for
   both, `docs/adr/0026`) — verifying, minting and storing are the server's
@@ -274,13 +276,16 @@ object rather than two optional fields, so a half-bound connection is unrepresen
 (docs/adr/0022): "session" already meant the main menu's session core, and the session token
 made it three.
 
-**`socket.data.account = { accountId, displayName, sessionToken }` sits beside it,
-independent**: an account binds at the main menu before any room and survives leaving one. Five
-acked events drive it — `signIn`, `createAccount`, `resumeSession`, `signOut`, `renameAccount`
-(docs/adr/0021) — and a sixth, `loadStats`, reads the account's stats through it, fresh, never
-carried on `AccountView` (0026); no HTTP surface and no `handshake.auth`. Each handler is a
-flow from `auth/flows.ts` and a binding, holding no auth logic; all six are accepted seated or
-not, and **binding an account over
+**`socket.data.account = { accountId, displayName, customYanivCall, customAssafCall,
+sessionToken }` sits beside it, independent**: an account binds at the main menu before any room
+and survives leaving one. Six acked events drive it — `signIn`, `createAccount`,
+`resumeSession`, `signOut`, `renameAccount` (docs/adr/0021) and `setCustomCall` (#126, an empty
+text unsetting a call, `INVALID_CUSTOM_CALL` for what `shared`'s `customCall.ts` rule refuses) —
+and a seventh, `loadStats`, reads the account's stats through it, fresh, never carried on
+`AccountView` (0026), where the two custom calls are; no HTTP surface and no `handshake.auth`.
+The binding carries the custom calls because a seat will copy them from it, as it copies the
+name (#238). Each handler is a flow from `auth/flows.ts` and a binding, holding no auth logic;
+all seven are accepted seated or not, and **binding an account over
 another replaces it** without error, an account binding orphaning nobody. **Newer wins at
 bind**: binding an account puts down any other connection bound to it. The session token
 reaches the wire in exactly one payload, its `signIn`/`createAccount` ack — the marked-token
@@ -608,7 +613,7 @@ it), and the two
 first sign-in resends is held privately, and the session token sits in a second injected store
 beside the seat's (`tokens.ts`). A cold boot resumes the **account, then the seat**, `resuming`
 up across both. **`busy` locks on emit and settles two ways** — on the ack for entering,
-leaving, the five account events that act (`loadStats` is a read and locks nothing) and
+leaving, the six account events that act (`loadStats` is a read and locks nothing) and
 anything producing a new position, on a strictly newer position for a move — so a control is never released over a position still showing the
 mover's own turn. **The client never enforces a rule the server owns**: what is
 legal about the cards is all it applies ahead of the server (ADR-0002), and everything else it
@@ -648,6 +653,9 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **Bots slapping down for themselves.** A human can win one inside the pause a bot takes before
   its turn, but no bot slaps down for itself — ADR-0005's other half.
 - **Disambiguating a joker that extends a run.** Tap order decides where it sits — a wart (§4).
+- **A content filter for custom calls**, or for names. Rooms are joined by invite code, and a
+  word list is easy to get round and catches innocent words in every script the rules allow; if
+  public matchmaking arrives, filtering both is one question (#233).
 
 ## Running things
 

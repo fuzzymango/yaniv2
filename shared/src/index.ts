@@ -34,6 +34,9 @@ export {
 
 export { MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from "./displayName.ts";
 
+export { MAX_CUSTOM_CALL_LENGTH, normalizeCustomCall } from "./customCall.ts";
+export type { Call, CustomCallVerdict } from "./customCall.ts";
+
 export type { GameErrorCode, GameError } from "./errors.ts";
 
 export type { AccountView, SignedIn, NameNeeded, SignInResult, Stats } from "./account.ts";

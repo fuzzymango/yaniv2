@@ -19,6 +19,7 @@
 import type {
   AccountView,
   Ack,
+  Call,
   ClientToServerEvents,
   GameError,
   PlayerGameView,
@@ -296,6 +297,13 @@ export interface Session {
   cancelSignIn: () => void;
   /** Change the account's name, from the next room on. Signed in only. */
   renameAccount: (displayName: string) => void;
+  /**
+   * Set the account's custom Yaniv call or custom Assaf call, from the next room on; an
+   * empty text puts the banner's own word back. Signed in only. Sent as given and judged by
+   * the server — the profile asks the shared rule before it sends — so a refusal is the
+   * server's, settled on its ack with the standing kept, as a refused rename's is.
+   */
+  setCustomCall: (call: Call, text: string) => void;
   /**
    * Read the account's stats afresh: `stats` blanked now and filled from the answer, or
    * left blank if the server refuses — a connection not signed in. A read, not an action:
@@ -984,7 +992,7 @@ export function createSession(
 
   /**
    * How an account event goes out: locked on the way, and settled on its ack — the only
-   * answer there is, none of the five producing a position to wait for (#174 §11). The
+   * answer there is, none of the six producing a position to wait for (#174 §11). The
    * notice goes with the error, as it does on the way into a room: a player acting again
    * has read the last piece of news.
    *
@@ -995,6 +1003,26 @@ export function createSession(
     if (snapshot.busy) return;
     publish({ error: null, notice: null, busy: true });
     emit();
+  };
+
+  /**
+   * The ack of an edit to the signed-in account — a rename or a custom call — which answers
+   * with the account as it now stands. Landed, that replaces the standing; refused, the
+   * standing is kept for the panel asked from it to say why.
+   */
+  const accountChanged: Ack<{ account: AccountView }> = (result) => {
+    if (result.ok) {
+      publish({ account: signInAs(result.value.account), error: null, busy: false });
+      return;
+    }
+    // The server holds no account for this connection, whatever the screen says: the same
+    // news as a session refused on the way in, and the same landing.
+    if (result.error.code === "INVALID_SESSION") {
+      forgetAccount();
+      publish({ account: GUEST, notice: SESSION_LAPSED, error: null, busy: false });
+      return;
+    }
+    settle(result.error);
   };
 
   /**
@@ -1086,22 +1114,12 @@ export function createSession(
       const name = accountName(displayName);
       if (name === null) return;
 
-      accountEvent(() =>
-        socket.emit("renameAccount", name, (result) => {
-          if (result.ok) {
-            publish({ account: signInAs(result.value.account), error: null, busy: false });
-            return;
-          }
-          // The server holds no account for this connection, whatever the screen says: the
-          // same news as a session refused on the way in, and the same landing.
-          if (result.error.code === "INVALID_SESSION") {
-            forgetAccount();
-            publish({ account: GUEST, notice: SESSION_LAPSED, error: null, busy: false });
-            return;
-          }
-          settle(result.error);
-        }),
-      );
+      accountEvent(() => socket.emit("renameAccount", name, accountChanged));
+    },
+
+    setCustomCall: (call, text) => {
+      if (snapshot.busy || snapshot.account.status !== "signedIn") return;
+      accountEvent(() => socket.emit("setCustomCall", call, text, accountChanged));
     },
 
     /*

@@ -58,7 +58,7 @@ identity. Ten fields, and each answers a different question:
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room settles
 on the **ack**: entry has been broadcast before it is acked, and a departing connection is
-published to no longer. The five account events that act settle on the ack too (`loadStats`, a read, locks nothing), producing no position at
+published to no longer. The six account events that act settle on the ack too (`loadStats`, a read, locks nothing), producing no position at
 all, so there is no newer broadcast to wait for. So do dealing the next round, dealing another match,
 and editing the room's settings, which produce a position rather than moving within one —
 and, in the settings case, none at all when refused, since a rejected edit is broadcast to
@@ -153,8 +153,18 @@ keys (docs/adr/0020), and at a table the seat is the one being sat in. Both are 
 the emit and Google's `disableAutoSelect()` is called — injected as `GoogleSignIn`, `google.ts`
 being the one file that knows `window.google` — so a reload mid-flight cannot sign back in. It is
 not sent over a dead socket: the next connection would arrive bound to no account and the
-server would have no session to end. A `renameAccount` refused `INVALID_SESSION` lands where a
-lapsed session does, below.
+server would have no session to end. A `renameAccount` or `setCustomCall` refused
+`INVALID_SESSION` lands where a lapsed session does, below.
+
+**Custom calls are set one at a time, and judged by the server** (#126). `setCustomCall(call,
+text)` sends the text as given — signed in only, nothing sent for a guest — locks `busy` and
+settles on the ack, which answers with the account as it now stands: landed, the signed-in
+standing is replaced from it, as a rename's is, and an empty text comes back as that call
+`null`, the banner's own word; refused (`INVALID_CUSTOM_CALL`), the standing is kept, the same
+object, and `error` says why. Unlike `renameAccount` it applies no rule before sending: the
+profile asks `normalizeCustomCall` itself before it calls the intent, so the session's suite
+meets the server's refusals rather than its own. Both calls ride every `AccountView`, so a
+sign-in, an account created, a resumed session and a rename all answer them.
 
 **A refusal is put down when the panel that asked for it closes.** `cancelSignIn` clears `error`
 on its way back to a guest, and `clearError` — nothing sent, nothing else touched, the account

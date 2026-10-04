@@ -18,10 +18,9 @@
  * to announce" is one of them.
  */
 
-import type { PlayerGameView } from "@yaniv/shared";
-
-/** The two things a round can turn on, and there are no others (docs/rules.md §6). */
-export type Call = "yaniv" | "assaf";
+// `Call` is the two things a round can turn on, and there are no others (docs/rules.md §6):
+// `shared`'s, because it is also which custom call an account sets over the wire.
+import type { Call, PlayerGameView } from "@yaniv/shared";
 
 /** One banner: the word, and the seat it goes over. Position is what says who. */
 export interface Banner {

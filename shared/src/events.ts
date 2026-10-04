@@ -1,4 +1,5 @@
 import type { AccountView, SignedIn, SignInResult, Stats } from "./account.ts";
+import type { Call } from "./customCall.ts";
 import type { GameError } from "./errors.ts";
 import type { RoomSettings } from "./settings.ts";
 import type { PlayerGameView } from "./views.ts";
@@ -68,6 +69,13 @@ export interface ClientToServerEvents {
    * `INVALID_SESSION` from a connection not signed in.
    */
   renameAccount: (displayName: string, ack: Ack<{ account: AccountView }>) => void;
+  /**
+   * Set the bound account's custom Yaniv call or custom Assaf call, answered with the
+   * account as it now stands; an empty text unsets it. From the next room on, as a rename
+   * is. `INVALID_CUSTOM_CALL` for a text the rule refuses, a call that is neither, or a
+   * text that is not a string; `INVALID_SESSION` from a connection not signed in.
+   */
+  setCustomCall: (call: Call, text: string, ack: Ack<{ account: AccountView }>) => void;
   /**
    * The bound account's six stats, as the store holds them at this moment — read fresh
    * each time a profile opens, rather than carried on an `AccountView` answered before the

@@ -23,6 +23,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  NO_CUSTOM_CALLS,
   NO_STATS,
   type Account,
   type AccountId,
@@ -36,6 +37,8 @@ import type { SqlClient } from "./connect.ts";
 interface AccountRow {
   id: string;
   display_name: string;
+  custom_yaniv_call: string | null;
+  custom_assaf_call: string | null;
   yaniv_calls: number;
   calls_assafed: number;
   assafs: number;
@@ -58,6 +61,8 @@ interface CredentialRow {
 const toAccount = (row: AccountRow): Account => ({
   id: row.id,
   displayName: row.display_name,
+  customYanivCall: row.custom_yaniv_call,
+  customAssafCall: row.custom_assaf_call,
   yanivCalls: row.yaniv_calls,
   callsAssafed: row.calls_assafed,
   assafs: row.assafs,
@@ -102,8 +107,14 @@ export function createSqlProfileStore(sql: SqlClient): ProfileStore {
        * key refuses it — takes the account row down with it and leaves no account nobody
        * can sign in to. The caller's answer to a returning player is `findByCredential`.
        */
-      // Every stat is left to its column's default of zero, which is what `NO_STATS` says.
-      const account: Account = { id: randomUUID(), displayName, ...NO_STATS };
+      // Every stat is left to its column's default of zero, which is what `NO_STATS` says, and
+      // both custom calls to theirs of null, which is what `NO_CUSTOM_CALLS` says.
+      const account: Account = {
+        id: randomUUID(),
+        displayName,
+        ...NO_CUSTOM_CALLS,
+        ...NO_STATS,
+      };
 
       await sql.begin(async (tx) => {
         await tx`
@@ -137,8 +148,8 @@ export function createSqlProfileStore(sql: SqlClient): ProfileStore {
       if (!UUID.test(id)) return null;
 
       const [row] = await sql<AccountRow[]>`
-        select id, display_name, yaniv_calls, calls_assafed, assafs, games_completed,
-          games_won, slapdowns
+        select id, display_name, custom_yaniv_call, custom_assaf_call, yaniv_calls,
+          calls_assafed, assafs, games_completed, games_won, slapdowns
         from account where id = ${id}
       `;
       return row ? toAccount(row) : null;
@@ -150,6 +161,20 @@ export function createSqlProfileStore(sql: SqlClient): ProfileStore {
       const updated = await sql`
         update account set display_name = ${displayName} where id = ${id} returning id
       `;
+      requireUpdated(updated, id);
+    },
+
+    async setCustomCall(id, call, text) {
+      // Two fixed templates rather than a column named from `call`: a column is not a value
+      // the driver can bind, and every query in this file stays one a reader can see whole.
+      const updated =
+        call === "yaniv"
+          ? await sql`
+              update account set custom_yaniv_call = ${text} where id = ${id} returning id
+            `
+          : await sql`
+              update account set custom_assaf_call = ${text} where id = ${id} returning id
+            `;
       requireUpdated(updated, id);
     },
 
