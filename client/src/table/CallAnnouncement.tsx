@@ -26,8 +26,8 @@
  *
  * Presentational throughout, like `PlayingCard`: it decides nothing. Which seats get a
  * banner, in which order and saying what, is `announcement.ts`'s and is asserted there — this
- * maps one `PlacedBanner` onto capitals, a size, a colour and two delays, and holds no
- * conditional of its own. The durations come down from `timing.ts` as custom properties
+ * maps one `PlacedBanner` onto capitals, a size, a colour and two delays, and decides
+ * nothing about the round: its one lookup is the size step, which is styling. The durations come down from `timing.ts` as custom properties
  * rather than being written into the stylesheet, so the chain stays in the one place a test
  * can assert it.
  *

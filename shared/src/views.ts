@@ -46,7 +46,7 @@ export interface SeatView extends MatchStanding {
   accountId: string | null;
   /** The seat's custom Yaniv call, or null. See `OpponentView.customYanivCall`. */
   customYanivCall: string | null;
-  /** The seat's custom Assaf call, or null. See `OpponentView.customYanivCall`. */
+  /** The seat's custom Assaf call, or null. See `OpponentView.customAssafCall`. */
   customAssafCall: string | null;
 }
 

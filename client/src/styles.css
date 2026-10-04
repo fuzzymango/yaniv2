@@ -1173,8 +1173,9 @@ body {
 
 /*
  * The call, over the seat it belongs to: `YANIV` for the call, `ASSAF` for the Assaf that
- * answered it (issue #156), or the seat's custom call for either (issue #238). No name and no number — position is what says who, which is the whole
- * reason this sits in a seat's box rather than in the middle of the felt.
+ * answered it (issue #156), or the seat's custom call for either (issue #238). No name and no
+ * number — position is what says who, which is the whole reason this sits in a seat's box
+ * rather than in the middle of the felt.
  *
  * Color is deliberately not set here: `.announce--yaniv` and `.announce--assaf` (below) each
  * set their own, off `--announce-yaniv`/`--announce-assaf` rather than off this shared rule,

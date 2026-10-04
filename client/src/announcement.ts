@@ -23,11 +23,9 @@
 import type { Call, OpponentView, PlayerGameView, SelfView } from "@yaniv/shared";
 
 /**
- * The word each call is announced as where its seat chose none, and **upper case here rather
- * than in the stylesheet**: the default is exactly `YANIV` or `ASSAF`, so what a text
- * transform makes of it is not the place that decision should live. Exported for the
- * profile, which shows it where no custom call is set (#237) — the table's word, so the two
- * cannot drift.
+ * The word each call is announced as where its seat chose none. Written in capitals though
+ * the banner upper-cases whatever it is handed: the profile shows it as it stands where no
+ * custom call is set (#237) — the table's word, so the two cannot drift.
  */
 export const CALL_WORD: Readonly<Record<Call, string>> = {
   yaniv: "YANIV",

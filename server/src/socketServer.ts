@@ -409,8 +409,7 @@ export function createSocketServer(
      * display name and with its own custom calls, or a guest under the name they typed and
      * with none. **A signed-in player is never asked for a name** — whatever the payload
      * claims is ignored — because identity is one answer and not one per table
-     * (docs/adr/0019), and the seat label is then always a
-     * reliable "who is that".
+     * (docs/adr/0019), and the seat label is then always a reliable "who is that".
      */
     function seatedAs(typedName: string): Occupant {
       const account = socket.data.account;
