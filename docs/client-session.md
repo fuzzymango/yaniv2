@@ -52,13 +52,14 @@ identity. Ten fields, and each answers a different question:
   The **one-shot**: `publish` clears it unless the publication being made is the one drawing that
   move, so a tap, a refusal or a reconnect never flies a card again. Decided in `show`, by asking
   `flight.ts`. See "Card flight" in `CONTEXT.md`.
-- **`announcement`** — the call a scored round arrived on, ordered, and null otherwise. The same
+- **`announcement`** — the call a scored round arrived on, ordered, each banner with its words
+  (the seat's custom call, else `YANIV`/`ASSAF`, #238), and null otherwise. The same
   one-shot in the same place, asking `announcement.ts` — which keys on the **scorecard growing**,
   never on a round result standing. See "Call announcement" in `CONTEXT.md` and docs/adr/0018.
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room settles
 on the **ack**: entry has been broadcast before it is acked, and a departing connection is
-published to no longer. The five account events that act settle on the ack too (`loadStats`, a read, locks nothing), producing no position at
+published to no longer. The six account events that act settle on the ack too (`loadStats`, a read, locks nothing), producing no position at
 all, so there is no newer broadcast to wait for. So do dealing the next round, dealing another match,
 and editing the room's settings, which produce a position rather than moving within one —
 and, in the settings case, none at all when refused, since a rejected edit is broadcast to
@@ -153,15 +154,25 @@ keys (docs/adr/0020), and at a table the seat is the one being sat in. Both are 
 the emit and Google's `disableAutoSelect()` is called — injected as `GoogleSignIn`, `google.ts`
 being the one file that knows `window.google` — so a reload mid-flight cannot sign back in. It is
 not sent over a dead socket: the next connection would arrive bound to no account and the
-server would have no session to end. A `renameAccount` refused `INVALID_SESSION` lands where a
-lapsed session does, below.
+server would have no session to end. A `renameAccount` or `setCustomCall` refused
+`INVALID_SESSION` lands where a lapsed session does, below.
+
+**Custom calls are set one at a time, and judged by the server** (#126). `setCustomCall(call,
+text)` sends the text as given — signed in only, nothing sent for a guest — locks `busy` and
+settles on the ack, which answers with the account as it now stands: landed, the signed-in
+standing is replaced from it, as a rename's is, and an empty text comes back as that call
+`null`, the banner's own word; refused (`INVALID_CUSTOM_CALL`), the standing is kept, the same
+object, and `error` says why. Unlike `renameAccount` it applies no rule before sending: the
+profile asks `normalizeCustomCall` itself before it calls the intent, so the session's suite
+meets the server's refusals rather than its own. Both calls ride every `AccountView`, so a
+sign-in, an account created, a resumed session and a rename all answer them.
 
 **A refusal is put down when the panel that asked for it closes.** `cancelSignIn` clears `error`
 on its way back to a guest, and `clearError` — nothing sent, nothing else touched, the account
-standing included — is the profile's way in and out, and its name editor's (#229): a refusal
-left over from the menu is no answer about a name, and one the editor was showing is about a
-question nobody is asking once it has closed. None of them is the session's: the menu decides
-when the panels open, the profile when its editor does.
+standing included — is the profile's way in and out, and its editors' (#229, #237): a refusal
+left over from the menu is no answer about a name or a call, and one an editor was showing is
+about a question nobody is asking once it has closed. None of them is the session's: the menu
+decides when the panels open, the profile when its editors do.
 
 **Stats are read fresh, and belong to one account** (docs/adr/0026). `loadStats()` blanks
 `stats`, emits, and fills it from the ack — only the latest read's, and only while the account it

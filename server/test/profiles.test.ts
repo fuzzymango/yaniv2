@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
 import {
   createMemoryProfileStore,
+  NO_CUSTOM_CALLS,
   NO_STATS,
   type NewCredential,
   type ProfileStore,
@@ -66,13 +67,15 @@ for (const [name, createStore] of implementations) {
     }
 
     describe("createAccount", () => {
-      it("returns an account with the name it was given and every stat at zero", async (t) => {
+      it("returns an account with the name it was given, no custom call and every stat at zero", async (t) => {
         const store = storeFor(t);
         const account = await store.createAccount("Ada", googleCredential("google-1"));
 
         assert.deepEqual(account, {
           id: account.id,
           displayName: "Ada",
+          customYanivCall: null,
+          customAssafCall: null,
           yanivCalls: 0,
           callsAssafed: 0,
           assafs: 0,
@@ -167,7 +170,12 @@ for (const [name, createStore] of implementations) {
         loaded.displayName = "Grace";
         loaded.yanivCalls = 99;
 
-        assert.deepEqual(await store.loadAccount(id), { id, displayName: "Ada", ...NO_STATS });
+        assert.deepEqual(await store.loadAccount(id), {
+          id,
+          displayName: "Ada",
+          ...NO_CUSTOM_CALLS,
+          ...NO_STATS,
+        });
       });
     });
 
@@ -182,9 +190,23 @@ for (const [name, createStore] of implementations) {
         assert.deepEqual(await store.loadAccount(id), {
           id,
           displayName: "Grace",
+          ...NO_CUSTOM_CALLS,
           ...NO_STATS,
           yanivCalls: 1,
         });
+      });
+
+      it("leaves the custom calls alone", async (t) => {
+        const store = storeFor(t);
+        const { id } = await store.createAccount("Ada", googleCredential("google-1"));
+        await store.setCustomCall(id, "yaniv", "I WIN");
+        await store.setCustomCall(id, "assaf", "GOTCHA");
+
+        await store.renameAccount(id, "Grace");
+
+        const renamed = await store.loadAccount(id);
+        assert.equal(renamed?.customYanivCall, "I WIN");
+        assert.equal(renamed?.customAssafCall, "GOTCHA");
       });
 
       it("leaves the credential reaching the same account", async (t) => {
@@ -203,6 +225,87 @@ for (const [name, createStore] of implementations) {
       });
     });
 
+    /*
+     * One setter for both calls, named by the call it sets: the two are independent, so
+     * setting one is never a write to the other, and `null` is how either goes back to the
+     * banner's own word — the store holds no empty string for it.
+     */
+    describe("setCustomCall", () => {
+      it("sets the custom Yaniv call, read back through a loaded account", async (t) => {
+        const store = storeFor(t);
+        const { id } = await store.createAccount("Ada", googleCredential("google-1"));
+
+        await store.setCustomCall(id, "yaniv", "I WIN");
+
+        assert.deepEqual(await store.loadAccount(id), {
+          id,
+          displayName: "Ada",
+          customYanivCall: "I WIN",
+          customAssafCall: null,
+          ...NO_STATS,
+        });
+      });
+
+      it("sets the custom Assaf call, read back through a loaded account", async (t) => {
+        const store = storeFor(t);
+        const { id } = await store.createAccount("Ada", googleCredential("google-1"));
+
+        await store.setCustomCall(id, "assaf", "GOTCHA");
+
+        assert.deepEqual(await store.loadAccount(id), {
+          id,
+          displayName: "Ada",
+          customYanivCall: null,
+          customAssafCall: "GOTCHA",
+          ...NO_STATS,
+        });
+      });
+
+      it("replaces a call already set, and leaves the other as it was", async (t) => {
+        const store = storeFor(t);
+        const { id } = await store.createAccount("Ada", googleCredential("google-1"));
+        await store.setCustomCall(id, "yaniv", "I WIN");
+        await store.setCustomCall(id, "assaf", "GOTCHA");
+
+        await store.setCustomCall(id, "yaniv", "MINE");
+
+        const account = await store.loadAccount(id);
+        assert.equal(account?.customYanivCall, "MINE");
+        assert.equal(account?.customAssafCall, "GOTCHA");
+      });
+
+      it("unsets a call set to null, and leaves the other as it was", async (t) => {
+        const store = storeFor(t);
+        const { id } = await store.createAccount("Ada", googleCredential("google-1"));
+        await store.setCustomCall(id, "yaniv", "I WIN");
+        await store.setCustomCall(id, "assaf", "GOTCHA");
+
+        await store.setCustomCall(id, "assaf", null);
+
+        const account = await store.loadAccount(id);
+        assert.equal(account?.customYanivCall, "I WIN");
+        assert.equal(account?.customAssafCall, null);
+      });
+
+      it("changes neither the name nor the stats", async (t) => {
+        const store = storeFor(t);
+        const { id } = await store.createAccount("Ada", googleCredential("google-1"));
+        await store.recordStats(id, { assafs: 2 });
+
+        await store.setCustomCall(id, "yaniv", "I WIN");
+
+        const account = await store.loadAccount(id);
+        assert.equal(account?.displayName, "Ada");
+        assert.equal(account?.assafs, 2);
+      });
+
+      it("throws against an account that is not there", async (t) => {
+        const store = storeFor(t);
+
+        await assert.rejects(() => store.setCustomCall("nobody", "yaniv", "I WIN"));
+      });
+    });
+
     describe("recordStats", () => {
       it("adds the counters a delta names and leaves the rest alone", async (t) => {
         const store = storeFor(t);
@@ -214,6 +317,7 @@ for (const [name, createStore] of implementations) {
         assert.deepEqual(await store.loadAccount(id), {
           id,
           displayName: "Ada",
+          ...NO_CUSTOM_CALLS,
           yanivCalls: 2,
           callsAssafed: 1,
           assafs: 0,
@@ -237,7 +341,12 @@ for (const [name, createStore] of implementations) {
 
         await store.recordStats(id, everything);
 
-        assert.deepEqual(await store.loadAccount(id), { id, displayName: "Ada", ...everything });
+        assert.deepEqual(await store.loadAccount(id), {
+          id,
+          displayName: "Ada",
+          ...NO_CUSTOM_CALLS,
+          ...everything,
+        });
       });
 
       it("adds up writes made at once", async (t) => {

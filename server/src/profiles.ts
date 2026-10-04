@@ -36,7 +36,7 @@
  * (docs/adr/0019); the seam need not carry one until something calls it.
  */
 
-import type { Stats } from "@yaniv/shared";
+import type { Call, Stats } from "@yaniv/shared";
 import { randomUUID } from "node:crypto";
 
 /** An account's own id — a UUID, as `Player.id` already is, and never anything Google issued. */
@@ -63,14 +63,31 @@ export const NO_STATS: Readonly<Stats> = {
 };
 
 /**
- * An identity that outlives every room: the name a player is known by, and its stats.
+ * The words an account has chosen for its seat to shout (`CONTEXT.md`, **Custom calls**):
+ * `null` is unset, the banner's own word, and never an empty string. Named *custom* always,
+ * beside a `yanivCalls` stat it must never be read as.
+ */
+export interface CustomCalls {
+  customYanivCall: string | null;
+  customAssafCall: string | null;
+}
+
+/** A new account's custom calls: neither set. */
+export const NO_CUSTOM_CALLS: Readonly<CustomCalls> = {
+  customYanivCall: null,
+  customAssafCall: null,
+};
+
+/**
+ * An identity that outlives every room: the name a player is known by, the custom calls its
+ * seat will shout, and its stats.
  *
  * No created-at, though the column exists: nothing reads it, and a field on the seam is
  * a conversion every implementation has to agree on (epoch milliseconds? a `Date`?) with
  * no caller to settle the question against. It is a column for whoever is looking at the
  * database, and it joins this type when something here asks for it.
  */
-export interface Account extends Stats {
+export interface Account extends CustomCalls, Stats {
   id: AccountId;
   displayName: string;
 }
@@ -117,6 +134,17 @@ export interface ProfileStore {
    * caller applies it, because the caller is who has an `INVALID_NAME` to answer with.
    */
   renameAccount(id: AccountId, displayName: string): Promise<void>;
+
+  /**
+   * Set one of an account's custom calls, or unset it with `null`, leaving the other as it
+   * was. Throws if there is no such account.
+   *
+   * One method naming the call rather than one per call, on `recordStats`' grounds: the
+   * seam stays narrow. The text is stored as given — `normalizeCustomCall` (`shared`) is
+   * the rule and the caller applies it, as for a name, and turns an empty field into the
+   * `null` stored here.
+   */
+  setCustomCall(id: AccountId, call: Call, text: string | null): Promise<void>;
 
   /**
    * Add `delta` to an account's stats, as one atomic increment — every counter it names
@@ -209,7 +237,12 @@ export function createMemoryProfileStore(): ProfileStore {
         throw new Error(`credential ${credential.kind}:${credential.identifier} is taken`);
       }
 
-      const account: Account = { id: randomUUID(), displayName, ...NO_STATS };
+      const account: Account = {
+        id: randomUUID(),
+        displayName,
+        ...NO_CUSTOM_CALLS,
+        ...NO_STATS,
+      };
       accounts.set(account.id, account);
       credentials.set(key, { ...credential, accountId: account.id });
       return copy(account);
@@ -227,6 +260,12 @@ export function createMemoryProfileStore(): ProfileStore {
 
     async renameAccount(id, displayName) {
       requireAccount(id).displayName = displayName;
+    },
+
+    async setCustomCall(id, call, text) {
+      const account = requireAccount(id);
+      if (call === "yaniv") account.customYanivCall = text;
+      else account.customAssafCall = text;
     },
 
     async recordStats(id, delta) {

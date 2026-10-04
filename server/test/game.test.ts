@@ -2319,20 +2319,27 @@ describe("playAgain", () => {
   /**
    * The one transition that rebuilds every `Player` object rather than patching one, so
    * the one most able to drop a field on the way past. A seat carried into another match
-   * is the same seat, and its resume token and the account that took it are what say so.
+   * is the same seat, and its resume token, the account that took it and the custom calls
+   * it copied are what say so.
    */
-  it("carries every seat's resume token and account into the new match", () => {
+  it("carries every seat's resume token, account and custom calls into the new match", () => {
     const finished = finishedMatch([
-      { id: "p1", score: 10, accountId: "account-p1" },
+      {
+        id: "p1",
+        score: 10,
+        accountId: "account-p1",
+        customYanivCall: "I win!",
+        customAssafCall: "Gotcha",
+      },
       { id: "p2", score: 95 },
     ]);
     const again = unwrap(playAgain(finished, "p1", rng()));
 
     assert.deepEqual(
-      again.players.map((p) => [p.resumeToken, p.accountId]),
+      again.players.map((p) => [p.resumeToken, p.accountId, p.customYanivCall, p.customAssafCall]),
       [
-        [`${RESUME_TOKEN_MARK}p1`, "account-p1"],
-        [`${RESUME_TOKEN_MARK}p2`, null],
+        [`${RESUME_TOKEN_MARK}p1`, "account-p1", "I win!", "Gotcha"],
+        [`${RESUME_TOKEN_MARK}p2`, null, null, null],
       ],
     );
   });

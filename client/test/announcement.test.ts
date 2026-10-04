@@ -62,7 +62,7 @@ describe("announcementFrom", () => {
     const before = playing();
     const after = scored([row(1, "p2", null)], reveal(1, "p2", null));
 
-    assert.deepEqual(announcementFrom(before, after), [{ playerId: "p2", call: "yaniv" }]);
+    assert.deepEqual(announcementFrom(before, after), [{ playerId: "p2", call: "yaniv", text: "YANIV" }]);
   });
 
   it("announces the call first and the Assaf second", () => {
@@ -70,8 +70,8 @@ describe("announcementFrom", () => {
     const after = scored([row(1, "p1", "p2")], reveal(1, "p1", "p2"));
 
     assert.deepEqual(announcementFrom(before, after), [
-      { playerId: "p1", call: "yaniv" },
-      { playerId: "p2", call: "assaf" },
+      { playerId: "p1", call: "yaniv", text: "YANIV" },
+      { playerId: "p2", call: "assaf", text: "ASSAF" },
     ]);
   });
 
@@ -121,7 +121,7 @@ describe("announcementFrom", () => {
     const before = playing([row(1, "p2", null)]);
     const after = scored([row(1, "p2", null), row(2, "p1", null)], reveal(2, "p1", null), "gameEnd");
 
-    assert.deepEqual(announcementFrom(before, after), [{ playerId: "p1", call: "yaniv" }]);
+    assert.deepEqual(announcementFrom(before, after), [{ playerId: "p1", call: "yaniv", text: "YANIV" }]);
   });
 
   it("announces nothing on a position nobody watched arrive", () => {
@@ -136,17 +136,109 @@ describe("announcementFrom", () => {
   });
 });
 
+/*
+ * What each banner says (issue #238): the seat's own words for that kind of call where it
+ * chose some, the banner's word where it did not. Who the seat is comes off the arriving
+ * position's roster — the viewer's own seat included, since the caller may be the viewer.
+ */
+describe("the words a banner says", () => {
+  /** An Assafed round arriving, with each seat's custom calls as given. */
+  function assafed(
+    you: { customYanivCall: string | null; customAssafCall: string | null },
+    them: { customYanivCall: string | null; customAssafCall: string | null },
+    callerId = "p1",
+    assaferId = "p2",
+  ) {
+    const after = scored([row(1, callerId, assaferId)], reveal(1, callerId, assaferId));
+    return announcementFrom(playing(), {
+      ...after,
+      you: { ...after.you, ...you },
+      opponents: after.opponents.map((o) => ({ ...o, ...them })),
+    });
+  }
+
+  const UNSET = { customYanivCall: null, customAssafCall: null };
+
+  it("uses a seat's custom call where it has one, as it was typed", () => {
+    const announced = assafed(
+      { customYanivCall: "I win!", customAssafCall: null },
+      { customYanivCall: null, customAssafCall: "Gotcha" },
+    );
+
+    assert.deepEqual(announced, [
+      { playerId: "p1", call: "yaniv", text: "I win!" },
+      { playerId: "p2", call: "assaf", text: "Gotcha" },
+    ]);
+  });
+
+  it("falls back on the banner's own word where a seat has none", () => {
+    assert.deepEqual(assafed(UNSET, UNSET), [
+      { playerId: "p1", call: "yaniv", text: "YANIV" },
+      { playerId: "p2", call: "assaf", text: "ASSAF" },
+    ]);
+  });
+
+  it("reads the custom call for the kind of call made, never the other one", () => {
+    // The caller chose only an Assaf call and the Assafer only a Yaniv call: neither is
+    // what this round asked of them, so both banners say the banner's own word.
+    const announced = assafed(
+      { customYanivCall: null, customAssafCall: "Gotcha" },
+      { customYanivCall: "I win!", customAssafCall: null },
+    );
+
+    assert.deepEqual(announced?.map((b) => b.text), ["YANIV", "ASSAF"]);
+  });
+
+  it("lets the kind and not the text decide which call a banner is", () => {
+    // Words that name the other call are still this call's words: the colour a renderer
+    // draws comes off `call`, so a red banner is an Assaf whatever it says.
+    const announced = assafed(
+      { customYanivCall: "ASSAF", customAssafCall: null },
+      { customYanivCall: null, customAssafCall: "YANIV" },
+    );
+
+    assert.deepEqual(announced, [
+      { playerId: "p1", call: "yaniv", text: "ASSAF" },
+      { playerId: "p2", call: "assaf", text: "YANIV" },
+    ]);
+  });
+
+  it("finds an opponent's seat as readily as the viewer's own", () => {
+    const announced = assafed(
+      { customYanivCall: null, customAssafCall: "Not today" },
+      { customYanivCall: "Mine", customAssafCall: null },
+      "p2",
+      "p1",
+    );
+
+    assert.deepEqual(announced, [
+      { playerId: "p2", call: "yaniv", text: "Mine" },
+      { playerId: "p1", call: "assaf", text: "Not today" },
+    ]);
+  });
+
+  it("hands the words on to the seat the banner goes over", () => {
+    const announced = assafed(
+      { customYanivCall: "I win!", customAssafCall: null },
+      { customYanivCall: null, customAssafCall: "Gotcha" },
+    );
+
+    assert.deepEqual(bannerAt(announced, "p1"), { call: "yaniv", text: "I win!", index: 0, count: 2 });
+    assert.deepEqual(bannerAt(announced, "p2"), { call: "assaf", text: "Gotcha", index: 1, count: 2 });
+  });
+});
+
 describe("bannerAt", () => {
   const pair = announcementFrom(playing(), scored([row(1, "p1", "p2")], reveal(1, "p1", "p2")));
   const alone = announcementFrom(playing(), scored([row(1, "p1", null)], reveal(1, "p1", null)));
 
   it("places the call first and the Assaf second", () => {
-    assert.deepEqual(bannerAt(pair, "p1"), { call: "yaniv", index: 0, count: 2 });
-    assert.deepEqual(bannerAt(pair, "p2"), { call: "assaf", index: 1, count: 2 });
+    assert.deepEqual(bannerAt(pair, "p1"), { call: "yaniv", text: "YANIV", index: 0, count: 2 });
+    assert.deepEqual(bannerAt(pair, "p2"), { call: "assaf", text: "ASSAF", index: 1, count: 2 });
   });
 
   it("gives a lone call a list of one to be last in", () => {
-    assert.deepEqual(bannerAt(alone, "p1"), { call: "yaniv", index: 0, count: 1 });
+    assert.deepEqual(bannerAt(alone, "p1"), { call: "yaniv", text: "YANIV", index: 0, count: 1 });
   });
 
   it("has nothing for a seat the round did not turn on", () => {

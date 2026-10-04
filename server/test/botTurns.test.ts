@@ -18,7 +18,7 @@ import { playBotTurn, type DecideTurn } from "../src/botTurns.ts";
 import { ok } from "../src/result.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { ids, makeState, unwrap, type StateOptions } from "./helpers.ts";
+import { ids, makeState, occupant, unwrap, type StateOptions } from "./helpers.ts";
 
 /** A live room holding exactly the state described, under its real room code. */
 function room(options: StateOptions): { rooms: RoomManager; roomCode: string } {
@@ -26,7 +26,7 @@ function room(options: StateOptions): { rooms: RoomManager; roomCode: string } {
     rng: mulberry32(11),
     newRoomRng: () => mulberry32(22),
   });
-  const { roomCode } = unwrap(rooms.createRoom("Ada", null));
+  const { roomCode } = unwrap(rooms.createRoom(occupant("Ada")));
   unwrap(rooms.apply(roomCode, () => ok({ ...makeState(options), roomCode })));
   return { rooms, roomCode };
 }

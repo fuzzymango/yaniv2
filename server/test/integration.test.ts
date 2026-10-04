@@ -5,9 +5,9 @@ import { canCallYaniv, handValue, legalDiscards } from "@yaniv/shared";
 import { callYaniv, startGame, startNextRound, takeTurn } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { NO_CONNECTIONS, serializeStateForPlayer } from "../src/serialize.ts";
-import type { GameState, GameStateActive } from "../src/state.ts";
+import type { GameState, GameStateActive, Player } from "../src/state.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { unwrap } from "./helpers.ts";
+import { occupant, unwrap } from "./helpers.ts";
 
 /** Every card the round is holding, across hands, deck and both discard areas. */
 function roundCards(state: GameState): Card[] {
@@ -69,25 +69,29 @@ function chooseDiscard(hand: readonly Card[]): Card[] {
   });
 }
 
-/** What a seat is fixed to at its creation: its credential, and the account that took it. */
-interface Issued {
-  resumeToken: string;
-  accountId: string | null;
-}
+/**
+ * What a seat is fixed to at its creation: its credential, the account that took it, and
+ * the custom calls it copied from that account.
+ */
+type Issued = Pick<Player, "resumeToken" | "accountId" | "customYanivCall" | "customAssafCall">;
+
+const issuedTo = ({ resumeToken, accountId, customYanivCall, customAssafCall }: Player): Issued => ({
+  resumeToken,
+  accountId,
+  customYanivCall,
+  customAssafCall,
+});
 
 /**
  * A resume token is issued once, at the seat's creation, and is never rotated; the
- * account a seat was taken under is written then too, and never changed (docs/adr/0022).
+ * account a seat was taken under is written then too, and never changed (docs/adr/0022),
+ * and so are the custom calls it copied (issue #238).
  * Checked on every state a match passes through rather than only at the end, so a
- * transition that rewrote either and a later one that put it back would still be caught.
+ * transition that rewrote any of them and a later one that put it back would still be caught.
  */
 function assertSeatsFixed(state: GameState, issued: Map<string, Issued>): void {
   for (const player of state.players) {
-    assert.deepEqual(
-      { resumeToken: player.resumeToken, accountId: player.accountId },
-      issued.get(player.id),
-      `${player.name}'s seat was reissued`,
-    );
+    assert.deepEqual(issuedTo(player), issued.get(player.id), `${player.name}'s seat was reissued`);
   }
 }
 
@@ -102,14 +106,19 @@ function playMatch(seed: number): { final: GameState; turns: number } {
     newRoomRng: () => mulberry32(seed + 1),
   });
 
-  // One account seat among the guests, so a transition dropping `accountId` has one to drop.
-  const { roomCode } = unwrap(rooms.createRoom("Ada", "account-ada"));
-  unwrap(rooms.joinRoom(roomCode, "Grace", null));
-  unwrap(rooms.joinRoom(roomCode, "Alan", null));
+  // One account seat among the guests, so a transition dropping `accountId` or a custom call
+  // has one to drop.
+  const { roomCode } = unwrap(
+    rooms.createRoom(
+      occupant("Ada", "account-ada", { customYanivCall: "I win!", customAssafCall: "Gotcha" }),
+    ),
+  );
+  unwrap(rooms.joinRoom(roomCode, occupant("Grace")));
+  unwrap(rooms.joinRoom(roomCode, occupant("Alan")));
   const issued = new Map(
     rooms
       .getState(roomCode)!
-      .players.map((p) => [p.id, { resumeToken: p.resumeToken, accountId: p.accountId }]),
+      .players.map((p) => [p.id, issuedTo(p)]),
   );
   unwrap(rooms.apply(roomCode, (s, rng) => startGame(s, s.hostId, rng)));
 
@@ -203,8 +212,8 @@ describe("full match simulation", () => {
       newPlayerId: () => `p${++playerCounter}`,
       newRoomRng: () => mulberry32(556),
     });
-    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
-    unwrap(rooms.joinRoom(roomCode, "Grace", null));
+    const { roomCode } = unwrap(rooms.createRoom(occupant("Ada")));
+    unwrap(rooms.joinRoom(roomCode, occupant("Grace")));
     unwrap(rooms.apply(roomCode, (s, rng) => startGame(s, s.hostId, rng)));
 
     for (let step = 0; step < 40; step++) {

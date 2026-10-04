@@ -8,16 +8,24 @@
  */
 
 /**
- * What a signed-in menu draws: who you are, and the name you are known by.
+ * What a signed-in menu draws: who you are, the name you are known by, and the words your
+ * seat will shout.
  *
  * **No stat**, though the account counts six: every ack carrying one of these is answered
  * at the main menu or on the way into it, never after a match, so a number here would be
  * stale by the time a profile showed it. Stats are read on their own, fresh, by
  * `loadStats` (docs/adr/0026), and a type is the cheapest place to keep them off this one.
+ *
+ * The **custom calls** are safe here where a stat is not: they change only through the
+ * profile, which the main menu alone opens, so none can move behind a view of this. `null`
+ * is unset — the banner's own word — and never an empty string. Named *custom* always, so
+ * neither is read as the `yanivCalls` stat (`CONTEXT.md`, **Custom calls**).
  */
 export interface AccountView {
   id: string;
   displayName: string;
+  customYanivCall: string | null;
+  customAssafCall: string | null;
 }
 
 /**

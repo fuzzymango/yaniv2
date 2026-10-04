@@ -50,7 +50,9 @@ holds across the trees, and is not discoverable by reading one file:
   being allowed to end two ways depending on who is looking, and `displayName.ts`, the one
   rule every name a player chooses goes through — trimmed, then 1–20 letters and digits of any
   script with single spaces between words, refused and never tidied (#227); a bot's
-  "(bot)" label is the server's own and never asked about. `account.ts` is the
+  "(bot)" label is the server's own and never asked about. `customCall.ts` is its sibling for
+  a custom call — the same words plus `! ? . , ' -`, capped at 24 on the upper-cased text the
+  banner draws, and empty meaning **unset** rather than refused. `account.ts` is the
   account on the wire and **types only** (`AccountView`, deliberately no stat, the `signIn`
   ack, and `Stats`, the six counters the store keeps and `loadStats` answers — one list for
   both, `docs/adr/0026`) — verifying, minting and storing are the server's
@@ -274,13 +276,16 @@ object rather than two optional fields, so a half-bound connection is unrepresen
 (docs/adr/0022): "session" already meant the main menu's session core, and the session token
 made it three.
 
-**`socket.data.account = { accountId, displayName, sessionToken }` sits beside it,
-independent**: an account binds at the main menu before any room and survives leaving one. Five
-acked events drive it — `signIn`, `createAccount`, `resumeSession`, `signOut`, `renameAccount`
-(docs/adr/0021) — and a sixth, `loadStats`, reads the account's stats through it, fresh, never
-carried on `AccountView` (0026); no HTTP surface and no `handshake.auth`. Each handler is a
-flow from `auth/flows.ts` and a binding, holding no auth logic; all six are accepted seated or
-not, and **binding an account over
+**`socket.data.account = { accountId, displayName, customYanivCall, customAssafCall,
+sessionToken }` sits beside it, independent**: an account binds at the main menu before any room
+and survives leaving one. Six acked events drive it — `signIn`, `createAccount`,
+`resumeSession`, `signOut`, `renameAccount` (docs/adr/0021) and `setCustomCall` (#126, an empty
+text unsetting a call, `INVALID_CUSTOM_CALL` for what `shared`'s `customCall.ts` rule refuses) —
+and a seventh, `loadStats`, reads the account's stats through it, fresh, never carried on
+`AccountView` (0026), where the two custom calls are; no HTTP surface and no `handshake.auth`.
+The binding carries the custom calls because a seat copies them from it, as it copies the
+name (#238). Each handler is a flow from `auth/flows.ts` and a binding, holding no auth logic;
+all seven are accepted seated or not, and **binding an account over
 another replaces it** without error, an account binding orphaning nobody. **Newer wins at
 bind**: binding an account puts down any other connection bound to it. The session token
 reaches the wire in exactly one payload, its `signIn`/`createAccount` ack — the marked-token
@@ -310,7 +315,15 @@ one statement of the rule: `resumeSeat` asks it through `claimSeat`, and `joinRo
 the account with no token, so an account already seated there is handed that seat back and a
 guest never is. The socket layer only builds the claimant: the account from the connection's
 binding, never the payload, and the token from the payload. `accountId` is on both views and
-is the only account fact any view carries.
+is the only account *id* any view carries.
+
+**Beside it, `Player.customYanivCall`/`customAssafCall`** (`string | null`, required on
+`isBot`'s grounds, #238): copied from the account binding through the `Occupant` when a
+signed-in `createRoom`/`joinRoom` takes a seat, as the name is, and fixed for the life of the
+room — `updatePlayer` cannot patch them, so a resumed seat, a seat handed back by `joinRoom`
+and `playAgain` keep them, and a profile change mid-match is heard from the next room on.
+Guests and bots get `null`; signing in while seated leaves a guest seat on `null`. Public, on
+both views in every phase, with no redaction.
 
 ### Room lifecycle
 
@@ -545,7 +558,10 @@ already out. Offered while a round is played or scored, watchers included; not o
 is over, the standings answering it over the very bar the button would sit in.
 
 **And the call that ended the round is announced over the seat that made it** (#124, #156,
-docs/adr/0018): `YANIV` in yellow, `ASSAF` in red a beat later, both faded out together. A one-shot
+docs/adr/0018): `YANIV` in yellow, `ASSAF` in red a beat later, both faded out together — or
+each seat's custom call for that kind (#238), resolved in `announcement.ts` off the arriving
+roster, upper-cased in the viewer's locale, shrunk then wrapped to #234's steps, and **still
+coloured by the kind**, so a red banner is an Assaf whatever it says. A one-shot
 like the flight, keyed on the scorecard growing so no republish replays it, on a second timing root
 deliberately not the flight's, in the two colours the scorecard now speaks. **The deal that
 replaces the call is held disabled for three seconds** (`DEAL_HOLD_MS`, #205), a third timing root
@@ -574,16 +590,19 @@ The one screen where identity is asked about (#174): signed out, Google's button
 and a guest is told nothing else; signed in, "Welcome <name>" replaces the name field, and the
 corner holds the **profile**'s person icon (`ProfileDialog`, #228 — the six stats over the menu,
 read fresh on every open, dashes until they land), **on this screen only**. **The profile is
-the one place an account is renamed or signed out of** (#229, #230): a pencil swaps the name for
-a field, ✓/Enter saves, ✕ cancels, and the field stays open while the standing it was opened
-over is still the one on screen — the session replaces it when a rename lands and keeps it on a
-refusal, shown under the field. A sign-out icon opposite the title asks "Sign out of <name>?",
+the one place an account is renamed, its custom calls chosen or it is signed out of** (#229,
+#237, #230): a pencil swaps the name — or a custom call, drawn upper-cased in the banner's
+yellow or red, the banner's own word dimmed where unset — for a field, ✓/Enter saves, ✕
+cancels, an empty call saves as unset, and the field stays open while the standing it was opened
+over is still the one on screen — the session replaces it when an edit lands and keeps it on a
+refusal, shown under the field. A call is asked of `customCall.ts` in the profile, worded there,
+before the intent sends it. A sign-out icon opposite the title asks "Sign out of <name>?",
 Cancel focused — sign-out forgets the seat too, hence a panel only the menu opens. Showing,
-editing and confirming are exclusive, and Escape backs out one level, the editor and the
-question each stopping the key before `Modal` sees it. `NameDialog` is confirm-only, the first
-sign-in's non-dismissible step with a "Not now". While either is open the menu shows no
-`error` — the panel does, the profile under its name field — which is why the menu, not the
-profile, holds whether the profile is open. Google's script is fetched when the signed-out form
+editing one field and confirming are exclusive — one `Panel` value — and Escape backs out one
+level, each editor and the question stopping the key before `Modal` sees it. `NameDialog` is
+confirm-only, the first sign-in's non-dismissible step with a "Not now". While either is open
+the menu shows no `error` — the panel does, the profile under whichever field is open — which
+is why the menu, not the profile, holds whether the profile is open. Google's script is fetched when the signed-out form
 mounts and a failure draws **nothing** (`google.ts`,
 docs/adr/0020) — sign-in is an option, never a wall.
 
@@ -608,7 +627,7 @@ it), and the two
 first sign-in resends is held privately, and the session token sits in a second injected store
 beside the seat's (`tokens.ts`). A cold boot resumes the **account, then the seat**, `resuming`
 up across both. **`busy` locks on emit and settles two ways** — on the ack for entering,
-leaving, the five account events that act (`loadStats` is a read and locks nothing) and
+leaving, the six account events that act (`loadStats` is a read and locks nothing) and
 anything producing a new position, on a strictly newer position for a move — so a control is never released over a position still showing the
 mover's own turn. **The client never enforces a rule the server owns**: what is
 legal about the cards is all it applies ahead of the server (ADR-0002), and everything else it
@@ -648,6 +667,9 @@ Not oversights — deferred on purpose, in this order of likely next work:
 - **Bots slapping down for themselves.** A human can win one inside the pause a bot takes before
   its turn, but no bot slaps down for itself — ADR-0005's other half.
 - **Disambiguating a joker that extends a run.** Tap order decides where it sits — a wart (§4).
+- **A content filter for custom calls**, or for names. Rooms are joined by invite code, and a
+  word list is easy to get round and catches innocent words in every script the rules allow; if
+  public matchmaking arrives, filtering both is one question (#233).
 
 ## Running things
 

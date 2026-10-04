@@ -25,7 +25,8 @@
  *   which the session core sends in place of anything typed — and in its place is a
  *   greeting, "Welcome <name>", plain text rather than a second way into anything. A
  *   person icon in the corner opens the **profile** (`ProfileDialog`, #228), where the
- *   name is changed (#229) and the player signs out (#230), and nowhere else. Signing out
+ *   name is changed (#229), the custom calls are chosen (#237) and the player signs out
+ *   (#230), and nowhere else. Signing out
  *   forgets the seat as well as the account (docs/adr/0020), and at a table that would be
  *   the seat being sat in — which is why it sits behind a panel this screen alone opens.
  *
@@ -34,7 +35,7 @@
  */
 
 import { useState } from "react";
-import type { GameError, Stats } from "@yaniv/shared";
+import type { Call, GameError, Stats } from "@yaniv/shared";
 import type { AccountStanding } from "../session.ts";
 import { GoogleButton } from "./GoogleButton.tsx";
 import { NameDialog } from "./NameDialog.tsx";
@@ -52,6 +53,7 @@ interface MainMenuProps {
   onCreateAccount: (displayName: string) => void;
   onCancelSignIn: () => void;
   onRenameAccount: (displayName: string) => void;
+  onSetCustomCall: (call: Call, text: string) => void;
   onClearError: () => void;
   onSignOut: () => void;
   onLoadStats: () => void;
@@ -69,6 +71,7 @@ export function MainMenu({
   onCreateAccount,
   onCancelSignIn,
   onRenameAccount,
+  onSetCustomCall,
   onClearError,
   onSignOut,
   onLoadStats,
@@ -79,7 +82,7 @@ export function MainMenu({
   /**
    * Whether the profile is up — held here rather than in it, because while it is the menu
    * shows no error (see `ProfileDialog.tsx`). Put down the moment there is no account to
-   * show, as a rename refused for a lapsed session leaves, so the next sign-in does not
+   * show, as an edit refused for a lapsed session leaves, so the next sign-in does not
    * land with it already open: state adjusted in render, before anything is drawn from it.
    */
   const [profileOpen, setProfileOpen] = useState(false);
@@ -117,6 +120,7 @@ export function MainMenu({
             onOpenChange={setProfileOpen}
             onLoadStats={onLoadStats}
             onRename={onRenameAccount}
+            onSetCustomCall={onSetCustomCall}
             onClearError={onClearError}
             onSignOut={onSignOut}
           />

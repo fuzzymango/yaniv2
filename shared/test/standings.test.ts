@@ -31,6 +31,8 @@ function finishedMatch(seated: Seat[]): PlayerGameView {
     departed: p.departed ?? false,
     connected: true,
     accountId: null,
+    customYanivCall: null,
+    customAssafCall: null,
   });
 
   return {

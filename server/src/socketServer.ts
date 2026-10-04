@@ -29,6 +29,7 @@ import {
   loadStats,
   renameAccount,
   resumeSession,
+  setCustomCall,
   signIn,
   type Auth,
 } from "./auth/flows.ts";
@@ -47,9 +48,9 @@ import {
   takeTurn,
   updateSettings,
 } from "./game.ts";
-import type { AccountId, ProfileStore } from "./profiles.ts";
+import type { AccountId, CustomCalls, ProfileStore } from "./profiles.ts";
 import { err, ok } from "./result.ts";
-import type { Claimant, RoomManager } from "./roomManager.ts";
+import type { Claimant, Occupant, RoomManager } from "./roomManager.ts";
 import { createRooms } from "./rooms.ts";
 import type { Rng } from "./rng.ts";
 import type { ActionResult, GameState } from "./state.ts";
@@ -82,11 +83,13 @@ interface Seat {
  * all-or-nothing on its own. The session token is held here and nowhere a view is built
  * from — it is not in `GameState` — so it has nothing to leak through but an ack.
  *
- * The display name rides along so seating a signed-in player never waits on the store: it
- * is what every bind was just answered with, and `renameAccount` keeps it current. It
- * cannot go stale behind another connection's back, an account being bound to one at a time.
+ * The display name and the custom calls ride along so seating a signed-in player never
+ * waits on the store: they are what every bind was just answered with, and `renameAccount`
+ * and `setCustomCall` keep them current — the custom calls being what a seat copies, as
+ * it copies the name. None can go stale behind another connection's back, an account being
+ * bound to one at a time.
  */
-interface AccountBinding {
+interface AccountBinding extends CustomCalls {
   accountId: AccountId;
   displayName: string;
   sessionToken: string;
@@ -298,6 +301,8 @@ export function createSocketServer(
       socket.data.account = {
         accountId: account.id,
         displayName: account.displayName,
+        customYanivCall: account.customYanivCall,
+        customAssafCall: account.customAssafCall,
         sessionToken,
       };
       // Copied out first: a disconnect mutates the very map being walked.
@@ -365,6 +370,27 @@ export function createSocketServer(
     });
 
     /**
+     * Whose custom call is set is the binding's to say, as whose name is, and so is the
+     * refusal for a connection with none. The new words are what the next seat is taken
+     * with; a seat already taken keeps the ones it was taken with.
+     */
+    socket.on("setCustomCall", async (call, text, ack) => {
+      const account = socket.data.account;
+      if (!account) {
+        ack(notSignedIn());
+        return;
+      }
+      const result = await setCustomCall(auth, account.accountId, call, text);
+      // Onto the binding that was asked about and only while it is still this connection's,
+      // for `renameAccount`'s reason.
+      if (result.ok && socket.data.account === account) {
+        const { customYanivCall, customAssafCall } = result.value.account;
+        socket.data.account = { ...account, customYanivCall, customAssafCall };
+      }
+      ack(result);
+    });
+
+    /**
      * Whose stats is the binding's to say, as whose name is — there is no payload to claim
      * otherwise. Read off the store on every ask, so a profile opened after a match shows
      * the match (docs/adr/0026).
@@ -380,16 +406,21 @@ export function createSocketServer(
 
     /**
      * Who a new seat is taken by: the account bound to this connection, under its own
-     * display name, or a guest under the name they typed. **A signed-in player is never
-     * asked for a name** — whatever the payload claims is ignored — because identity is one
-     * answer and not one per table (docs/adr/0019), and the seat label is then always a
-     * reliable "who is that".
+     * display name and with its own custom calls, or a guest under the name they typed and
+     * with none. **A signed-in player is never asked for a name** — whatever the payload
+     * claims is ignored — because identity is one answer and not one per table
+     * (docs/adr/0019), and the seat label is then always a reliable "who is that".
      */
-    function seatedAs(typedName: string): { name: string; accountId: AccountId | null } {
+    function seatedAs(typedName: string): Occupant {
       const account = socket.data.account;
       return account
-        ? { name: account.displayName, accountId: account.accountId }
-        : { name: typedName, accountId: null };
+        ? {
+            name: account.displayName,
+            accountId: account.accountId,
+            customYanivCall: account.customYanivCall,
+            customAssafCall: account.customAssafCall,
+          }
+        : { name: typedName, accountId: null, customYanivCall: null, customAssafCall: null };
     }
 
     /**
@@ -408,8 +439,7 @@ export function createSocketServer(
         return;
       }
 
-      const { name, accountId } = seatedAs(playerName);
-      const created = rooms.createRoom(name, accountId);
+      const created = rooms.createRoom(seatedAs(playerName));
       if (!created.ok) {
         ack({ ok: false, error: created.error });
         return;
@@ -446,8 +476,7 @@ export function createSocketServer(
         return;
       }
 
-      const { name, accountId } = seatedAs(playerName);
-      const joined = rooms.joinRoom(roomCode, name, accountId);
+      const joined = rooms.joinRoom(roomCode, seatedAs(playerName));
       if (!joined.ok) {
         ack({ ok: false, error: joined.error });
         return;

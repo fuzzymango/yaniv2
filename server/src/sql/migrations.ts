@@ -47,10 +47,10 @@ const VERSION_TABLE = `
  *
  * `account` is one row per identity: its own id (a UUID minted by the server, as
  * `Player.id` already is, never anything Google issued), the display name the player is
- * known by at a table, and its stats — **plain integer columns, not an event log**
- * (docs/adr/0019), the first of them created with the table and the other five appended.
- * `created_at` is for whoever is looking at the database; nothing reads it, which is why it
- * is not on the seam.
+ * known by at a table, its stats — **plain integer columns, not an event log**
+ * (docs/adr/0019), the first of them created with the table and the other five appended —
+ * and its two custom calls, appended after them. `created_at` is for whoever is looking at
+ * the database; nothing reads it, which is why it is not on the seam.
  *
  * `credential` is a table rather than a column on `account`, and that shape is the whole
  * reason it exists: a second sign-in method can be added later without invalidating a
@@ -99,6 +99,13 @@ export const MIGRATIONS: readonly string[] = [
     add column games_completed integer not null default 0,
     add column games_won integer not null default 0,
     add column slapdowns integer not null default 0`,
+
+  // The custom calls (issue #126): nullable text, `null` being unset — the banner's own word
+  // — so an existing account reads unset on both with nothing backfilled. The rule is the
+  // server's to apply (`normalizeCustomCall`), so no check constraint repeats it here.
+  `alter table account
+    add column custom_yaniv_call text,
+    add column custom_assaf_call text`,
 ];
 
 /**
@@ -106,7 +113,7 @@ export const MIGRATIONS: readonly string[] = [
  * on every boot after the first, which is the thing worth seeing in a log.
  *
  * This is a function the folder exports and the entrypoint calls, **not a method on
- * `ProfileStore`**: the seam stays the ten methods it is, the in-memory store never learns
+ * `ProfileStore`**: the seam stays the methods it is, the in-memory store never learns
  * the word migration, and a failed migration stops the server from starting because it
  * throws before anything binds a port.
  */

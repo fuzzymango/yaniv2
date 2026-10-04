@@ -22,7 +22,9 @@
  */
 
 import {
+  MAX_CUSTOM_CALL_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
+  normalizeCustomCall,
   normalizeDisplayName,
   type AccountView,
   type SignedIn,
@@ -146,7 +148,31 @@ export async function renameAccount(
   if (name === null) return invalidName();
 
   await auth.store.renameAccount(accountId, name);
-  return ok({ account: { id: accountId, displayName: name } });
+  return ok({ account: toView(await requireAccount(auth, accountId)) });
+}
+
+/**
+ * Set one of the account's custom calls, or unset it with an empty text — the caller being
+ * whoever the socket is signed in as, as for `renameAccount`, and a missing account the
+ * store's throw for the same reason. Answered with the account read back, so the ack is
+ * the standing the profile draws and not a guess at it.
+ *
+ * Both payloads are `unknown`: a call that is neither Yaniv nor Assaf is refused like a text
+ * the rule refuses, never handed to the store as a column to choose. What a seat already
+ * taken shouts is not touched — it keeps the calls it was taken with (`CONTEXT.md`).
+ */
+export async function setCustomCall(
+  auth: Auth,
+  accountId: AccountId,
+  call: unknown,
+  text: unknown,
+): Promise<Result<{ account: AccountView }>> {
+  if (call !== "yaniv" && call !== "assaf") return invalidCustomCall();
+  const verdict = typeof text === "string" ? normalizeCustomCall(text) : null;
+  if (!verdict?.accepted) return invalidCustomCall();
+
+  await auth.store.setCustomCall(accountId, call, verdict.customCall);
+  return ok({ account: toView(await requireAccount(auth, accountId)) });
 }
 
 /**
@@ -213,10 +239,16 @@ async function requireAccount(auth: Auth, id: AccountId): Promise<Account> {
 
 /**
  * What the wire is told about an account, picked field by field rather than spread: the
- * stats are on `Account` and ride only `loadStats`' answer (docs/adr/0021, 0026).
+ * stats are on `Account` and ride only `loadStats`' answer (docs/adr/0021, 0026). The custom
+ * calls ride here, changing only through the profile this answers.
  */
 function toView(account: Account): AccountView {
-  return { id: account.id, displayName: account.displayName };
+  return {
+    id: account.id,
+    displayName: account.displayName,
+    customYanivCall: account.customYanivCall,
+    customAssafCall: account.customAssafCall,
+  };
 }
 
 /**
@@ -236,6 +268,13 @@ function statsOf(account: Account): Stats {
 
 function invalidCredential<T>(): Result<T> {
   return err("INVALID_CREDENTIAL", "That Google sign-in could not be verified");
+}
+
+function invalidCustomCall<T>(): Result<T> {
+  return err(
+    "INVALID_CUSTOM_CALL",
+    `A custom call must be up to ${MAX_CUSTOM_CALL_LENGTH} letters, digits, single spaces and ! ? . , ' -`,
+  );
 }
 
 function invalidName<T>(): Result<T> {

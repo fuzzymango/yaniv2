@@ -39,6 +39,12 @@ export type GameErrorCode =
   | "INVALID_CREDENTIAL"
   /** A session token with no live session behind it: expired, signed out, or never ours. */
   | "INVALID_SESSION"
+  /**
+   * A custom call the rule refuses (`normalizeCustomCall`), a call that is neither Yaniv nor
+   * Assaf, or a text that is not a string at all. One code for the three: the profile asks
+   * the same rule before sending, so this is what an off-contract client is told.
+   */
+  | "INVALID_CUSTOM_CALL"
   // room settings
   /**
    * A settings object with a field outside its range or enum, or not a settings object at

@@ -169,6 +169,12 @@ caller then.
 Two pieces of real CSS work follow: seats allow the banner to overflow their bounds, and a
 stacking context puts it above neighbouring seats' cards.
 
+*Amended by #234:* the second needs every seat to isolate its own cards, not only the
+announcing seat to be raised — a neighbour's cascade otherwise outranks it card by card. And
+anchoring to the person is bounded by the screen: a top seat's banner hangs from the top edge,
+and a pair of top seats anchors outward as the side seats do, because centred on the outer half
+of either, the word started off a phone's screen.
+
 ## Reduced motion keeps the banner and the beat
 
 `prefers-reduced-motion` is a request not to be moved, not a request to be told less. The same
@@ -192,6 +198,18 @@ a scored round, so the two are never on screen together.
 The scorecard is brought into line: its call tone moves from green to the same accent yellow.
 Its Assaf red and milestone blue are unchanged. The cell tone type is semantic
 (`"yaniv" | "assaf" | "milestone"`), so this was a stylesheet value and no logic moved.
+
+*Amended by #238:* the banner's **word** is now chosen per seat — a signed-in player's
+custom Yaniv call over their seat when they call, their custom Assaf call when they are the
+Assafer, `YANIV`/`ASSAF` where they chose none — and the **colour still belongs to the kind of
+call**, never to the text. That is what makes free text safe in the banner: a red banner is an
+Assaf whatever it says, so words that name the other call, or that say nothing about either,
+cannot tell the table the wrong thing. It is also why the custom-call rule refuses emoji, which
+keep colours of their own. The word is resolved in the pure module as the announcement is
+decided, off the arriving position's roster, so `Banner` carries `call` and `text` as two
+facts; the renderer upper-cases the text in the viewer's locale and shrinks and wraps it to
+#234's measured steps (`docs/client-table.md`). Freshness, ordering, timing and reduced motion
+are unchanged.
 
 And the now-redundant `yaniv` / `assaf` chips come out of the scored seat's badge row.
 `milestone` and `out` stay — they are the two facts nothing else on the table records, and

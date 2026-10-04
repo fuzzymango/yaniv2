@@ -21,6 +21,7 @@ import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import {
   HAND_SIZE,
+  MAX_CUSTOM_CALL_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_PLAYERS,
   MAX_SCORE,
@@ -1661,7 +1662,7 @@ describe("the call to announce", () => {
       );
 
       assert.deepEqual(scored.announcement, [
-        { playerId: scored.view!.you.id, call: "yaniv" },
+        { playerId: scored.view!.you.id, call: "yaniv", text: "YANIV" },
       ]);
     } finally {
       await server.close();
@@ -3145,6 +3146,428 @@ describe("an account", () => {
       session.createRoom("");
       const lobby = await seated(session, "the account");
       assert.ok(lobby.view!.you.accountId);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The words an account's seat will shout (`CONTEXT.md`, **Custom calls**): set over the wire
+ * one call at a time, kept on the account, and on every `AccountView` the server answers.
+ * The session sends what it is handed and lets the server judge it — the profile asks the
+ * shared rule before it sends — so a refusal here is the server's, as an off-contract
+ * client would meet it.
+ */
+describe("custom calls", () => {
+  /** The account standing's custom calls, or a failed assertion where there is no account. */
+  function customCalls(snapshot: SessionSnapshot) {
+    assert.equal(snapshot.account.status, "signedIn");
+    if (snapshot.account.status !== "signedIn") throw new Error("unreachable");
+    const { customYanivCall, customAssafCall } = snapshot.account.account;
+    return { customYanivCall, customAssafCall };
+  }
+
+  it("sets each custom call, locked until its own ack, and shows it on the account", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+
+      session.setCustomCall("yaniv", " I WIN! ");
+      assert.equal(session.getSnapshot().busy, true, "locked on the way out");
+      const yaniv = await settled(session, "setCustomCall's ack");
+      assert.equal(yaniv.error, null);
+      assert.deepEqual(customCalls(yaniv), { customYanivCall: "I WIN!", customAssafCall: null });
+      assert.equal(yaniv.view, null, "still the main menu");
+
+      session.setCustomCall("assaf", "GOTCHA");
+      const assaf = await settled(session, "setCustomCall's ack");
+      assert.deepEqual(customCalls(assaf), {
+        customYanivCall: "I WIN!",
+        customAssafCall: "GOTCHA",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("puts the banner's own word back on an empty text, leaving the other call alone", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.setCustomCall("yaniv", "I WIN");
+      await settled(session, "the custom Yaniv call");
+      session.setCustomCall("assaf", "GOTCHA");
+      await settled(session, "the custom Assaf call");
+
+      session.setCustomCall("yaniv", "   ");
+      const unset = await settled(session, "the custom Yaniv call unset");
+
+      assert.equal(unset.error, null);
+      assert.deepEqual(customCalls(unset), { customYanivCall: null, customAssafCall: "GOTCHA" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("never changes one call by setting the other", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.setCustomCall("assaf", "GOTCHA");
+      await settled(session, "the custom Assaf call");
+
+      session.setCustomCall("yaniv", "MINE");
+      const yaniv = await settled(session, "the custom Yaniv call");
+      assert.equal(customCalls(yaniv).customAssafCall, "GOTCHA");
+
+      session.setCustomCall("assaf", "   ");
+      const unset = await settled(session, "the custom Assaf call unset");
+      assert.equal(customCalls(unset).customYanivCall, "MINE");
+    } finally {
+      await server.close();
+    }
+  });
+
+  /*
+   * The profile's editor stays open on exactly this — the standing it was opened over still
+   * being the one on screen — as the rename panel does, so it is pinned by identity.
+   */
+  it("keeps the standing and says why when the server refuses a text", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
+      session.setCustomCall("yaniv", "I WIN");
+      const asked = (await settled(session, "the custom Yaniv call")).account;
+
+      for (const [what, text] of [
+        ["too long", "W".repeat(MAX_CUSTOM_CALL_LENGTH + 1)],
+        ["an emoji", "I WIN 🃏"],
+        ["a doubled space", "I  WIN"],
+        ["not a string", 42 as unknown as string],
+      ] as const) {
+        session.setCustomCall("yaniv", text);
+        const refused = await settled(session, `the refusal of ${what}`);
+        assert.equal(refused.error?.code, "INVALID_CUSTOM_CALL", what);
+        assert.equal(refused.account, asked, `${what}: the same standing`);
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("sends nothing for a guest, there being no account to keep a call on", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await server.openSession();
+
+      session.setCustomCall("yaniv", "I WIN");
+
+      assert.equal(session.getSnapshot().busy, false, "nothing sent");
+      assert.deepEqual(session.getSnapshot().account, { status: "guest" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("comes back with the account however it is answered", async () => {
+    const server = await startServer(26);
+    try {
+      const account = fakeAccount();
+      const first = await signUp(
+        server,
+        { sub: "google-ada", name: "Ada" },
+        { account: account.store },
+      );
+      assert.deepEqual(
+        customCalls(first.getSnapshot()),
+        { customYanivCall: null, customAssafCall: null },
+        "a new account, from createAccount, has chosen no words",
+      );
+      first.setCustomCall("yaniv", "I WIN");
+      await settled(first, "the custom Yaniv call");
+      first.setCustomCall("assaf", "GOTCHA");
+      await settled(first, "the custom Assaf call");
+      const chosen = { customYanivCall: "I WIN", customAssafCall: "GOTCHA" };
+
+      first.renameAccount("Countess");
+      assert.deepEqual(customCalls(await settled(first, "the rename")), chosen, "a rename");
+
+      const again = await server.openSession();
+      again.signIn(`${ID_TOKEN_MARK}google-ada`);
+      assert.deepEqual(customCalls(await settled(again, "the sign-in")), chosen, "a sign-in");
+
+      const back = server.bootSession({ account: account.store });
+      assert.deepEqual(
+        customCalls(await settled(back, "the resumed session")),
+        chosen,
+        "a resumed session",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * Custom calls at the table (issue #238): a seat copies its account's words when it is taken,
+ * as it copies the name, keeps them for the life of the room, and the banner over it says
+ * them — the kind of call deciding which, and the banner's own word where there are none.
+ * Everything here is read off what the screen is handed: the seats on a view, and the
+ * announcement on a snapshot.
+ */
+describe("custom calls at the table", () => {
+  const CHOSEN = { customYanivCall: "I win!", customAssafCall: "Gotcha" } as const;
+  const UNSET = { customYanivCall: null, customAssafCall: null } as const;
+  type Calls = { customYanivCall: string | null; customAssafCall: string | null };
+
+  /** A seat's custom calls, as one view or another draws them. */
+  const callsOf = ({ customYanivCall, customAssafCall }: Calls): Calls => ({
+    customYanivCall,
+    customAssafCall,
+  });
+
+  /** The seat with this id, whoever's view it is read from. */
+  function seatIn(view: PlayerGameView, playerId: string): Calls {
+    const seat = [view.you, ...view.opponents].find((s) => s.id === playerId);
+    assert.ok(seat, `seat ${playerId} is on the table`);
+    return callsOf(seat);
+  }
+
+  /** A player signed in for the first time, who has chosen these words, at the main menu. */
+  async function signUpCalling(
+    server: Harness,
+    who: { sub: string; name: string },
+    calls: Calls = CHOSEN,
+    options: SessionOptions = {},
+  ): Promise<Session> {
+    const session = await signUp(server, who, options);
+    if (calls.customYanivCall !== null) {
+      session.setCustomCall("yaniv", calls.customYanivCall);
+      await settled(session, "the custom Yaniv call");
+    }
+    if (calls.customAssafCall !== null) {
+      session.setCustomCall("assaf", calls.customAssafCall);
+      await settled(session, "the custom Assaf call");
+    }
+    return session;
+  }
+
+  /**
+   * A seed whose match the one human seat plays to the end, calling Yaniv and Assafing a
+   * bot's call along the way, with a bot calling too — every banner it can hear, in one
+   * match. Nothing else about it is special; the test says so out loud if it stops being so.
+   */
+  const CALLS_AND_ASSAFS = 1;
+
+  /** Every announcement a session published, in order. */
+  function announcementsHeardBy(session: Session): NonNullable<Announcement>[] {
+    const heard: NonNullable<Announcement>[] = [];
+    session.subscribe(() => {
+      const { announcement } = session.getSnapshot();
+      if (announcement !== null) heard.push(announcement);
+    });
+    return heard;
+  }
+
+  /** Who called and who Assafed, round by round, as the banners announced them. */
+  function expectedBanners(
+    rows: readonly { callerId: string; assaferId: string | null }[],
+    wordsOf: (playerId: string) => Calls,
+  ) {
+    return rows.map(({ callerId, assaferId }) => {
+      const call = {
+        playerId: callerId,
+        call: "yaniv",
+        text: wordsOf(callerId).customYanivCall ?? "YANIV",
+      };
+      return assaferId === null
+        ? [call]
+        : [
+            call,
+            {
+              playerId: assaferId,
+              call: "assaf",
+              text: wordsOf(assaferId).customAssafCall ?? "ASSAF",
+            },
+          ];
+    });
+  }
+
+  it("puts a signed-in player's custom calls on their seat, in everybody's view", async () => {
+    const server = await startServer(26);
+    try {
+      const ada = await signUpCalling(server, { sub: "google-ada", name: "Ada" });
+      ada.createRoom("");
+      const { roomCode, you } = (await seated(ada, "the account")).view!;
+      const grace = await server.openSession();
+      grace.joinRoom(roomCode, "Grace");
+      const graceId = (await seated(grace, "the guest")).view!.you.id;
+      await waitForSnapshot(ada, "the guest at the table", (s) => s.view!.opponents.length === 1);
+
+      const inEveryView = (phase: string) => {
+        const [mine, theirs] = [ada.getSnapshot().view!, grace.getSnapshot().view!];
+        assert.deepEqual(callsOf(mine.you), CHOSEN, `${phase}: their own view`);
+        assert.deepEqual(seatIn(theirs, you.id), CHOSEN, `${phase}: an opponent's view`);
+        assert.deepEqual(callsOf(theirs.you), UNSET, `${phase}: a guest chose nothing`);
+        assert.deepEqual(seatIn(mine, graceId), UNSET, `${phase}: nor as seen across the table`);
+      };
+      inEveryView("the lobby");
+
+      ada.startGame();
+      const playing = (s: SessionSnapshot) => s.view?.phase === "playing";
+      await Promise.all([
+        waitForSnapshot(ada, "the deal", playing),
+        waitForSnapshot(grace, "the deal", playing),
+      ]);
+      inEveryView("a round dealt");
+      const bots = ada.getSnapshot().view!.opponents.filter((o) => o.id !== graceId);
+      assert.ok(bots.length > 0, "a table with bots at it");
+      for (const bot of bots) assert.deepEqual(callsOf(bot), UNSET, `${bot.name} chose nothing`);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("announces each seat's own words over it, the call first and the Assaf second", async () => {
+    const server = await startServer(CALLS_AND_ASSAFS);
+    try {
+      const ada = await signUpCalling(server, { sub: "google-ada", name: "Ada" });
+      ada.createRoom("");
+      const adaId = (await seated(ada, "the account")).view!.you.id;
+      ada.startGame();
+      await waitForSnapshot(ada, "the deal", (s) => s.view?.phase === "playing" && !s.busy);
+      const heard = announcementsHeardBy(ada);
+
+      const rows = (await playToMatchEnd([ada])).view!.scorecard;
+
+      assert.ok(rows.some((r) => r.callerId === adaId), "the seat called Yaniv");
+      assert.ok(rows.some((r) => r.assaferId === adaId), "and Assafed a call");
+      assert.ok(rows.some((r) => r.callerId !== adaId), "and a bot called");
+      assert.deepEqual(
+        heard,
+        expectedBanners(rows, (id) => (id === adaId ? CHOSEN : UNSET)),
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("announces a guest, a bot and an account with nothing chosen in the banner's words", async () => {
+    const server = await startServer(26);
+    try {
+      const ada = await signUp(server, { sub: "google-ada", name: "Ada" });
+      ada.createRoom("");
+      const { roomCode, you } = (await seated(ada, "the account")).view!;
+      const grace = await server.openSession();
+      grace.joinRoom(roomCode, "Grace");
+      const graceId = (await seated(grace, "the guest")).view!.you.id;
+      const heard = announcementsHeardBy(grace);
+      ada.startGame();
+
+      const rows = (await playToMatchEnd([ada, grace])).view!.scorecard;
+
+      const humans = new Set([you.id, graceId]);
+      assert.ok(rows.some((r) => humans.has(r.callerId)), "a human called");
+      assert.ok(rows.some((r) => !humans.has(r.callerId)), "and a bot called");
+      assert.ok(rows.some((r) => r.assaferId !== null), "and somebody was Assafed");
+      assert.deepEqual(heard, expectedBanners(rows, () => UNSET));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps the words a seat was taken with when the account changes them", async () => {
+    const server = await startServer(26);
+    try {
+      const ada = await signUpCalling(server, { sub: "google-ada", name: "Ada" });
+      ada.createRoom("");
+      const { roomCode, you } = (await seated(ada, "the account")).view!;
+
+      ada.setCustomCall("yaniv", "Mine");
+      const changed = await settled(ada, "the change");
+      assert.equal(changed.error, null, "the account takes it, seated or not");
+
+      const grace = await server.openSession();
+      grace.joinRoom(roomCode, "Grace");
+      const theirs = (await seated(grace, "the guest")).view!;
+      assert.deepEqual(seatIn(theirs, you.id), CHOSEN, "the seat kept what it was taken with");
+
+      // The same account on another device, handed its seat back by joining the room again
+      // (docs/adr/0022): the seat it is handed is the one it took, words and all.
+      const again = await server.openSession();
+      again.signIn(`${ID_TOKEN_MARK}google-ada`);
+      const signedIn = await settled(again, "the sign-in");
+      assert.equal(
+        signedIn.account.status === "signedIn" && signedIn.account.account.customYanivCall,
+        "Mine",
+        "the account has the new words",
+      );
+      again.joinRoom(roomCode, "");
+      const handedBack = (await seated(again, "the seat handed back")).view!;
+      assert.equal(handedBack.you.id, you.id, "the account's own seat");
+      assert.deepEqual(callsOf(handedBack.you), CHOSEN, "with the words it was taken with");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("leaves a guest seat on the banner's words when its player signs in", async () => {
+    const server = await startServer(26);
+    try {
+      const elsewhere = await signUpCalling(server, { sub: "google-ada", name: "Ada" });
+      const guest = await server.openSession();
+      guest.createRoom("Ada");
+      const { roomCode, you } = (await seated(guest, "the guest")).view!;
+
+      guest.signIn(`${ID_TOKEN_MARK}google-ada`);
+      const signedIn = await settled(guest, "the sign-in");
+      assert.equal(signedIn.account.status, "signedIn", "the connection is the account's");
+      await waitForSnapshot(elsewhere, "the other device put down", (s) => !s.connected);
+
+      // Somebody joining republishes the room, which is when a seat changed by the sign-in
+      // would show — and it has not changed.
+      const grace = await server.openSession();
+      grace.joinRoom(roomCode, "Grace");
+      const theirs = (await seated(grace, "Grace")).view!;
+      const mine = await waitForSnapshot(
+        guest,
+        "Grace at the table",
+        (s) => s.view!.opponents.length === 1,
+      );
+      assert.deepEqual(callsOf(mine.view!.you), UNSET, "the seat's own view");
+      assert.equal(mine.view!.you.accountId, null, "still a guest seat");
+      assert.deepEqual(seatIn(theirs, you.id), UNSET, "and across the table");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps a seat's custom calls when it is claimed back", async () => {
+    const server = await startServer(26);
+    try {
+      const account = fakeAccount();
+      const tokens = fakeTokens();
+      const first = await signUpCalling(server, { sub: "google-ada", name: "Ada" }, CHOSEN, {
+        account: account.store,
+        seat: tokens.store,
+      });
+      first.createRoom("");
+      await seated(first, "the account");
+      first.startGame();
+      await waitForSnapshot(first, "the deal", (s) => s.view?.phase === "playing" && !s.busy);
+
+      // A connection that drops and finds its own way back.
+      server.drop(first, true);
+      await waitForSnapshot(first, "the drop", (s) => !s.connected);
+      const back = await waitForSnapshot(first, "the seat", (s) => s.connected && !s.resuming);
+      assert.deepEqual(callsOf(back.view!.you), CHOSEN, "a seat claimed back on reconnecting");
+
+      // And a page reloaded: the account resumed, then the seat.
+      server.drop(first);
+      const booted = server.bootSession({ account: account.store, seat: tokens.store });
+      const table = await settled(booted, "the seat");
+      assert.deepEqual(callsOf(table.view!.you), CHOSEN, "a seat claimed back on a cold boot");
     } finally {
       await server.close();
     }

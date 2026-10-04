@@ -537,6 +537,32 @@ field and nothing else.
 The profile store is named for what it *remembers* and the profile for what it *shows*; both
 are about accounts. _Avoid_: player profile, for the data — that is the account.
 
+## Custom calls
+
+**Custom Yaniv call** — the words an account has chosen to be announced over its seat when it
+calls Yaniv. **Custom Assaf call** — the same, for a round it is the **Assafer** of. Together,
+its **custom calls** (issue #126): two, independent, each the account's own, and set from its
+**profile**. A guest has none and a bot has none — neither has an account to keep them on.
+
+A custom call **replaces the word** in the **call announcement** and nothing else about it: the
+same banner over the same seat, in the same colour — so a custom Assaf call is still red, and
+an Assaf still reads as one whatever it says. The line above the felt is the plain record of
+how the round ended and never shows one.
+
+What one may say is the **display name**'s rule and a little punctuation besides — `! ? . , ' -`,
+a call being shouted where a name is not — and still no emoji or other symbols: an emoji
+keeps its own colours, and the banner's colour is what says which call it was. Refused, never
+tidied, on the display name's grounds.
+
+A seat takes its custom calls **when it is taken**, as it takes its display name, and keeps them
+for the life of the room: a change made in the profile is heard from the next room on. They are
+public to the table from then, not only once said — words chosen to be shouted are no secret.
+
+**"Custom" is never dropped.** A bare **Yaniv call** is the act of calling and the stat that
+counts it, and a bare **Assaf** the outcome and its stat; the chosen words are only ever the
+*custom* one, so the profile can show "Yaniv calls: 14" beside a custom Yaniv call with nothing
+to tell apart. _Avoid_: message, taunt, catchphrase, Yaniv line.
+
 ## Resume token
 
 The secret that proves a connection is entitled to a **guest** seat. Issued to every seat,

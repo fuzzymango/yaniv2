@@ -655,10 +655,11 @@ body {
 }
 
 /*
- * The profile's name and the pencil beside it, and the field that swaps in for both: one
- * row the same height either way, so the stats below do not move when editing starts.
+ * A value in the profile and the pencil beside it — the name, or a custom call — and the
+ * field that swaps in for both: one row the same height either way, so nothing below it
+ * moves when editing starts.
  */
-.profile__name {
+.profile__row {
   display: flex;
   align-items: center;
   gap: 0.25rem;
@@ -667,7 +668,8 @@ body {
   overflow-wrap: anywhere;
 }
 
-.profile__name > .menu__name {
+.profile__row > .menu__name,
+.profile__row > .profile__call {
   flex: 1;
   min-width: 0;
 }
@@ -682,6 +684,49 @@ body {
 .profile__input {
   flex: 1;
   min-width: 0;
+}
+
+/*
+ * The custom calls under the stats (#237): a heading and the two rows, nothing else, set
+ * a little apart so the heading does not read as a seventh stat.
+ */
+.profile__calls {
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.5rem;
+}
+
+/* Sized and coloured as the stats' labels are: a caption, not a second title. */
+.profile__heading {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+/*
+ * A call as the banner will shout it, in the banner's own two colours rather than the
+ * accent's — the same variables, so tuning the banner tunes this with it. Weighted and
+ * spaced like the banner, at a size a panel row can hold.
+ */
+.profile__call {
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.profile__call--yaniv {
+  color: var(--announce-yaniv);
+}
+
+.profile__call--assaf {
+  color: var(--announce-assaf);
+}
+
+/* No call of the player's: the banner's own word, plain, saying what the table says instead. */
+.profile__call--unset {
+  color: var(--ink-dim);
+  font-weight: 600;
+  opacity: 0.6;
 }
 
 /*
@@ -1051,6 +1096,13 @@ body {
 .table-seat {
   /* The box the call announcement is placed against — see `.announce` (issue #156). */
   position: relative;
+  /*
+   * A seat's cards stack among themselves and nowhere else (#234). A fan's and a cascade's
+   * cards carry inline z-indexes counting up from 0, and without a context of the seat's own
+   * they would be ranked against the seat beside them — where a five-card cascade outranks an
+   * announcing seat's `z-index: 3` and paints over the banner overflowing onto it.
+   */
+  isolation: isolate;
 
   display: flex;
   flex-direction: column;
@@ -1120,9 +1172,10 @@ body {
 }
 
 /*
- * The call, over the seat it belongs to: `YANIV` for a call that stood, `ASSAF` for one that
- * did not (issue #156). No name and no number — position is what says who, which is the whole
- * reason this sits in a seat's box rather than in the middle of the felt.
+ * The call, over the seat it belongs to: `YANIV` for the call, `ASSAF` for the Assaf that
+ * answered it (issue #156), or the seat's custom call for either (issue #238). No name and no
+ * number — position is what says who, which is the whole reason this sits in a seat's box
+ * rather than in the middle of the felt.
  *
  * Color is deliberately not set here: `.announce--yaniv` and `.announce--assaf` (below) each
  * set their own, off `--announce-yaniv`/`--announce-assaf` rather than off this shared rule,
@@ -1162,13 +1215,30 @@ body {
     announce-in var(--announce-enter) cubic-bezier(0.2, 1.6, 0.4, 1) var(--announce-in-delay)
       both,
     announce-out var(--announce-exit) ease-in var(--announce-out-delay) forwards;
-  font-size: clamp(2.1rem, 18vw, 4.4rem);
+  /*
+   * The full shout, scaled by `--announce-scale` from `CallAnnouncement.tsx`: 1 for up to five
+   * letters, stepping down to 0.5 — half the shout, 32.4px on a 360px phone — from nine
+   * (#234's measured steps). Still sized off the viewport at every step.
+   */
+  font-size: calc(clamp(2.1rem, 18vw, 4.4rem) * var(--announce-scale, 1));
   font-weight: 800;
   letter-spacing: 0.12em;
   line-height: 1;
   padding: 0.15em 0.4em;
   border-radius: 0.3em;
-  white-space: nowrap;
+  /*
+   * Then it wraps, as wide as its words up to 90% of a phone's width, every line centred
+   * and balanced. `overflow-wrap: anywhere` is what the custom-call cap was measured
+   * against: twenty-four of the widest letter with no space fit three lines only by breaking
+   * mid-word. Nothing clamps the line count — the cap keeps it to three, and the few scripts
+   * wider than `W` grow downward rather than being cut (#234's accepted exceptions).
+   */
+  white-space: normal;
+  width: max-content;
+  max-width: min(90vw, 27rem);
+  text-align: center;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
   pointer-events: none;
   -webkit-text-stroke: 0.16em color-mix(in oklab, currentColor 70%, #000);
   paint-order: stroke fill;
@@ -1198,6 +1268,37 @@ body {
   left: auto;
 
   --announce-anchor: translateY(-50%);
+}
+
+/*
+ * A top seat's banner hangs from the top of the screen and grows down into the felt, rather
+ * than being centred on the seat (#234). The seat's box starts at the screen's top edge, so a
+ * banner centred on it and taller than it would grow up off the screen by as much as it grew
+ * down — which a custom call wrapped onto a second line is.
+ */
+.table-seat--top > .announce {
+  top: 0.25rem;
+
+  --announce-anchor: translateX(-50%);
+}
+
+/*
+ * And a pair of top seats grows outward-in, off each seat's outer edge, as the side seats do
+ * (#234). Two top seats on a phone each sit in half the screen, and a word centred on the
+ * outer half of either one starts off the screen — `YANIV` by about 50px at 360px wide. A lone
+ * top seat is centred on the screen, where centring is the right answer and stays.
+ */
+.table-zone--top > .table-seat:first-child:not(:only-child) > .announce {
+  left: 0;
+
+  --announce-anchor: translate(0, 0);
+}
+
+.table-zone--top > .table-seat:last-child:not(:only-child) > .announce {
+  right: 0;
+  left: auto;
+
+  --announce-anchor: translate(0, 0);
 }
 
 /*

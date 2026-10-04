@@ -1,7 +1,8 @@
 /**
  * A signed-in player's own account, held up over the main menu: a person icon in the
  * menu's corner, and behind it the account's name — renamed in place, here and nowhere
- * else (#229) — over its six stats (#228, docs/adr/0026), and the way to sign out (#230).
+ * else (#229) — over its six stats (#228, docs/adr/0026), its two custom calls (#237), and
+ * the way to sign out (#230).
  *
  * The first place the counters this repo has kept since #166 are seen, and the only one —
  * the profile is the main menu's and nowhere else's, so nothing about an account stands
@@ -18,9 +19,9 @@
  *
  * Whether the panel is open is the main menu's rather than this component's, unlike
  * `SettingsDialog`'s, for one reason: while it is open the menu shows no error, the panel
- * showing a refused name under the field instead — one message in the one place the player
+ * showing a refusal under the field instead — one message in the one place the player
  * is looking, as `NameDialog` does. The error is put down on the way in and on the way out,
- * so anything on the screen while the panel is open is an answer about a name typed in it.
+ * so anything on the screen while the panel is open is an answer about something typed in it.
  * Nothing on the wire knows or cares that somebody is looking at it.
  *
  * **Signing out is asked before it is done, and asked here alone** (#230): an icon in the
@@ -31,22 +32,34 @@
  * standing becomes a guest's at once and the menu puts the profile down in render; nothing
  * here closes it.
  *
- * **The panel does one thing at a time** — showing, editing the name, or confirming the
- * sign-out. The confirmation is drawn *instead of* the editor, so tapping sign-out mid-rename
- * unmounts the field and its draft with it, and cancelling comes back to the name, not to
- * the field. Whether it is confirming is this component's, reset every time it opens. A
- * rename already sent is not a draft and is not called back: tapping sign-out while one is
- * out leaves Sign out disabled until it is answered, and a refusal of it is cleared unseen
- * on the way back — a race of one tap against one round trip, accepted.
+ * **The custom calls are shown as the table would shout them** (#237): upper-cased the way
+ * the banner is, in the banner's yellow or red, and — where the player has chosen none — the
+ * banner's own `YANIV` or `ASSAF`, dimmed. Each row is edited exactly as the name is, by the
+ * same editor, an empty save putting the banner's word back. Unlike a name, a call is asked
+ * of `shared`'s rule here rather than in the session, which sends a call as given: the
+ * refusal is worded by this panel, the server judging it again regardless (ADR-0002).
  *
- * **Escape backs out one level.** `Modal` catches it on its wrapper, so the name editor and
- * the confirmation each stop the key there and go back to showing the profile; from there
- * it reaches `Modal` and closes it.
+ * **The panel does one thing at a time** — showing, editing one field, or confirming the
+ * sign-out — one value (`Panel`) rather than a flag per field, so opening one editor closes
+ * another by construction and tapping sign-out mid-edit unmounts the field and its draft
+ * with it, cancelling coming back to the profile, not to the field. It is this component's,
+ * reset every time the panel opens. An edit already sent is not a draft and is not called
+ * back: tapping sign-out or another pencil while one is out leaves Sign out disabled and the
+ * new field read-only until it is answered, and the answer lands on whatever is showing — a
+ * rename landing closes a call's field opened behind it, a refusal shows under it, or is
+ * cleared unseen on the way back to the profile. A race of one tap against one round trip,
+ * accepted.
+ *
+ * **Escape backs out one level.** `Modal` catches it on its wrapper, so an editor and the
+ * confirmation each stop the key there and go back to showing the profile; from there it
+ * reaches `Modal` and closes it.
  */
 
 import { useState } from "react";
-import type { GameError, Stats } from "@yaniv/shared";
+import { MAX_CUSTOM_CALL_LENGTH, normalizeCustomCall } from "@yaniv/shared";
+import type { Call, GameError, Stats } from "@yaniv/shared";
 import type { AccountStanding } from "../session.ts";
+import { CALL_WORD } from "../announcement.ts";
 import { Modal } from "../shared/Modal.tsx";
 
 const PROFILE_TITLE = "Profile";
@@ -168,106 +181,153 @@ function CrossIcon() {
 
 type SignedIn = Extract<AccountStanding, { status: "signedIn" }>;
 
-interface EditNameProps {
-  standing: SignedIn;
+/** What the panel has to edit: the account's name, and its two custom calls (#237). */
+type Field = "name" | Call;
+
+/**
+ * What the panel is doing, as one value, so it can only be doing one thing: showing,
+ * editing one field, or asking about the sign-out.
+ *
+ * **An edit lasts for as long as the standing it was opened `over` is still the one on the
+ * screen**, the rule the main menu's rename panel used before the profile replaced it: the
+ * session replaces the standing when an edit lands — even to the same value — and keeps it
+ * when one is refused (pinned in the session suite), so the field closes on the answer that
+ * means "done" and stays open, the reason under it, on the one that means "not that". No
+ * effect watches for either.
+ *
+ * `returnTo` is the field whose editor closed last, so its pencil takes the focus back: an
+ * input that unmounts with the focus in it leaves it on the page behind the panel, where
+ * `Modal` would never hear the second Escape. `autoFocus` acts on mount alone — which is why
+ * a pencil and its field are separate returns, the pencil remounting when the field closes —
+ * so the first open still gives the focus to Close. An edit outlived by its standing returns
+ * to its own pencil the same way.
+ */
+type Panel =
+  | { readonly kind: "showing"; readonly returnTo: Field | null }
+  | { readonly kind: "editing"; readonly field: Field; readonly over: SignedIn }
+  | { readonly kind: "confirming" };
+
+const SHOWING: Panel = { kind: "showing", returnTo: null };
+
+/** How each call is named on its controls, the banner's word being no sentence. */
+const CALL_NAME: Record<Call, string> = {
+  yaniv: "Yaniv call",
+  assaf: "Assaf call",
+};
+
+/**
+ * The profile's own sentence for a call the shared rule refuses, as the session words its
+ * own for a name: the rule is `shared`'s, its wording each caller's. Asked before sending so
+ * a typo is not a round trip, the server applying the same rule regardless (ADR-0002).
+ */
+const UNUSABLE_CALL = `Enter up to ${MAX_CUSTOM_CALL_LENGTH} letters, digits, single spaces and ! ? . , ' -`;
+
+interface PencilProps {
+  label: string;
+  autoFocus: boolean;
+  onClick: () => void;
+}
+
+/** The pencil beside something that can be changed in place. */
+function Pencil({ label, autoFocus, onClick }: PencilProps) {
+  return (
+    <button
+      className="topbar__button"
+      type="button"
+      aria-label={label}
+      title={label}
+      autoFocus={autoFocus}
+      onClick={onClick}
+    >
+      <PencilIcon />
+    </button>
+  );
+}
+
+interface EditInPlaceProps {
+  /** The field's accessible name, and the save button's. */
+  label: string;
+  saveLabel: string;
+  /** What the field opens with, focused and selected. */
+  initial: string;
+  placeholder?: string;
+  autoComplete: string;
+  /**
+   * The panel's own check, asked before `onSave` and answered with a refusal to show, or
+   * null to send. Absent where the session asks the rule itself, as it does for a name.
+   */
+  refuse?: (draft: string) => string | null;
+  /** The session's refusal, shown under the field while the panel is open. */
   error: GameError | null;
   busy: boolean;
-  onRename: (displayName: string) => void;
-  onClearError: () => void;
+  onSave: (draft: string) => void;
+  onCancel: () => void;
 }
 
 /**
- * The account's name and a pencil beside it, and the pencil swapping the name for a field
- * with a tick and a cross (#229). The stats below stay where they are either way: renaming
- * does not take the player anywhere.
+ * The field that swaps in for a value and its pencil, with a tick and a cross (#229): the
+ * name's editor first, and each custom call's the same one (#237), so the three behave alike
+ * by construction. The rest of the panel stays where it is: editing takes the player nowhere.
  *
- * **Editing lasts for as long as the standing it was opened over is still the one on the
- * screen**, the rule the main menu's rename panel used before this replaced it: the session
- * replaces the standing when a rename lands — even to the same name — and keeps it when one
- * is refused (pinned in the session suite), so the field closes on the answer that means
- * "done" and stays open, the reason under it, on the one that means "not that". No effect
- * watches for either.
- *
- * The draft is this helper's own: a name half-typed is no use outside the field holding it.
+ * The draft is this component's own, and so is a refusal it answered itself: a value
+ * half-typed is no use outside the field holding it, and the field mounts afresh on every
+ * open, so neither can outlive the edit it belongs to.
  */
-function EditName({ standing, error, busy, onRename, onClearError }: EditNameProps) {
-  const [editingFrom, setEditingFrom] = useState<SignedIn | null>(null);
-  const [draft, setDraft] = useState("");
-  /**
-   * Whether the field has been open since the profile was, so the pencil takes the focus
-   * back when it closes: an input that unmounts with the focus in it leaves it on the page
-   * behind the panel, where `Modal` would never hear the second Escape. `autoFocus` acts on
-   * mount alone — which is why the pencil and the field are separate returns, the pencil
-   * remounting when the field closes — so the first open still gives the focus to Close.
-   */
-  const [returnFocus, setReturnFocus] = useState(false);
-  const editing = editingFrom === standing;
-  const { displayName } = standing.account;
-
-  const cancel = () => {
-    onClearError();
-    setEditingFrom(null);
-  };
-
-  if (!editing) {
-    return (
-      <div className="profile__name">
-        <strong className="menu__name">{displayName}</strong>
-        <button
-          className="topbar__button"
-          type="button"
-          aria-label="Change name"
-          title="Change name"
-          autoFocus={returnFocus}
-          onClick={() => {
-            onClearError();
-            setDraft(displayName);
-            setEditingFrom(standing);
-            setReturnFocus(true);
-          }}
-        >
-          <PencilIcon />
-        </button>
-      </div>
-    );
-  }
+function EditInPlace({
+  label,
+  saveLabel,
+  initial,
+  placeholder,
+  autoComplete,
+  refuse,
+  error,
+  busy,
+  onSave,
+  onCancel,
+}: EditInPlaceProps) {
+  const [draft, setDraft] = useState(initial);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const message = refusal ?? error?.message ?? null;
 
   return (
     <form
       className="profile__edit"
       onSubmit={(event) => {
         event.preventDefault();
-        onRename(draft);
+        const refused = refuse?.(draft) ?? null;
+        setRefusal(refused);
+        if (refused === null) onSave(draft);
       }}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         // One level at a time: the edit, not the profile around it.
         event.stopPropagation();
-        cancel();
+        onCancel();
       }}
     >
-      <div className="profile__name">
+      <div className="profile__row">
         <input
           className="field__input profile__input"
-          aria-label="Your name"
+          aria-label={label}
           value={draft}
+          placeholder={placeholder}
           onChange={(event) => setDraft(event.target.value)}
-          autoComplete="nickname"
+          autoComplete={autoComplete}
           enterKeyHint="done"
           autoFocus
-          // Selected as well as focused, so retyping a name does not start by clearing it.
+          // Selected as well as focused, so retyping a value does not start by clearing it.
           onFocus={(event) => event.target.select()}
-          // Read-only rather than disabled while the rename is out: a disabled control drops
+          // Read-only rather than disabled while an edit is out: a disabled control drops
           // the focus, and with it Escape and the chance to retype after a refusal. The two
-          // buttons are left enabled for the same reason — the session ignores a rename sent
+          // buttons are left enabled for the same reason — the session ignores an edit sent
           // while one is out, and cancelling one leaves nothing on screen for its answer.
           readOnly={busy}
         />
         <button
           className="topbar__button"
           type="submit"
-          aria-label="Save name"
-          title="Save name"
+          aria-label={saveLabel}
+          title={saveLabel}
           // The field keeps the focus through a click: Safari gives none to a clicked button,
           // so it would otherwise fall to the page, and a refusal — which leaves the field up —
           // would leave Escape with nowhere to land.
@@ -280,18 +340,31 @@ function EditName({ standing, error, busy, onRename, onClearError }: EditNamePro
           type="button"
           aria-label="Cancel"
           title="Cancel"
-          onClick={cancel}
+          onClick={onCancel}
         >
           <CrossIcon />
         </button>
       </div>
 
-      {error && (
+      {message !== null && (
         <p className="notice notice--error" role="alert">
-          {error.message}
+          {message}
         </p>
       )}
     </form>
+  );
+}
+
+/**
+ * A custom call as the table would shout it: upper-cased the way the banner will be, in the
+ * banner's colour — yellow the Yaniv, red the Assaf — or, unset, the banner's own word,
+ * plain and dimmed, which is what the table says instead.
+ */
+function CallValue({ call, text }: { call: Call; text: string | null }) {
+  return text === null ? (
+    <strong className="profile__call profile__call--unset">{CALL_WORD[call]}</strong>
+  ) : (
+    <strong className={`profile__call profile__call--${call}`}>{text.toLocaleUpperCase()}</strong>
   );
 }
 
@@ -354,11 +427,11 @@ function ConfirmSignOut({ displayName, busy, onSignOut, onCancel }: ConfirmSignO
 }
 
 interface ProfileDialogProps {
-  /** Whose profile it is — the standing, not only the account, so a rename can see it land. */
+  /** Whose profile it is — the standing, not only the account, so an edit can see it land. */
   standing: SignedIn;
   /** The account's stats as last read, or null while they are being read or were refused. */
   stats: Stats | null;
-  /** The session's, shown under the name while it is being edited. */
+  /** The session's, shown under whichever field is being edited. */
   error: GameError | null;
   busy: boolean;
   /** Whether the panel is up — the main menu's to hold, for the reason above. */
@@ -367,9 +440,22 @@ interface ProfileDialogProps {
   /** Read the stats afresh — called every time the profile opens. */
   onLoadStats: () => void;
   onRename: (displayName: string) => void;
+  /** Set one custom call; an empty text puts the banner's own word back. */
+  onSetCustomCall: (call: Call, text: string) => void;
   onClearError: () => void;
   onSignOut: () => void;
 }
+
+/** Each call's text on the account, by the call — the account's two fields, read as one. */
+const callText = (standing: SignedIn, call: Call): string | null =>
+  call === "yaniv" ? standing.account.customYanivCall : standing.account.customAssafCall;
+
+/**
+ * The rule asked before a call is sent, refused in the profile's own words. What passes is
+ * sent as typed, the server trimming it by the same rule — empty, after that, unsetting it.
+ */
+const refuseCall = (draft: string): string | null =>
+  normalizeCustomCall(draft).accepted ? null : UNUSABLE_CALL;
 
 export function ProfileDialog({
   standing,
@@ -380,20 +466,61 @@ export function ProfileDialog({
   onOpenChange,
   onLoadStats,
   onRename,
+  onSetCustomCall,
   onClearError,
   onSignOut,
 }: ProfileDialogProps) {
-  const [confirming, setConfirming] = useState(false);
+  const [panel, setPanel] = useState<Panel>(SHOWING);
+
+  /** The field being edited, if any — none once the standing it was opened over is gone. */
+  const editing = panel.kind === "editing" && panel.over === standing ? panel.field : null;
+  const returnTo =
+    panel.kind === "showing" ? panel.returnTo : panel.kind === "editing" ? panel.field : null;
+  const { displayName } = standing.account;
+
+  /** Open one field's editor, closing whichever other one was open: one thing at a time. */
+  const edit = (field: Field) => {
+    onClearError();
+    setPanel({ kind: "editing", field, over: standing });
+  };
 
   /** Back to showing: a refusal left over from anything cancelled has nothing to answer. */
-  const showProfile = () => {
+  const showProfile = (from: Field | null) => {
     onClearError();
-    setConfirming(false);
+    setPanel({ kind: "showing", returnTo: from });
   };
 
   const close = () => {
     onClearError();
     onOpenChange(false);
+  };
+
+  const callRow = (call: Call) => {
+    const text = callText(standing, call);
+    return editing === call ? (
+      <EditInPlace
+        key={call}
+        label={`Your ${CALL_NAME[call]}`}
+        saveLabel={`Save ${CALL_NAME[call]}`}
+        initial={text ?? ""}
+        placeholder={CALL_WORD[call]}
+        autoComplete="off"
+        refuse={refuseCall}
+        error={error}
+        busy={busy}
+        onSave={(draft) => onSetCustomCall(call, draft)}
+        onCancel={() => showProfile(call)}
+      />
+    ) : (
+      <div className="profile__row" key={call}>
+        <CallValue call={call} text={text} />
+        <Pencil
+          label={`Change ${CALL_NAME[call]}`}
+          autoFocus={returnTo === call}
+          onClick={() => edit(call)}
+        />
+      </div>
+    );
   };
 
   return (
@@ -408,7 +535,7 @@ export function ProfileDialog({
         onClick={() => {
           onClearError();
           onLoadStats();
-          setConfirming(false);
+          setPanel(SHOWING);
           onOpenChange(true);
         }}
       >
@@ -421,7 +548,7 @@ export function ProfileDialog({
         <Modal title={PROFILE_TITLE} showTitle={false} onDismiss={close}>
           <div className="profile__header">
             <h2 className="modal__title">{PROFILE_TITLE}</h2>
-            {!confirming && (
+            {panel.kind !== "confirming" && (
               <button
                 className="topbar__button"
                 type="button"
@@ -429,7 +556,7 @@ export function ProfileDialog({
                 title="Sign out"
                 onClick={() => {
                   onClearError();
-                  setConfirming(true);
+                  setPanel({ kind: "confirming" });
                 }}
               >
                 <SignOutIcon />
@@ -437,24 +564,46 @@ export function ProfileDialog({
             )}
           </div>
 
-          {confirming ? (
+          {panel.kind === "confirming" ? (
             <ConfirmSignOut
-              displayName={standing.account.displayName}
+              displayName={displayName}
               busy={busy}
               onSignOut={onSignOut}
-              onCancel={showProfile}
+              onCancel={() => showProfile(null)}
             />
           ) : (
             <>
-              <EditName
-                standing={standing}
-                error={error}
-                busy={busy}
-                onRename={onRename}
-                onClearError={onClearError}
-              />
+              {editing === "name" ? (
+                <EditInPlace
+                  label="Your name"
+                  saveLabel="Save name"
+                  initial={displayName}
+                  autoComplete="nickname"
+                  error={error}
+                  busy={busy}
+                  onSave={onRename}
+                  onCancel={() => showProfile("name")}
+                />
+              ) : (
+                <div className="profile__row">
+                  <strong className="menu__name">{displayName}</strong>
+                  <Pencil
+                    label="Change name"
+                    autoFocus={returnTo === "name"}
+                    onClick={() => edit("name")}
+                  />
+                </div>
+              )}
 
               <StatsTable stats={stats} />
+
+              <section className="profile__calls" aria-labelledby="profile-calls">
+                <h3 className="profile__heading" id="profile-calls">
+                  Custom calls
+                </h3>
+                {callRow("yaniv")}
+                {callRow("assaf")}
+              </section>
 
               {/* Remounted on the way back from the question, so it takes the focus again. */}
               <button className="button" type="button" autoFocus onClick={close}>

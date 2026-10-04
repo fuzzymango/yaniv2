@@ -36,6 +36,7 @@ import {
   expectErr,
   markedResumeTokens,
   fishingDiscard,
+  occupant,
   playingSelf,
   seatBehind,
   slapdownOpen,
@@ -142,7 +143,7 @@ function host(
   name = "Ada",
   accountId: string | null = null,
 ): Seated & { resumeToken: string } {
-  const { roomCode, playerId, resumeToken } = unwrap(h.rooms.createRoom(name, accountId));
+  const { roomCode, playerId, resumeToken } = unwrap(h.rooms.createRoom(occupant(name, accountId)));
   arrive(h, { roomCode, playerId });
   return { roomCode, playerId, resumeToken };
 }
@@ -175,7 +176,7 @@ function join(
   name: string,
   accountId: AccountId | null = null,
 ): Seated {
-  const { playerId } = unwrap(h.rooms.joinRoom(roomCode, name, accountId));
+  const { playerId } = unwrap(h.rooms.joinRoom(roomCode, occupant(name, accountId)));
   const seated = { roomCode, playerId };
   arrive(h, seated);
   return seated;
@@ -487,7 +488,7 @@ describe("leave", () => {
 
     unwrap(h.rooms.leave(roomCode, playerId, () => {}));
 
-    expectErr(h.rooms.joinRoom(roomCode, "Alan", null), "ROOM_NOT_FOUND");
+    expectErr(h.rooms.joinRoom(roomCode, occupant("Alan")), "ROOM_NOT_FOUND");
     expectErr(
       h.rooms.claimSeat(roomCode, playerId, { accountId: null, resumeToken }),
       "ROOM_NOT_FOUND",
@@ -509,7 +510,7 @@ describe("leave", () => {
     );
 
     assert.deepEqual(unwrap(departure), { name: "Ada", ended: false });
-    unwrap(h.rooms.joinRoom(ada.roomCode, "Alan", null));
+    unwrap(h.rooms.joinRoom(ada.roomCode, occupant("Alan")));
   });
 
   /**
@@ -953,7 +954,7 @@ describe("sweeping a room nobody is in", () => {
     h.clock.tickAt(ROOM_SWEEP_MS);
 
     assert.equal(h.rooms.viewFor(ada.roomCode, ada.playerId), null, "the room is still there");
-    expectErr(h.rooms.joinRoom(ada.roomCode, "Alan", null), "ROOM_NOT_FOUND");
+    expectErr(h.rooms.joinRoom(ada.roomCode, occupant("Alan")), "ROOM_NOT_FOUND");
   });
 
   /** A reload is a disconnect, and the connection coming back is the whole answer to one. */
@@ -965,7 +966,7 @@ describe("sweeping a room nobody is in", () => {
     comeBack(h, ada, resumeToken);
 
     assert.equal(h.clock.pending(), 0, "nothing is counting the room down");
-    unwrap(h.rooms.joinRoom(ada.roomCode, "Alan", null));
+    unwrap(h.rooms.joinRoom(ada.roomCode, occupant("Alan")));
   });
 
   it("gives a lone human against bots their match back after a reload", () => {
@@ -1004,7 +1005,7 @@ describe("sweeping a room nobody is in", () => {
     h.clock.tickAt(ROOM_SWEEP_MS);
 
     assert.ok(h.rooms.viewFor(ada.roomCode, ada.playerId), "the room was swept from under them");
-    unwrap(h.rooms.joinRoom(ada.roomCode, "Alan", null));
+    unwrap(h.rooms.joinRoom(ada.roomCode, occupant("Alan")));
   });
 
   // What a swept room takes with it is ending a room's: "cancels a bot's pending turn when

@@ -18,15 +18,34 @@
  * to announce" is one of them.
  */
 
-import type { PlayerGameView } from "@yaniv/shared";
+// `Call` is the two things a round can turn on, and there are no others (docs/rules.md §6):
+// `shared`'s, because it is also which custom call an account sets over the wire.
+import type { Call, OpponentView, PlayerGameView, SelfView } from "@yaniv/shared";
 
-/** The two things a round can turn on, and there are no others (docs/rules.md §6). */
-export type Call = "yaniv" | "assaf";
+/**
+ * The word each call is announced as where its seat chose none. Written in capitals though
+ * the banner upper-cases whatever it is handed: the profile shows it as it stands where no
+ * custom call is set (#237) — the table's word, so the two cannot drift.
+ */
+export const CALL_WORD: Readonly<Record<Call, string>> = {
+  yaniv: "YANIV",
+  assaf: "ASSAF",
+};
 
-/** One banner: the word, and the seat it goes over. Position is what says who. */
+/**
+ * One banner: which call it is, the words it says, and the seat it goes over. Position is
+ * what says who.
+ *
+ * `call` and `text` are two fields because they are two facts (issue #238): the **kind**
+ * decides the colour — a red banner is an Assaf whatever it says — and the **text** is the
+ * seat's custom call for that kind, or `CALL_WORD`'s. Resolved here, when the announcement
+ * is decided, so a renderer never chooses words; it is handed as typed, the banner
+ * upper-casing it in the viewer's locale.
+ */
 export interface Banner {
   readonly playerId: string;
   readonly call: Call;
+  readonly text: string;
 }
 
 /**
@@ -52,6 +71,7 @@ export type Announcement = readonly [Banner] | readonly [Banner, Banner] | null;
  */
 export interface PlacedBanner {
   readonly call: Call;
+  readonly text: string;
   readonly index: number;
   readonly count: number;
 }
@@ -95,10 +115,29 @@ export function announcementFrom(
   const round = arriving.scorecard[arriving.scorecard.length - 1];
   if (round === undefined) return null;
 
-  const call: Banner = { playerId: round.callerId, call: "yaniv" };
-  return round.assaferId === null
-    ? [call]
-    : [call, { playerId: round.assaferId, call: "assaf" }];
+  const seats = [arriving.you, ...arriving.opponents];
+  const banner = (playerId: string, call: Call): Banner => ({
+    playerId,
+    call,
+    text: wordsOf(seats.find((seat) => seat.id === playerId), call),
+  });
+
+  const call = banner(round.callerId, "yaniv");
+  return round.assaferId === null ? [call] : [call, banner(round.assaferId, "assaf")];
+}
+
+/**
+ * What a seat says for one kind of call: its custom call for that kind where it chose one,
+ * otherwise the banner's own word (issue #238).
+ *
+ * Read off the arriving position's roster, which is sent whole and keeps every seat it ever
+ * held (issue #144), so the seat a scored round names is always on it. A seat missing from
+ * it anyway is announced with the default rather than nothing, a banner with no words being
+ * the one outcome no choice of words can produce.
+ */
+function wordsOf(seat: SelfView | OpponentView | undefined, call: Call): string {
+  const custom = call === "yaniv" ? seat?.customYanivCall : seat?.customAssafCall;
+  return custom ?? CALL_WORD[call];
 }
 
 /**
@@ -113,5 +152,6 @@ export function bannerAt(announcement: Announcement, playerId: string): PlacedBa
   if (announcement === null) return null;
   const index = announcement.findIndex((banner) => banner.playerId === playerId);
   if (index === -1) return null;
-  return { call: announcement[index]!.call, index, count: announcement.length };
+  const { call, text } = announcement[index]!;
+  return { call, text, index, count: announcement.length };
 }
