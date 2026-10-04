@@ -26,6 +26,24 @@ const MAX_CODE_ATTEMPTS = 100;
 const RESUME_TOKEN_BYTES = 32;
 
 /**
+ * Who is sitting down in a seat being taken — what the seat copies from them, fixed for the
+ * life of the room. Every field is required: a seat is only as complete as what it was taken
+ * with.
+ *
+ * `name` is whatever the caller settled on — for an account, its own display name, which the
+ * transport knows and this does not. `createRoom` and `joinRoom` put it through the
+ * display-name rule; a bot's, the server's own, is not asked about.
+ *
+ * `accountId` is who took the seat, `null` for a guest, and **required** rather than
+ * defaulted on ADR-0013's grounds: a call site that forgot it would seat every signed-in
+ * player as a guest, and nothing would say so.
+ */
+export interface Occupant {
+  name: string;
+  accountId: string | null;
+}
+
+/**
  * Whoever is presenting themselves for a seat that already exists: the account bound to
  * their connection, and the resume token they hold — either of which may be absent. A
  * join presents an account and no token; a resume presents both, as they stand.
@@ -124,8 +142,10 @@ export class RoomManager {
    * A fresh seat, credentialed. The one place a `Player` is built, so an id, a resume
    * token or the account behind it cannot be left off one of the three ways a seat comes
    * into existence — the same reason all three are required on `Player` in the first place.
+   * The occupant's name is taken as it is: a human's has been through the display-name rule
+   * by now, and a bot's is the server's own.
    */
-  private newSeat(name: string, isBot: boolean, accountId: string | null): Player {
+  private newSeat({ name, accountId }: Occupant, isBot: boolean): Player {
     return {
       id: this.newPlayerId(),
       name,
@@ -159,32 +179,24 @@ export class RoomManager {
    *
    * The token is handed back from here rather than dug out of `state` by the caller,
    * so the one place it is issued is also the one place it is given away.
-   *
-   * `accountId` is who took the seat, `null` for a guest, and **required** rather than
-   * defaulted on ADR-0013's grounds: a call site that forgot it would seat every signed-in
-   * player as a guest, and nothing would say so. The name is whatever the caller settled on
-   * — for an account, its own display name, which the transport knows and this does not.
    */
-  createRoom(
-    hostName: string,
-    accountId: string | null,
-  ): Result<{
+  createRoom(host: Occupant): Result<{
     roomCode: string;
     playerId: string;
     resumeToken: string;
     state: GameState;
   }> {
-    const name = normalizeDisplayName(hostName);
+    const name = normalizeDisplayName(host.name);
     if (name === null) return invalidName();
 
     const roomCode = this.generateRoomCode();
-    const host = this.newSeat(name, false, accountId);
+    const seat = this.newSeat({ ...host, name }, false);
 
     const state: GameStateLobby = {
       roomCode,
       phase: "lobby",
-      hostId: host.id,
-      players: [host],
+      hostId: seat.id,
+      players: [seat],
       // Today's constants, seeded as defaults — except `botCount`, which defaults to
       // zero rather than "fill to six". docs/adr/0006.
       settings: {
@@ -206,8 +218,8 @@ export class RoomManager {
     this.rooms.set(roomCode, { state, rng: this.newRoomRng() });
     return ok({
       roomCode,
-      playerId: host.id,
-      resumeToken: host.resumeToken,
+      playerId: seat.id,
+      resumeToken: seat.resumeToken,
       state,
     });
   }
@@ -224,13 +236,12 @@ export class RoomManager {
    */
   joinRoom(
     roomCode: string,
-    playerName: string,
-    accountId: string | null,
+    occupant: Occupant,
   ): Result<{ playerId: string; resumeToken: string; state: GameState; resumed: boolean }> {
     const room = this.rooms.get(roomCode);
     if (!room) return err("ROOM_NOT_FOUND", `No room with code ${roomCode}`);
 
-    const claimant: Claimant = { accountId, resumeToken: null };
+    const claimant: Claimant = { accountId: occupant.accountId, resumeToken: null };
     const held = room.state.players.find((p) => claims(p, claimant));
     if (held) {
       return ok({
@@ -241,7 +252,7 @@ export class RoomManager {
       });
     }
 
-    const name = normalizeDisplayName(playerName);
+    const name = normalizeDisplayName(occupant.name);
     if (name === null) return invalidName();
     if (room.state.phase !== "lobby") {
       return err("WRONG_PHASE", "That game has already started");
@@ -250,7 +261,7 @@ export class RoomManager {
       return err("ROOM_FULL", `Room is full (${MAX_PLAYERS} players)`);
     }
 
-    const player = this.newSeat(name, false, accountId);
+    const player = this.newSeat({ ...occupant, name }, false);
     room.state = { ...room.state, players: [...room.state.players, player] };
     return ok({
       playerId: player.id,
@@ -314,7 +325,7 @@ export class RoomManager {
       // bots cannot end up sharing a name. Safe to index directly: a table holds at most
       // MAX_PLAYERS seats and its creator is human, so BOT_NAMES has a name for each.
       const taken = players.filter((p) => p.isBot).length;
-      players.push(this.newSeat(BOT_NAMES[taken]!, true, null));
+      players.push(this.newSeat({ name: BOT_NAMES[taken]!, accountId: null }, true));
       seated++;
     }
     return { ...state, players };

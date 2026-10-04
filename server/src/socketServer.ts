@@ -49,7 +49,7 @@ import {
 } from "./game.ts";
 import type { AccountId, ProfileStore } from "./profiles.ts";
 import { err, ok } from "./result.ts";
-import type { Claimant, RoomManager } from "./roomManager.ts";
+import type { Claimant, Occupant, RoomManager } from "./roomManager.ts";
 import { createRooms } from "./rooms.ts";
 import type { Rng } from "./rng.ts";
 import type { ActionResult, GameState } from "./state.ts";
@@ -385,7 +385,7 @@ export function createSocketServer(
      * answer and not one per table (docs/adr/0019), and the seat label is then always a
      * reliable "who is that".
      */
-    function seatedAs(typedName: string): { name: string; accountId: AccountId | null } {
+    function seatedAs(typedName: string): Occupant {
       const account = socket.data.account;
       return account
         ? { name: account.displayName, accountId: account.accountId }
@@ -408,8 +408,7 @@ export function createSocketServer(
         return;
       }
 
-      const { name, accountId } = seatedAs(playerName);
-      const created = rooms.createRoom(name, accountId);
+      const created = rooms.createRoom(seatedAs(playerName));
       if (!created.ok) {
         ack({ ok: false, error: created.error });
         return;
@@ -446,8 +445,7 @@ export function createSocketServer(
         return;
       }
 
-      const { name, accountId } = seatedAs(playerName);
-      const joined = rooms.joinRoom(roomCode, name, accountId);
+      const joined = rooms.joinRoom(roomCode, seatedAs(playerName));
       if (!joined.ok) {
         ack({ ok: false, error: joined.error });
         return;

@@ -7,7 +7,7 @@ import { RoomManager } from "../src/roomManager.ts";
 import { NO_CONNECTIONS, serializeStateForPlayer } from "../src/serialize.ts";
 import type { GameState, GameStateActive } from "../src/state.ts";
 import { mulberry32 } from "../src/rng.ts";
-import { unwrap } from "./helpers.ts";
+import { occupant, unwrap } from "./helpers.ts";
 
 /** Every card the round is holding, across hands, deck and both discard areas. */
 function roundCards(state: GameState): Card[] {
@@ -103,9 +103,9 @@ function playMatch(seed: number): { final: GameState; turns: number } {
   });
 
   // One account seat among the guests, so a transition dropping `accountId` has one to drop.
-  const { roomCode } = unwrap(rooms.createRoom("Ada", "account-ada"));
-  unwrap(rooms.joinRoom(roomCode, "Grace", null));
-  unwrap(rooms.joinRoom(roomCode, "Alan", null));
+  const { roomCode } = unwrap(rooms.createRoom(occupant("Ada", "account-ada")));
+  unwrap(rooms.joinRoom(roomCode, occupant("Grace")));
+  unwrap(rooms.joinRoom(roomCode, occupant("Alan")));
   const issued = new Map(
     rooms
       .getState(roomCode)!
@@ -203,8 +203,8 @@ describe("full match simulation", () => {
       newPlayerId: () => `p${++playerCounter}`,
       newRoomRng: () => mulberry32(556),
     });
-    const { roomCode } = unwrap(rooms.createRoom("Ada", null));
-    unwrap(rooms.joinRoom(roomCode, "Grace", null));
+    const { roomCode } = unwrap(rooms.createRoom(occupant("Ada")));
+    unwrap(rooms.joinRoom(roomCode, occupant("Grace")));
     unwrap(rooms.apply(roomCode, (s, rng) => startGame(s, s.hostId, rng)));
 
     for (let step = 0; step < 40; step++) {

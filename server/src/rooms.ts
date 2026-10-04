@@ -32,9 +32,9 @@ import type { BotTurnRunnerOptions } from "./botTurns.ts";
 import { createBotTurnRunner } from "./botTurns.ts";
 import type { Clock } from "./clock.ts";
 import { removePlayer } from "./game.ts";
-import type { AccountId, ProfileStore } from "./profiles.ts";
+import type { ProfileStore } from "./profiles.ts";
 import { ok, type Result } from "./result.ts";
-import type { Claimant, RoomManager } from "./roomManager.ts";
+import type { Claimant, Occupant, RoomManager } from "./roomManager.ts";
 import { createRoomSweeper, unattended } from "./roomSweep.ts";
 import { createRoomTimers } from "./roomTimers.ts";
 import type { Rng } from "./rng.ts";
@@ -93,8 +93,7 @@ export interface Rooms {
    * until the transport has put them in it, which is `attendanceChanged`'s to report.
    */
   createRoom: (
-    hostName: string,
-    accountId: AccountId | null,
+    host: Occupant,
   ) => Result<{ roomCode: string; playerId: string; resumeToken: string }>;
   /**
    * Seat a player, or hand an account back the seat it holds (`resumed`), answering the
@@ -103,8 +102,7 @@ export interface Rooms {
    */
   joinRoom: (
     roomCode: string,
-    playerName: string,
-    accountId: AccountId | null,
+    occupant: Occupant,
   ) => Result<{ playerId: string; resumeToken: string; resumed: boolean; name: string }>;
   /** Judge a claim on a seat that exists (`RoomManager.claimSeat`). Publishes nothing. */
   claimSeat: (roomCode: string, playerId: string, claimant: Claimant) => Result<null>;
@@ -292,8 +290,8 @@ export function createRooms(
   }
 
   return {
-    createRoom: (hostName, accountId) => {
-      const created = manager.createRoom(hostName, accountId);
+    createRoom: (host) => {
+      const created = manager.createRoom(host);
       if (!created.ok) return created;
       // Destructured deliberately: the manager also hands back the full `GameState`,
       // which must never leave this module.
@@ -301,11 +299,11 @@ export function createRooms(
       return ok({ roomCode, playerId, resumeToken });
     },
 
-    joinRoom: (roomCode, playerName, accountId) => {
-      const joined = manager.joinRoom(roomCode, playerName, accountId);
+    joinRoom: (roomCode, occupant) => {
+      const joined = manager.joinRoom(roomCode, occupant);
       if (!joined.ok) return joined;
       const { playerId, resumeToken, resumed, state } = joined.value;
-      const name = getPlayer(state, playerId)?.name ?? playerName;
+      const name = getPlayer(state, playerId)?.name ?? occupant.name;
       return ok({ playerId, resumeToken, resumed, name });
     },
 

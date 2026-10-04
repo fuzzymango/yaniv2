@@ -13,6 +13,7 @@ import { HAND_SIZE, MAX_SCORE, YANIV_THRESHOLD } from "@yaniv/shared";
 import type { Clock } from "../src/clock.ts";
 import { createDeck } from "../src/deck.ts";
 import type { Result } from "../src/result.ts";
+import type { Occupant } from "../src/roomManager.ts";
 import type { GameState, GameStateActive, Player, RoundState } from "../src/state.ts";
 import { inMatch } from "../src/state.ts";
 
@@ -206,6 +207,14 @@ export function allCardIds(state: GameState): string[] {
   ]
     .map((c) => c.id)
     .sort();
+}
+
+/**
+ * Who sits down in a fixture's seat: a guest under `name`, unless an account is named. The
+ * fixture's convenience only — `Occupant` itself defaults nothing.
+ */
+export function occupant(name: string, accountId: string | null = null): Occupant {
+  return { name, accountId };
 }
 
 export function unwrap<T>(result: Result<T>): T {

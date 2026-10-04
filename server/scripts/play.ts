@@ -47,12 +47,12 @@ function setUp(playerCount: number, seed: number): Table {
     newRoomRng: () => mulberry32(seed + 1),
   });
 
-  const created = rooms.createRoom(names[0]!, null);
+  const created = rooms.createRoom({ name: names[0]!, accountId: null });
   if (!created.ok) throw new Error(created.error.message);
   const { roomCode } = created.value;
 
   for (let i = 1; i < playerCount; i++) {
-    const joined = rooms.joinRoom(roomCode, names[i]!, null);
+    const joined = rooms.joinRoom(roomCode, { name: names[i]!, accountId: null });
     if (!joined.ok) throw new Error(joined.error.message);
   }
 
