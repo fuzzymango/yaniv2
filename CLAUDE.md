@@ -579,16 +579,19 @@ The one screen where identity is asked about (#174): signed out, Google's button
 and a guest is told nothing else; signed in, "Welcome <name>" replaces the name field, and the
 corner holds the **profile**'s person icon (`ProfileDialog`, #228 — the six stats over the menu,
 read fresh on every open, dashes until they land), **on this screen only**. **The profile is
-the one place an account is renamed or signed out of** (#229, #230): a pencil swaps the name for
-a field, ✓/Enter saves, ✕ cancels, and the field stays open while the standing it was opened
-over is still the one on screen — the session replaces it when a rename lands and keeps it on a
-refusal, shown under the field. A sign-out icon opposite the title asks "Sign out of <name>?",
+the one place an account is renamed, its custom calls chosen or it is signed out of** (#229,
+#237, #230): a pencil swaps the name — or a custom call, drawn upper-cased in the banner's
+yellow or red, the banner's own word dimmed where unset — for a field, ✓/Enter saves, ✕
+cancels, an empty call saves as unset, and the field stays open while the standing it was opened
+over is still the one on screen — the session replaces it when an edit lands and keeps it on a
+refusal, shown under the field. A call is asked of `customCall.ts` in the profile, worded there,
+before the intent sends it. A sign-out icon opposite the title asks "Sign out of <name>?",
 Cancel focused — sign-out forgets the seat too, hence a panel only the menu opens. Showing,
-editing and confirming are exclusive, and Escape backs out one level, the editor and the
-question each stopping the key before `Modal` sees it. `NameDialog` is confirm-only, the first
-sign-in's non-dismissible step with a "Not now". While either is open the menu shows no
-`error` — the panel does, the profile under its name field — which is why the menu, not the
-profile, holds whether the profile is open. Google's script is fetched when the signed-out form
+editing one field and confirming are exclusive — one `Panel` value — and Escape backs out one
+level, each editor and the question stopping the key before `Modal` sees it. `NameDialog` is
+confirm-only, the first sign-in's non-dismissible step with a "Not now". While either is open
+the menu shows no `error` — the panel does, the profile under whichever field is open — which
+is why the menu, not the profile, holds whether the profile is open. Google's script is fetched when the signed-out form
 mounts and a failure draws **nothing** (`google.ts`,
 docs/adr/0020) — sign-in is an option, never a wall.
 

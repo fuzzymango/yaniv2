@@ -71,6 +71,7 @@ export function App({ session }: { session: Session }) {
         onCreateAccount={session.createAccount}
         onCancelSignIn={session.cancelSignIn}
         onRenameAccount={session.renameAccount}
+        onSetCustomCall={session.setCustomCall}
         onClearError={session.clearError}
         onSignOut={session.signOut}
         onLoadStats={session.loadStats}

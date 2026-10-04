@@ -22,6 +22,17 @@
 // `shared`'s, because it is also which custom call an account sets over the wire.
 import type { Call, PlayerGameView } from "@yaniv/shared";
 
+/**
+ * The word each call is announced as, and **upper case here rather than in the stylesheet**:
+ * the banner says exactly `YANIV` or `ASSAF` and nothing else, so what a text transform makes
+ * of it is not the place that decision should live. Exported for the profile, which shows it
+ * where no custom call is set (#237) — the table's word, so the two cannot drift.
+ */
+export const CALL_WORD: Readonly<Record<Call, string>> = {
+  yaniv: "YANIV",
+  assaf: "ASSAF",
+};
+
 /** One banner: the word, and the seat it goes over. Position is what says who. */
 export interface Banner {
   readonly playerId: string;

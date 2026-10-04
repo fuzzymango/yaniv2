@@ -30,23 +30,13 @@
  */
 
 import type { CSSProperties } from "react";
-import type { PlacedBanner } from "../announcement.ts";
+import { CALL_WORD, type PlacedBanner } from "../announcement.ts";
 import {
   ANNOUNCE_ENTER_MS,
   ANNOUNCE_EXIT_MS,
   announceEnterAt,
   announceLeaveAt,
 } from "../timing.ts";
-
-/**
- * The word each call is announced as, and **upper case here rather than in the stylesheet**:
- * the banner says exactly `YANIV` or `ASSAF` and nothing else, so what a text transform makes
- * of it is not the place that decision should live.
- */
-const SAID: Record<PlacedBanner["call"], string> = {
-  yaniv: "YANIV",
-  assaf: "ASSAF",
-};
 
 export function CallAnnouncement({ banner }: { banner: PlacedBanner }) {
   /*
@@ -77,7 +67,7 @@ export function CallAnnouncement({ banner }: { banner: PlacedBanner }) {
         } as CSSProperties
       }
     >
-      {SAID[banner.call]}
+      {CALL_WORD[banner.call]}
     </span>
   );
 }

@@ -655,10 +655,11 @@ body {
 }
 
 /*
- * The profile's name and the pencil beside it, and the field that swaps in for both: one
- * row the same height either way, so the stats below do not move when editing starts.
+ * A value in the profile and the pencil beside it — the name, or a custom call — and the
+ * field that swaps in for both: one row the same height either way, so nothing below it
+ * moves when editing starts.
  */
-.profile__name {
+.profile__row {
   display: flex;
   align-items: center;
   gap: 0.25rem;
@@ -667,7 +668,8 @@ body {
   overflow-wrap: anywhere;
 }
 
-.profile__name > .menu__name {
+.profile__row > .menu__name,
+.profile__row > .profile__call {
   flex: 1;
   min-width: 0;
 }
@@ -682,6 +684,49 @@ body {
 .profile__input {
   flex: 1;
   min-width: 0;
+}
+
+/*
+ * The custom calls under the stats (#237): a heading and the two rows, nothing else, set
+ * a little apart so the heading does not read as a seventh stat.
+ */
+.profile__calls {
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.5rem;
+}
+
+/* Sized and coloured as the stats' labels are: a caption, not a second title. */
+.profile__heading {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+/*
+ * A call as the banner will shout it, in the banner's own two colours rather than the
+ * accent's — the same variables, so tuning the banner tunes this with it. Weighted and
+ * spaced like the banner, at a size a panel row can hold.
+ */
+.profile__call {
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.profile__call--yaniv {
+  color: var(--announce-yaniv);
+}
+
+.profile__call--assaf {
+  color: var(--announce-assaf);
+}
+
+/* No call of the player's: the banner's own word, plain, saying what the table says instead. */
+.profile__call--unset {
+  color: var(--ink-dim);
+  font-weight: 600;
+  opacity: 0.6;
 }
 
 /*
