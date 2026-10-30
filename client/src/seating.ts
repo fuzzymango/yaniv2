@@ -60,12 +60,12 @@ export type Zone = (typeof ZONES)[number];
 
 /**
  * The zone each successive opponent adds a seat to, at the table size that opponent makes:
- * `top` first, so a heads-up opponent sits across the table; then `right`, then `left`, so
- * every side is taken before any doubles; then the doubles, `right` before `left`. `top` is
+ * `top` first, so a heads-up opponent sits across the table; then `left`, then `right`, so
+ * every side is taken before any doubles; then the doubles, `left` before `right`. `top` is
  * never doubled — at a full table it has the top edge to itself, and the two sides sit
  * symmetrical about it (issue #242).
  */
-const FILL_ORDER: readonly Zone[] = ["top", "right", "left", "right", "left"];
+const FILL_ORDER: readonly Zone[] = ["top", "left", "right", "left", "right"];
 
 /**
  * How many seats each zone holds at this table size — `FILL_ORDER`'s first `total` entries,

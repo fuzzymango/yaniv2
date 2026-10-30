@@ -97,12 +97,12 @@ viewer-relative order seated the 1st and 4th opponents side by side, which is tu
 neither direction.
 
 How many each zone holds is a separate question (issue #242): **the top fills first and never
-holds two**, then the right, then the left, then the right doubles, then the left — for 1–5
-opponents, left/top/right, `[0,1,0]` `[0,1,1]` `[1,1,1]` `[1,1,2]` `[2,1,2]`. Heads-up, the one
+holds two**, then the left, then the right, then the left doubles, then the right — for 1–5
+opponents, left/top/right, `[0,1,0]` `[1,1,0]` `[1,1,1]` `[2,1,1]` `[2,1,2]`. Heads-up, the one
 opponent sits across the table; at six the top seat has the top edge to itself and the sides
 sit symmetrical about it. The issue behind it asked for the next player to act always to sit
-opposite, which keeps these positions but zigzags play across the felt — five crossings a lap
-at six — so the runs above decide who sits where, and play goes round the table.
+opposite, which zigzags play across the felt — five crossings a lap at six — so the runs above
+decide who sits where, and play goes round the table.
 
 The list being dealt round is roster order, which is turn order with the seats that are out
 still standing in their places: neighbours on the felt still act one after the other, with
