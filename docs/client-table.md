@@ -26,6 +26,12 @@ had to give up to make room for the lot:
   per count or width. The band is out of the column's flow and pinned to the screen, or "off
   the edge" would mean off the edge of the padding; the cards scale by height as well as
   width, since a doubled zone stacks up an edge.
+- **A side's seats are centred on that side** (#243): the band runs from the top of the
+  screen to the top of the viewer's hand (`--viewer-rows`, worked out from the hand row's own
+  size rather than measured, so it holds whatever the row shows), and the left and right
+  zones are centred in it — a lone seat on the middle of the edge, a pair either side of it,
+  so a lone seat opposite a pair sits level with the gap between them. It used to stop at 56%
+  of the screen, which drew a lone side seat where the upper of two would sit.
 - **Only the label is ringed on turn**, not the seat's box — which is mostly the space
   reserved for an arc turned inside it and hung off the edge, so a ring there reads as a box
   near a player rather than round them.
@@ -369,7 +375,10 @@ arrives a think time apart, so each move flies inside its own.
 A flight shows the move that just happened and is gone; the felt shows one moment of the
 round. A player who looked away, or who dropped and came back, had no way to see the rest of
 it — so the round's log gets a **drawer on the left edge of the table** (issues #89, #91),
-newest move first, in mini cards. `MoveHistory.tsx`, and four decisions:
+newest move first, in mini cards — its arrow at the foot of that edge, just above the hand,
+and the list growing up from it: the middle of the edge is where a lone left seat's name is
+(#243). Six on a short phone is the one table where the lower left label still comes down
+to meet it. `MoveHistory.tsx`, and four decisions:
 
 - **The drawer is a pass-through, and so has no module under it.** The log arrives whole on
   the view, chronological like every other array on it, and already redacted per entry

@@ -924,6 +924,21 @@ body {
    * of step with the hand it stands in for.
    */
   --hand-card-w: min(4.0rem, 16vw);
+  /*
+   * The row that hand sits in, the room above it for a chosen card to rise into included —
+   * and so the row the spectator's bar holds in its place.
+   */
+  --hand-row-h: calc(var(--hand-card-w) * 7 / 5 + 0.75rem);
+  /*
+   * How far up from the bottom of the screen the viewer's own place reaches: the hand row,
+   * this column's `gap`, the bar under it (`.you`'s `min-height`) and `.screen`'s bottom
+   * padding — three numbers written again here, so keep them in step. The seats are laid out
+   * above it (`.table__seats`). Worked out from the rows' own sizes rather than measured, so
+   * it holds whatever the row is showing — a hand, the spectator's bar, or nothing at all.
+   */
+  --viewer-rows: calc(
+    var(--hand-row-h) + 0.75rem + 2.25rem + max(1.25rem, env(safe-area-inset-bottom))
+  );
 
   position: relative;
   justify-content: flex-start;
@@ -1008,9 +1023,10 @@ body {
  * also what lets a fan hang off the top of the screen at all — in the column it would
  * start below the settings icon, and "off the edge" would mean off the edge of nothing.
  *
- * The top of the screen rather than all of it, because the bottom is the local player's:
- * the hand, and the felt they play it onto. Nothing here is tappable, so it passes taps
- * through to whatever the felt puts under it.
+ * Down to the top of the viewer's own hand and no further, because the bottom is theirs
+ * (`--viewer-rows`). So a side of the table runs from the top of the screen to the hand, and
+ * a side's seats are centred on it — one seat or two (#243). Nothing here is tappable, so it
+ * passes taps through to whatever the felt puts under it.
  *
  * Cards here are smaller than the ones on the felt and in the hand, and that is the whole
  * of the size difference between a hand being played and five being watched: these are
@@ -1026,13 +1042,7 @@ body {
   --card-w: calc(min(4.0rem, 15vw, 7.5vh));
 
   position: absolute;
-  inset: 0 0 auto;
-  /*
-   * Deep enough for a doubled zone — two whole seats, stacked — to sit inside it without
-   * the first one's fan being cut off by the top of the screen, at every size the cards
-   * scale to. Any deeper and the seats sit down among the hand rather than around it.
-   */
-  height: 56%;
+  inset: 0 0 var(--viewer-rows);
   pointer-events: none;
 }
 
@@ -1827,10 +1837,11 @@ body {
  *
  * Pinned to the edge and out of the column's flow, like the seats and the corner icons: it
  * is drawn *over* the felt rather than taking room from it, so opening it never moves a card
- * anybody is about to tap. Centred on the table's own height rather than hung off the top or
- * the bottom, which are the two edges already spoken for — the seats take the top of the
- * screen and the hand the bottom, and the left edge between them is the one place a panel
- * can sit without covering either.
+ * anybody is about to tap. Sat on the bottom of that edge, just above the hand, and growing
+ * up it when opened: a side's seats are centred on the edge (`.table__seats`, #243), so its
+ * middle is where a lone seat's name is, and a toggle there would be drawn over it. The bottom
+ * clears every name at a lone seat and a pair alike, the one case it does not being six on a
+ * short phone, where the lower left seat's label comes down far enough to meet it.
  *
  * Above the felt and the seats (`z-index`), and below the two things that are not the
  * table's: the settings modal and the flight layer are both drawn outside it, and the flight
@@ -1839,12 +1850,12 @@ body {
  */
 .history {
   position: absolute;
-  top: 50%;
+  bottom: var(--viewer-rows);
   left: 0;
   z-index: 3;
   display: flex;
-  align-items: center;
-  transform: translateY(-50%);
+  /* The toggle stays put as the list opens, so the list grows up from its foot. */
+  align-items: flex-end;
 }
 
 /*
@@ -1878,7 +1889,7 @@ body {
  * five entries is a fraction of a tall screen and most of a short one.
  *
  * The known overlap: five entries is taller than the gap between the seats and the hand, so
- * an open drawer reaches up over the bottom of a left-hand seat. Accepted rather than solved
+ * an open drawer reaches up over a left-hand seat. Accepted rather than solved
  * by shrinking it — the felt shows through it, it is only ever there because somebody asked
  * for it, and a drawer short enough to clear every seat would hold two moves.
  */
@@ -2061,7 +2072,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  min-height: calc(var(--hand-card-w) * 7 / 5 + 0.75rem);
+  min-height: var(--hand-row-h);
   padding: 0.75rem 0 0;
   text-align: center;
 }
