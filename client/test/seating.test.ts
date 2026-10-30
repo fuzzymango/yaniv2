@@ -25,23 +25,23 @@ describe("ZONES", () => {
 });
 
 describe("seatZones", () => {
-  it("seats nobody at a heads-up table, and still offers all three zones", () => {
+  it("seats nobody when there is nobody to seat, and still offers all three zones", () => {
     assert.deepEqual(seatZones([]), { left: [], top: [], right: [] });
   });
 
-  it("puts a lone opponent on the left", () => {
+  it("puts a lone opponent on top, across the table", () => {
     assert.deepEqual(seatZones(opponents(1)), {
-      left: ["opponent-1"],
-      top: [],
+      left: [],
+      top: ["opponent-1"],
       right: [],
     });
   });
 
-  it("puts the second opponent on top", () => {
+  it("puts the second opponent on the right, so play goes round from the top", () => {
     assert.deepEqual(seatZones(opponents(2)), {
-      left: ["opponent-1"],
-      top: ["opponent-2"],
-      right: [],
+      left: [],
+      top: ["opponent-1"],
+      right: ["opponent-2"],
     });
   });
 
@@ -53,35 +53,41 @@ describe("seatZones", () => {
     });
   });
 
-  it("doubles left first, and keeps the soonest to act at the bottom of it", () => {
+  it("doubles right first, and keeps the soonest to act at the top of it", () => {
     assert.deepEqual(seatZones(opponents(4)), {
-      left: ["opponent-2", "opponent-1"],
-      top: ["opponent-3"],
-      right: ["opponent-4"],
+      left: ["opponent-1"],
+      top: ["opponent-2"],
+      right: ["opponent-3", "opponent-4"],
     });
   });
 
-  it("doubles top second, at a full table", () => {
+  it("doubles left second, at a full table, and keeps the soonest to act at the bottom", () => {
     assert.deepEqual(seatZones(opponents(5)), {
       left: ["opponent-2", "opponent-1"],
-      top: ["opponent-3", "opponent-4"],
-      right: ["opponent-5"],
+      top: ["opponent-3"],
+      right: ["opponent-4", "opponent-5"],
     });
   });
 
-  it("fills every zone before doubling any, and never doubles right", () => {
+  it("fills top, then right, then left, then doubles right, then left", () => {
     const counts = Array.from({ length: MAX_PLAYERS }, (_, n) => {
       const zones = seatZones(opponents(n));
       return ZONES.map((zone) => zones[zone].length);
     });
     assert.deepEqual(counts, [
       [0, 0, 0],
-      [1, 0, 0],
-      [1, 1, 0],
+      [0, 1, 0],
+      [0, 1, 1],
       [1, 1, 1],
-      [2, 1, 1],
-      [2, 2, 1],
+      [1, 1, 2],
+      [2, 1, 2],
     ]);
+  });
+
+  it("never seats two on top, at any table size", () => {
+    for (let n = 0; n < MAX_PLAYERS; n += 1) {
+      assert.ok(seatZones(opponents(n)).top.length <= 1, `${n} opponents`);
+    }
   });
 
   it("seats contiguous runs, so a doubled zone holds consecutive players", () => {
@@ -94,9 +100,9 @@ describe("seatZones", () => {
   it("zones whatever it is given, since a revealed hand is not a live opponent", () => {
     const hands = [{ playerId: "a" }, { playerId: "b" }];
     assert.deepEqual(seatZones(hands), {
-      left: [{ playerId: "a" }],
-      top: [{ playerId: "b" }],
-      right: [],
+      left: [],
+      top: [{ playerId: "a" }],
+      right: [{ playerId: "b" }],
     });
   });
 });

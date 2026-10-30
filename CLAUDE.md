@@ -539,7 +539,8 @@ sends — so `isSlapdownTarget` reads the wire's own answer, and answers `false`
 
 Opponents are drawn round three sides of the felt (`seatZones`): fans of face-down backs while
 the round is played, the same seats cascaded face up once it is scored, and the same again with
-the standings floating over them once the match is. **One screen, not three** (issues #78,
+the standings floating over them once the match is. The top is filled first and never doubled,
+the sides taking the doubles, and play still goes round the table (#242). **One screen, not three** (issues #78,
 #130): `Table.tsx` renders every phase off one placement (`byRelativeSeat` off the live roster)
 and one reserved box per seat (`seatFootprint`).
 

@@ -175,6 +175,9 @@ anchoring to the person is bounded by the screen: a top seat's banner hangs from
 and a pair of top seats anchors outward as the side seats do, because centred on the outer half
 of either, the word started off a phone's screen.
 
+*Amended by #242:* the top zone never holds two seats any more, so the pair's outward anchoring
+is gone; a top seat's banner is centred on the screen and hangs from its top edge.
+
 ## Reduced motion keeps the banner and the beat
 
 `prefers-reduced-motion` is a request not to be moved, not a request to be told less. The same

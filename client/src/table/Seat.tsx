@@ -94,8 +94,8 @@ interface SeatProps {
    * answer straight through.
    *
    * It sits inside the seat's box because the box is what says who called — see
-   * `CallAnnouncement.tsx` — and it is allowed to overflow that box, being wider than a
-   * cramped top-zone seat. The stacking that keeps it above a neighbour's cards is the
+   * `CallAnnouncement.tsx` — and it is allowed to overflow that box, being wider than the
+   * seat. The stacking that keeps it above a neighbour's cards is the
    * stylesheet's (`.table-seat--announcing`).
    */
   banner?: ReactNode;

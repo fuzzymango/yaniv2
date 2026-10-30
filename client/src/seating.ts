@@ -46,7 +46,8 @@ export function byRelativeSeat(
 }
 
 /**
- * The three sides of the felt an opponent can be drawn on, in the order they are dealt.
+ * The three sides of the felt an opponent can be drawn on, in the order the contiguous runs
+ * fill them (`seatZones`) — which is not the order they gain seats in (`FILL_ORDER`).
  * The viewer holds the fourth, and is not a zone: their hand is at the bottom of the
  * screen whoever else is at the table.
  *
@@ -58,32 +59,28 @@ export const ZONES = ["left", "top", "right"] as const;
 export type Zone = (typeof ZONES)[number];
 
 /**
- * How many seats each zone holds at this table size: every zone is filled before any is
- * doubled, which is the distribution a round-robin deal gives — `left` takes every third
- * opponent counting from the first, `top` from the second, `right` from the third. Counted
- * rather than dealt, since the counts are all the contiguous fill below wants of it (#116).
+ * The zone each successive opponent adds a seat to, at the table size that opponent makes:
+ * `top` first, so a heads-up opponent sits across the table; then `right`, then `left`, so
+ * every side is taken before any doubles; then the doubles, `right` before `left`. `top` is
+ * never doubled — at a full table it has the top edge to itself, and the two sides sit
+ * symmetrical about it (issue #242).
+ */
+const FILL_ORDER: readonly Zone[] = ["top", "right", "left", "right", "left"];
+
+/**
+ * How many seats each zone holds at this table size — `FILL_ORDER`'s first `total` entries,
+ * counted. Only the counts: which opponents go in them is the contiguous fill below (#116).
  */
 function zoneCounts(total: number): Record<Zone, number> {
   const counts: Record<Zone, number> = { left: 0, top: 0, right: 0 };
-  for (let i = 0; i < total; i += 1) {
-    switch (i % 3) {
-      case 0:
-        counts.left += 1;
-        break;
-      case 1:
-        counts.top += 1;
-        break;
-      default:
-        counts.right += 1;
-    }
-  }
+  for (const zone of FILL_ORDER.slice(0, total)) counts[zone] += 1;
   return counts;
 }
 
 /**
  * Deals a turn-ordered opponent list around the table in **contiguous runs**: the first
  * `left.length` opponents fill the left column, the next the top, the last the right. Every
- * zone is filled before any is doubled — `zoneCounts` above — but a doubled zone holds two
+ * zone is filled before any is doubled — `zoneCounts` above — and a doubled zone holds two
  * players who act one after the other rather than three turns apart, which is what makes the
  * sweep round the felt read in turn order at all (issue #116).
  *
@@ -95,7 +92,7 @@ function zoneCounts(total: number): Record<Zone, number> {
  * Sorting the roster first, whether by `bySeat` or `byRelativeSeat`, is the whole point of
  * that: this function reads nothing but the order it is handed.
  *
- * `right` cannot hold two: doubling it needs a 6th opponent, and `MAX_PLAYERS` is 6, so
+ * `top` never holds two, and `FILL_ORDER` runs out at five opponents: `MAX_PLAYERS` is 6, so
  * five is all there ever are. That is a fact about the room, not a case handled here.
  *
  * Generic over the opponent because seating is a fact about a list's order and nothing about
