@@ -26,6 +26,12 @@ had to give up to make room for the lot:
   per count or width. The band is out of the column's flow and pinned to the screen, or "off
   the edge" would mean off the edge of the padding; the cards scale by height as well as
   width, since a doubled zone stacks up an edge.
+- **A side's seats are centred on that side** (#243): the band runs from the top of the
+  screen to the top of the viewer's hand (`--viewer-rows`, worked out from the hand row's own
+  size rather than measured, so it holds whatever the row shows), and the left and right
+  zones are centred in it — a lone seat on the middle of the edge, a pair either side of it,
+  so a lone seat opposite a pair sits level with the gap between them. It used to stop at 56%
+  of the screen, which drew a lone side seat where the upper of two would sit.
 - **Only the label is ringed on turn**, not the seat's box — which is mostly the space
   reserved for an arc turned inside it and hung off the edge, so a ring there reads as a box
   near a player rather than round them.
@@ -92,10 +98,17 @@ listed in one place — and keeps the absolute `bySeat`.
 
 `seatZones` then fills the zones in **contiguous runs**, not round-robin (issue #116): the
 first opponents go to the left column, the next to the top, the last to the right, so a
-doubled zone holds two players who act one after the other. The per-zone counts are still the
-round-robin's — every zone filled before any doubles, `right` never doubling at all — and only
-which opponents land in each changes. A round-robin fed a viewer-relative order seated the 1st
-and 4th opponents side by side, which is turn order in neither direction.
+doubled zone holds two players who act one after the other. A round-robin fed a
+viewer-relative order seated the 1st and 4th opponents side by side, which is turn order in
+neither direction.
+
+How many each zone holds is a separate question (issue #242): **the top fills first and never
+holds two**, then the left, then the right, then the left doubles, then the right — for 1–5
+opponents, left/top/right, `[0,1,0]` `[1,1,0]` `[1,1,1]` `[2,1,1]` `[2,1,2]`. Heads-up, the one
+opponent sits across the table; at six the top seat has the top edge to itself and the sides
+sit symmetrical about it. The issue behind it asked for the next player to act always to sit
+opposite, which zigzags play across the felt — five crossings a lap at six — so the runs above
+decide who sits where, and play goes round the table.
 
 The list being dealt round is roster order, which is turn order with the seats that are out
 still standing in their places: neighbours on the felt still act one after the other, with
@@ -362,7 +375,10 @@ arrives a think time apart, so each move flies inside its own.
 A flight shows the move that just happened and is gone; the felt shows one moment of the
 round. A player who looked away, or who dropped and came back, had no way to see the rest of
 it — so the round's log gets a **drawer on the left edge of the table** (issues #89, #91),
-newest move first, in mini cards. `MoveHistory.tsx`, and four decisions:
+newest move first, in mini cards — its arrow at the foot of that edge, just above the hand,
+and the list growing up from it: the middle of the edge is where a lone left seat's name is
+(#243). Six on a short phone is the one table where the lower left label still comes down
+to meet it. `MoveHistory.tsx`, and four decisions:
 
 - **The drawer is a pass-through, and so has no module under it.** The log arrives whole on
   the view, chronological like every other array on it, and already redacted per entry
@@ -402,10 +418,9 @@ about this table in particular:
   what says who, which is the whole difference between this and a larger copy of the line
   above the felt — and it is why the banner carries no name and no number, so it is glanced at
   rather than read. *Where* over the seat is decided by the screen's edges, so that no banner
-  is ever off them (#234): a side seat's banner grows inward from its own edge, a top seat's
-  hangs from the top of the screen and grows down into the felt, and a *pair* of top seats
-  grows outward-in as the sides do, since a word centred on the outer half of either starts
-  off a phone's screen. A lone top seat is centred on the screen and stays centred.
+  is ever off them (#234): a side seat's banner grows inward from its own edge, and the top
+  seat's hangs from the top of the screen and grows down into the felt, centred on the screen —
+  the top holding one seat at most (#242), the pair of top seats #234 anchored outward is gone.
 - **The viewer's own anchor is the hand actually shown, not the live hand.** The caller can be
   the player the round has just knocked out, and at that scored round their hand is still on
   the screen, read off the round's own record — being dimmed out of the *next* round does not
@@ -414,7 +429,7 @@ about this table in particular:
 - **It sits in a box the seat already sized, and nothing here measures the DOM.** A card
   genuinely travels between two distant boxes, which is why `CardsInFlight.tsx` measures; a
   banner does not travel. What the seat gives up for it is its bounds — the word is wider than
-  a cramped top-zone seat — and a stacking context, so it is never drawn under a neighbour's
+  the seat — and a stacking context, so it is never drawn under a neighbour's
   cards. That takes two: the announcing seat is raised, and every seat isolates its own cards
   (#234), whose inline z-indexes would otherwise be ranked against the raised seat beside them
   — a five-card cascade outranks it.

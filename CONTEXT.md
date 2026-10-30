@@ -413,6 +413,17 @@ a viewer-relative sweep anchors on would be. That sweep anchors on the viewer's 
 seat rather than on the next player to act, which is also what keeps it meaningful for a
 spectator: they are still seated, and no longer in turn order at all.
 
+## Zone
+
+A **zone** is a side of the felt an opponent is drawn on: **left**, **top** or **right**, named
+for the screen and never for a compass. The viewer is not in one — their hand is the bottom of
+the screen whoever else is at the table. **Top** holds one seat at most and is filled first;
+**left** and **right** hold two, and take the doubles.
+
+Which zone a seat lands in follows the seating, never turn order, and keeps play **going round
+the table**: from the viewer, up the left, across the top, down the right and back, so
+neighbours on the felt act one after the other and nobody's turn is ever passed across it.
+
 ## Scorecard
 
 The match's running record of the rounds it has **scored** — `GameState.scorecard`, and
