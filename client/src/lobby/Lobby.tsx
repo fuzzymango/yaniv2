@@ -63,7 +63,6 @@ export function Lobby({
           characters, read out one at a time and not pronounced as a word.
         */}
         <p className="code__value">{view.roomCode}</p>
-        <p className="code__hint">Read it out to whoever is playing with you.</p>
       </header>
 
       {/*
