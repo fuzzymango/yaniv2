@@ -45,7 +45,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import type {
-  GameError,
   OpponentView,
   PlayerGameView,
   PlayerRoundResultView,
@@ -76,7 +75,6 @@ import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "..
 interface TableProps {
   view: PlayerGameView;
   selection: readonly string[];
-  error: GameError | null;
   busy: boolean;
   /**
    * The move this position was reached by, if it is one worth watching happen. A one-shot
@@ -157,7 +155,6 @@ function ScoredDetail({
 export function Table({
   view,
   selection,
-  error,
   busy,
   flight,
   announcement,
@@ -742,13 +739,6 @@ export function Table({
             </>
           )}
         </footer>
-
-        {error && (
-          <p className="notice notice--error" role="alert">
-            {error.message}
-          </p>
-        )}
-
       </main>
 
       {/*

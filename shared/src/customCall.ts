@@ -1,8 +1,8 @@
 /**
  * The custom-call rule: what a **custom Yaniv call** or **custom Assaf call** may say
  * (`CONTEXT.md`, **Custom calls**; issue #126). The display-name rule's sibling, here for the
- * same reason that one is (ADR-0002): the server enforces it, and the profile asks it before
- * sending, so a client offers exactly what the server will accept.
+ * same reason that one is (ADR-0002): the server enforces it, and the client's session asks
+ * it before sending, so a client offers exactly what the server will accept.
  *
  * A module of its own rather than a second function in `displayName.ts`: the two rules are
  * deliberately different — a call is shouted where a name is not, so it allows a little

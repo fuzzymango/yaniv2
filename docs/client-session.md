@@ -31,8 +31,12 @@ identity. Ten fields, and each answers a different question:
 - **`stats`** — the signed-in account's six counters as last read, or `null`: not read yet, being
   read, or refused. Read only when asked for (`loadStats`), and **one account's and never the
   next's** — see "Accounts" below.
-- **`error`** — a `GameError`: something the player asked for and was refused, or one the server
-  pushed as `errorMessage`. Cleared the moment they try again — a refusal costs them nothing.
+- **`errors`** — every **toast** still up, oldest first: a `Toast` is a `GameError` — something
+  the player asked for and was refused, or one the server pushed as `errorMessage` — and an `id`
+  from the session's own counter, fixed for the toast's life. Appended, never replaced, so the
+  same refusal twice is two toasts, there is no cap, and one already on screen never moves when
+  another arrives below it. **Only `dismissError(id)` takes one down** — see "A toast leaves on its ✕" below.
+  Never one the table already explains — see "Refusals the board already explains" below.
 - **`notice`** — news that is *not* a refusal: a seat that could not be claimed back, or a session
   that has lapsed. No action to blame and nothing to retry, and it arrives while they sit still.
 - **`connected`** — whether there is a socket to play over (this session's own, not the wire's
@@ -92,6 +96,15 @@ crossing an action still in flight acks `PLAYER_NOT_FOUND` about a room they hav
 error is dropped whenever `view` is already null. **An `errorMessage` shows and is dropped
 exactly where a rejected ack is**, being the same news, **but does not touch `busy`**: it is
 nobody's answer, and letting go would put a second copy of the action on the wire.
+
+**Refusals the board already explains are never published** (#246). Each releases `busy`, and
+the move stays the player's to make, but no toast is added: what they see next — the turn
+indicator, the slapdown window closing, the round ending, the next round dealt — already says
+what happened. A move (`play`: `takeTurn`, `callYaniv`, `slapDown`) is silent on
+`NOT_YOUR_TURN`, `SLAPDOWN_NOT_AVAILABLE`, `WRONG_PHASE` and `CARD_NOT_PICKUP_ELIGIBLE`
+(`SILENT_MOVE`); `startNextRound` and `playAgain` on `WRONG_PHASE`, somebody else having dealt
+first (`SILENT_DEAL`, handed to `act`). **Keyed on the action as well as the code**: the lobby's
+`WRONG_PHASE` ("Settings are locked once the match has started") is news, and is shown.
 
 **`playerJoined`/`playerLeft` are deliberately unhandled.** The roster arrives right behind each
 as a fresh view, and a screen that re-renders in place shows a seat filling or emptying by
@@ -157,22 +170,24 @@ not sent over a dead socket: the next connection would arrive bound to no accoun
 server would have no session to end. A `renameAccount` or `setCustomCall` refused
 `INVALID_SESSION` lands where a lapsed session does, below.
 
-**Custom calls are set one at a time, and judged by the server** (#126). `setCustomCall(call,
-text)` sends the text as given — signed in only, nothing sent for a guest — locks `busy` and
-settles on the ack, which answers with the account as it now stands: landed, the signed-in
-standing is replaced from it, as a rename's is, and an empty text comes back as that call
-`null`, the banner's own word; refused (`INVALID_CUSTOM_CALL`), the standing is kept, the same
-object, and `error` says why. Unlike `renameAccount` it applies no rule before sending: the
-profile asks `normalizeCustomCall` itself before it calls the intent, so the session's suite
-meets the server's refusals rather than its own. Both calls ride every `AccountView`, so a
-sign-in, an account created, a resumed session and a rename all answer them.
+**Custom calls are set one at a time, and judged before they are sent** (#126, #248).
+`setCustomCall(call, text)` — signed in only, nothing sent for a guest — asks
+`normalizeCustomCall` first, as `renameAccount` asks the name rule: a text it refuses publishes a
+local `INVALID_CUSTOM_CALL` in the session's own words and sends nothing, the standing kept, the
+same object. What passes is sent as typed, locks `busy` and settles on the ack, which answers
+with the account as it now stands: landed, the signed-in standing is replaced from it, as a
+rename's is, and an empty text comes back as that call `null`, the banner's own word. The server
+judges the text again regardless (ADR-0002); its refusal of one is the server's flow suite's.
+Both calls ride every `AccountView`, so a sign-in, an account created, a resumed session and a
+rename all answer them.
 
-**A refusal is put down when the panel that asked for it closes.** `cancelSignIn` clears `error`
-on its way back to a guest, and `clearError` — nothing sent, nothing else touched, the account
-standing included — is the profile's way in and out, and its editors' (#229, #237): a refusal
-left over from the menu is no answer about a name or a call, and one an editor was showing is
-about a question nobody is asking once it has closed. None of them is the session's: the menu
-decides when the panels open, the profile when its editors do.
+**A toast leaves on its ✕ and on nothing else** (docs/adr/0027). Trying again, entering or
+leaving a room, a seat claimed back, `cancelSignIn`, and the profile and its editors opening or
+closing all leave `errors` as it stands — whether a refusal has been read is the player's to say,
+and a toast that vanished under the tap that retried would be a jump of its own. `dismissError(id)`
+removes that one toast and nothing else: nothing is sent, `account`, `view` and `busy` are left
+as they were, and an id not up publishes nothing at all. `notice` is not a toast and keeps its
+own rule: put down by the next attempt to enter a room or act on the account.
 
 **Stats are read fresh, and belong to one account** (docs/adr/0026). `loadStats()` blanks
 `stats`, emits, and fills it from the ack — only the latest read's, and only while the account it

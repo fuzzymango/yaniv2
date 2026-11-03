@@ -270,7 +270,8 @@ one. `GameEnd` is drawn over it.
 - **Siblings, not composition.** `App.tsx` returns `Table` and `GameEnd` next to each other, the
   shape `Table` already uses for `CardsInFlight`: the panel is fixed to the viewport, so putting
   it *inside* the table's column would place a thing that is deliberately floating above one.
-  The table underneath is passed no error — one message, in the one place a player is looking.
+  Neither draws an error: what the room refuses is a toast over both (`shared/ErrorToasts.tsx`),
+  part of no layout, so nothing on the felt or the panel moves when one comes or goes.
 - **No scrim.** The panel is opaque, like the settings modal, because there are cards behind it;
   the layer holding it is not, because those cards are half of what there is to look at, and
   dimming them would dim the very thing the standings are about.

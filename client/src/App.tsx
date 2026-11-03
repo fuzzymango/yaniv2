@@ -12,24 +12,40 @@
  *
  * One branch renders two screens rather than one: a finished match is `Table` with `GameEnd`
  * drawn over it (issue #130). Everywhere else a phase picks exactly one component.
+ *
+ * And whatever the screen, what the session was refused is held up over it, part of none of
+ * them (`ErrorToasts`, spec #245): drawn once, here, beside whichever screen is up, so no
+ * screen draws an error of its own and nothing on any of them moves when one appears.
  */
 
 import { Disconnected } from "./connection/Disconnected.tsx";
+import { ErrorToasts } from "./shared/ErrorToasts.tsx";
 import { Resuming } from "./connection/Resuming.tsx";
 import { GameEnd } from "./game-end/GameEnd.tsx";
 import { Lobby } from "./lobby/Lobby.tsx";
 import { MainMenu } from "./main-menu/MainMenu.tsx";
 import { Room } from "./table/Room.tsx";
 import { Table } from "./table/Table.tsx";
-import type { Session } from "./session.ts";
+import type { Session, SessionSnapshot } from "./session.ts";
 import { useSession } from "./useSession.ts";
 
 export function App({ session }: { session: Session }) {
+  const snapshot = useSession(session);
+
+  return (
+    <>
+      <Screen session={session} snapshot={snapshot} />
+      <ErrorToasts toasts={snapshot.errors} onDismiss={session.dismissError} />
+    </>
+  );
+}
+
+/** Which one screen is up, the toasts aside. */
+function Screen({ session, snapshot }: { session: Session; snapshot: SessionSnapshot }) {
   const {
     view,
     account,
     stats,
-    error,
     notice,
     busy,
     connected,
@@ -37,7 +53,7 @@ export function App({ session }: { session: Session }) {
     selection,
     flight,
     announcement,
-  } = useSession(session);
+  } = snapshot;
 
   /*
    * Before anything else, and whatever position was last drawn: with no socket there is
@@ -62,7 +78,6 @@ export function App({ session }: { session: Session }) {
       <MainMenu
         account={account}
         stats={stats}
-        error={error}
         notice={notice}
         busy={busy}
         onCreate={session.createRoom}
@@ -72,7 +87,6 @@ export function App({ session }: { session: Session }) {
         onCancelSignIn={session.cancelSignIn}
         onRenameAccount={session.renameAccount}
         onSetCustomCall={session.setCustomCall}
-        onClearError={session.clearError}
         onSignOut={session.signOut}
         onLoadStats={session.loadStats}
       />
@@ -88,7 +102,6 @@ export function App({ session }: { session: Session }) {
     return (
       <Lobby
         view={view}
-        error={error}
         busy={busy}
         onStart={session.startGame}
         onUpdateSettings={session.updateSettings}
@@ -123,12 +136,6 @@ export function App({ session }: { session: Session }) {
       <Table
         view={view}
         selection={selection}
-        /*
-         * A finished match reports through the panel over the table, which is what every
-         * action left on this screen is asked through: one message, in the one place a
-         * player is looking.
-         */
-        error={phase === "gameEnd" ? null : error}
         busy={busy}
         flight={flight}
         announcement={announcement}
@@ -154,7 +161,6 @@ export function App({ session }: { session: Session }) {
         {table}
         <GameEnd
           view={view}
-          error={error}
           busy={busy}
           onPlayAgain={session.playAgain}
           onExit={session.exitToMenu}
