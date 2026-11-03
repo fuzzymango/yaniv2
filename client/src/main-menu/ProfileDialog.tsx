@@ -20,8 +20,8 @@
  * Whether the panel is open is this component's, as `SettingsDialog`'s is: nothing on the
  * wire knows or cares that somebody is looking at it, and the main menu draws this only while
  * signed in, so a sign-out takes the open panel with it. **A refusal is a toast over the
- * panel** (`ErrorToasts`, spec #245), never a line in it — though the error is still put down
- * on the way in and on the way out, and as a field opens, until the toasts stack (#250).
+ * panel** (`ErrorToasts`, spec #245), never a line in it, and opening, closing or switching
+ * fields puts none down: a toast goes on its own ✕ (#250).
  *
  * **Signing out is asked before it is done, and asked here alone** (#230): an icon in the
  * header, opposite the title and as far from Close as the panel allows, swaps the panel's
@@ -407,7 +407,6 @@ interface ProfileDialogProps {
   onRename: (displayName: string) => void;
   /** Set one custom call; an empty text puts the banner's own word back. */
   onSetCustomCall: (call: Call, text: string) => void;
-  onClearError: () => void;
   onSignOut: () => void;
 }
 
@@ -422,7 +421,6 @@ export function ProfileDialog({
   onLoadStats,
   onRename,
   onSetCustomCall,
-  onClearError,
   onSignOut,
 }: ProfileDialogProps) {
   const [open, setOpen] = useState(false);
@@ -436,20 +434,14 @@ export function ProfileDialog({
 
   /** Open one field's editor, closing whichever other one was open: one thing at a time. */
   const edit = (field: Field) => {
-    onClearError();
     setPanel({ kind: "editing", field, over: standing });
   };
 
-  /** Back to showing: a refusal left over from anything cancelled has nothing to answer. */
   const showProfile = (from: Field | null) => {
-    onClearError();
     setPanel({ kind: "showing", returnTo: from });
   };
 
-  const close = () => {
-    onClearError();
-    setOpen(false);
-  };
+  const close = () => setOpen(false);
 
   const callRow = (call: Call) => {
     const text = callText(standing, call);
@@ -487,7 +479,6 @@ export function ProfileDialog({
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => {
-          onClearError();
           onLoadStats();
           setPanel(SHOWING);
           setOpen(true);
@@ -508,10 +499,7 @@ export function ProfileDialog({
                 type="button"
                 aria-label="Sign out"
                 title="Sign out"
-                onClick={() => {
-                  onClearError();
-                  setPanel({ kind: "confirming" });
-                }}
+                onClick={() => setPanel({ kind: "confirming" })}
               >
                 <SignOutIcon />
               </button>

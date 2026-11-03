@@ -7,19 +7,18 @@
  * went. So this layer is fixed to the viewport and takes no space in any layout — nothing a
  * player is looking at moves when a toast comes or goes.
  *
- * **Shaped for a list already**, though the session holds one error for now: each toast is
- * an id and the error it carries, and ✕ hands back the id. `App.tsx` adapts the single error
- * to that shape until the snapshot holds the list itself.
+ * The session's list, drawn as it stands: each toast an id and the error it carries, ✕
+ * handing back the id, and ✕ the only way one goes (`dismissError`).
  *
  * The layer is inert to every tap and each toast is not, so the felt around a toast still
  * takes a tap meant for it.
  */
 
-import type { GameError } from "@yaniv/shared";
+import type { Toast } from "../session.ts";
 
 interface ErrorToastsProps {
   /** Oldest first, so a toast already on screen never moves when another arrives below it. */
-  toasts: readonly { id: number; error: GameError }[];
+  toasts: readonly Toast[];
   onDismiss: (id: number) => void;
 }
 

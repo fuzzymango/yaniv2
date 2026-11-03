@@ -147,6 +147,11 @@ interface Harness {
    */
   announce: (error: GameError) => void;
   /**
+   * Every event a session's socket sends from now on, by name, kept as they go — how a test
+   * proves an intent sent nothing, rather than inferring it from a lock that stayed down.
+   */
+  outgoing: (session: Session) => string[];
+  /**
    * Make `idToken` a Google ID token this server's verifier accepts, as the identity
    * named. Every other string is one Google did not vouch for. The real verifier is the
    * one thing no test can reach (docs/adr/0020), so the suite says outright who Google
@@ -243,6 +248,13 @@ async function startServer(
       else client.disconnect();
     },
     announce: (error) => io.emit("errorMessage", error),
+    outgoing: (session) => {
+      const client = connections.get(session);
+      if (!client) throw new Error("that session was never opened here");
+      const sent: string[] = [];
+      client.onAnyOutgoing((event: string) => sent.push(event));
+      return sent;
+    },
     vouchFor: verifier.vouchFor,
     skewClock: (ms) => {
       skew = ms;
@@ -574,7 +586,7 @@ describe("the session core", () => {
 
       const joined = await waitForSnapshot(guest, "the joined room", (s) => s.view !== null);
       assert.equal(joined.view!.roomCode, roomCode, "the code is normalised, not rejected");
-      assert.equal(joined.error, null);
+      assert.deepEqual(joined.errors, []);
       assert.deepEqual(
         joined.view!.opponents.map((p) => p.name),
         ["Ada"],
@@ -600,8 +612,8 @@ describe("the session core", () => {
       const session = await server.openSession();
       session.joinRoom("ZZZZ", "Ada");
 
-      const refused = await waitForSnapshot(session, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "ROOM_NOT_FOUND");
+      const refused = await waitForSnapshot(session, "the refusal", (s) => s.errors.length > 0);
+      assert.equal(refused.errors.at(-1)!.error.code, "ROOM_NOT_FOUND");
       assert.equal(refused.view, null, "no room, so the main menu is still the screen");
 
       // Still able to act, which is the whole point of staying on the menu — and, since
@@ -609,7 +621,11 @@ describe("the session core", () => {
       // that the failed join left nothing bound behind it.
       session.createRoom("Ada");
       const created = await waitForSnapshot(session, "a room of their own", (s) => s.view !== null);
-      assert.equal(created.error, null, "the refusal is cleared by the next attempt");
+      assert.deepEqual(
+        created.errors.map((t) => t.error.code),
+        ["ROOM_NOT_FOUND"],
+        "the refusal outlives the next attempt and the screen it was made on — only ✕ takes it",
+      );
     } finally {
       await server.close();
     }
@@ -630,8 +646,8 @@ describe("the session core", () => {
       const latecomer = await server.openSession();
       latecomer.joinRoom(roomCode, "Grace");
 
-      const refused = await waitForSnapshot(latecomer, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "ROOM_FULL");
+      const refused = await waitForSnapshot(latecomer, "the refusal", (s) => s.errors.length > 0);
+      assert.equal(refused.errors.at(-1)!.error.code, "ROOM_FULL");
       assert.equal(refused.view, null);
     } finally {
       await server.close();
@@ -651,10 +667,10 @@ describe("the session core", () => {
         // Asserted without awaiting anything, which is the proof that nothing was sent:
         // an answer that had come from the server could not be on the snapshot yet.
         const refused = session.getSnapshot();
-        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${JSON.stringify(unusable)}`);
+        assert.equal(refused.errors.at(-1)?.error.code, "INVALID_NAME", `refused ${JSON.stringify(unusable)}`);
         // Saying what a name may be, since a symbol is not something a player can see
         // they got wrong by counting.
-        assert.match(refused.error!.message, /letters, digits and single spaces/);
+        assert.match(refused.errors.at(-1)!.error.message, /letters, digits and single spaces/);
         assert.equal(refused.busy, false, "nothing is in flight to wait for");
         assert.equal(refused.view, null);
       }
@@ -680,12 +696,12 @@ describe("the session core", () => {
       session.createRoom("Ada");
 
       const created = await waitForSnapshot(session, "the room", (s) => s.view !== null);
-      assert.equal(created.error, null);
+      assert.deepEqual(created.errors, []);
 
       // The second ask, had it been made, would be answered after the first — so give
       // the server a round trip to say so before believing it never was.
       await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.equal(session.getSnapshot().error, null, "only one room was ever asked for");
+      assert.deepEqual(session.getSnapshot().errors, [], "only one room was ever asked for");
     } finally {
       await server.close();
     }
@@ -702,7 +718,7 @@ describe("the session core", () => {
 
         // Read straight off, as for a create: nothing was sent for an answer to come from.
         const refused = guest.getSnapshot();
-        assert.equal(refused.error?.code, "INVALID_NAME", `refused ${JSON.stringify(unusable)}`);
+        assert.equal(refused.errors.at(-1)?.error.code, "INVALID_NAME", `refused ${JSON.stringify(unusable)}`);
         assert.equal(refused.busy, false, "nothing is in flight to wait for");
         assert.equal(refused.view, null);
       }
@@ -765,8 +781,8 @@ describe("the session core", () => {
       const [host] = await hostARoom(server, "Ada");
       host.startGame();
 
-      const refused = await waitForSnapshot(host, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "NOT_ENOUGH_PLAYERS");
+      const refused = await waitForSnapshot(host, "the refusal", (s) => s.errors.length > 0);
+      assert.equal(refused.errors.at(-1)!.error.code, "NOT_ENOUGH_PLAYERS");
       assert.equal(refused.view!.phase, "lobby", "still waiting in the lobby");
     } finally {
       await server.close();
@@ -782,8 +798,8 @@ describe("the session core", () => {
 
       // Whether the control is offered is the screen's business; whether the match
       // starts is the server's, and this is how a guest is told the rule.
-      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "NOT_HOST");
+      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.errors.length > 0);
+      assert.equal(refused.errors.at(-1)!.error.code, "NOT_HOST");
       assert.equal(refused.view!.phase, "lobby", "still waiting on the host");
 
       // Nothing was dealt behind the refusal, on the host's screen either.
@@ -803,7 +819,7 @@ describe("the session core", () => {
       guest.exitToMenu();
 
       const gone = await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null);
-      assert.equal(gone.error, null, "leaving a room is not a failure");
+      assert.deepEqual(gone.errors, [], "leaving a room is not a failure");
 
       const stayed = await waitForSnapshot(
         host,
@@ -817,7 +833,7 @@ describe("the session core", () => {
       // ALREADY_IN_ROOM instead.
       guest.createRoom("Grace");
       const another = await waitForSnapshot(guest, "a room of their own", (s) => s.view !== null);
-      assert.equal(another.error, null);
+      assert.deepEqual(another.errors, []);
     } finally {
       await server.close();
     }
@@ -837,7 +853,7 @@ describe("the session core", () => {
       host.exitToMenu();
 
       const hostGone = await waitForSnapshot(host, "the host's menu", (s) => s.view === null);
-      assert.equal(hostGone.error, null);
+      assert.deepEqual(hostGone.errors, []);
 
       const stayed = await waitForSnapshot(
         guest,
@@ -847,7 +863,7 @@ describe("the session core", () => {
       assert.equal(stayed.view!.phase, "lobby", "the room plays on for whoever remains");
       assert.equal(stayed.view!.hostId, guestId, "and they are now its host");
       assert.equal(stayed.notice, null, "there is no news of a room ending, because none did");
-      assert.equal(stayed.error, null, "nothing the guest did was refused");
+      assert.deepEqual(stayed.errors, [], "nothing the guest did was refused");
     } finally {
       await server.close();
     }
@@ -873,7 +889,7 @@ describe("the session core", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       const settled = guest.getSnapshot();
       assert.equal(settled.view, null);
-      assert.equal(settled.error, null, "nothing the guest did was their fault");
+      assert.deepEqual(settled.errors, [], "nothing the guest did was their fault");
     } finally {
       await server.close();
     }
@@ -893,7 +909,7 @@ describe("the session core", () => {
       const own = await waitForSnapshot(guest, "a room of their own", (s) => s.view !== null);
       assert.equal(own.view!.phase, "lobby");
       assert.equal(own.notice, null, "the last room's news is not this room's");
-      assert.equal(own.error, null);
+      assert.deepEqual(own.errors, []);
     } finally {
       await server.close();
     }
@@ -937,7 +953,7 @@ describe("the session core", () => {
       guest.exitToMenu();
 
       const gone = await waitForSnapshot(guest, "the menu", (s) => s.view === null && !s.busy);
-      assert.equal(gone.error, null, "leaving is not something to be refused any more");
+      assert.deepEqual(gone.errors, [], "leaving is not something to be refused any more");
 
       const stayed = await waitForSnapshot(
         host,
@@ -1008,7 +1024,7 @@ describe("the room's settings", () => {
       // The ack is what releases the controls, and it comes back ahead of the position it
       // produced — so the settled snapshot is still showing the settings that were edited.
       const settled = await waitForSnapshot(host, "the controls", (s) => !s.busy);
-      assert.equal(settled.error, null);
+      assert.deepEqual(settled.errors, []);
 
       const edited = await waitForSnapshot(
         host,
@@ -1025,7 +1041,7 @@ describe("the room's settings", () => {
         (s) => s.view!.settings.handSize === RAISED.handSize,
       );
       assert.deepEqual(seen.view!.settings, RAISED);
-      assert.equal(seen.error, null, "nothing the guest did, and nothing to refuse");
+      assert.deepEqual(seen.errors, [], "nothing the guest did, and nothing to refuse");
     } finally {
       await server.close();
     }
@@ -1064,8 +1080,8 @@ describe("the room's settings", () => {
 
       // Nothing is broadcast behind a refused edit, so this waits on the ack and nothing
       // else — which is the whole of why the intent settles on one.
-      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "NOT_HOST");
+      const refused = await waitForSnapshot(guest, "the refusal", (s) => s.errors.length > 0);
+      assert.equal(refused.errors.at(-1)!.error.code, "NOT_HOST");
       assert.equal(refused.busy, false, "and the lobby is a screen to act from again");
       assert.equal(
         refused.view!.settings.handSize,
@@ -1091,8 +1107,8 @@ describe("the room's settings", () => {
 
       host.updateSettings(RAISED);
 
-      const refused = await waitForSnapshot(host, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "WRONG_PHASE");
+      const refused = await waitForSnapshot(host, "the refusal", (s) => s.errors.length > 0);
+      assert.equal(refused.errors.at(-1)!.error.code, "WRONG_PHASE");
       assert.equal(refused.busy, false);
       assert.equal(
         refused.view!.settings.handSize,
@@ -1128,7 +1144,7 @@ describe("taking a turn", () => {
         !playingSelf(landed.view!).hand.some((c) => c.id === chosen.id),
         "the lock held until a strictly newer position arrived, not merely until the ack",
       );
-      assert.equal(landed.error, null);
+      assert.deepEqual(landed.errors, []);
       assert.deepEqual(landed.selection, [], "the selection went with the turn");
       assert.equal(playingSelf(landed.view!).hand.length, HAND_SIZE, "discarded one, drew one");
       assert.deepEqual(
@@ -1152,7 +1168,7 @@ describe("taking a turn", () => {
       host.commitTurn({ kind: "discard", cardId: wanted.id });
 
       const landed = await waitForSnapshot(host, "the turn to land", (s) => !s.busy);
-      assert.equal(landed.error, null, "the client offered only what the server accepts");
+      assert.deepEqual(landed.errors, [], "the client offered only what the server accepts");
       assert.ok(
         playingSelf(landed.view!).hand.some((c) => c.id === wanted.id),
         "the tapped card was drawn, not one off the deck",
@@ -1180,7 +1196,7 @@ describe("taking a turn", () => {
       // the lock coming back is the ack, and nothing else.
       const refused = await waitForSnapshot(waiting, "the refusal", (s) => !s.busy);
       assert.ok(
-        seen.every((s) => s.error === null),
+        seen.every((s) => s.errors.length === 0),
         "the board already says whose turn it is",
       );
       assert.deepEqual(
@@ -1211,7 +1227,7 @@ describe("taking a turn", () => {
       // The second send, had it been made, would be answered a round trip behind the
       // first, so give it one before believing it never was.
       await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.equal(host.getSnapshot().error, null, "only one turn was ever sent");
+      assert.deepEqual(host.getSnapshot().errors, [], "only one turn was ever sent");
     } finally {
       await server.close();
     }
@@ -1259,7 +1275,7 @@ describe("taking a turn", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       const settled = host.getSnapshot();
       assert.equal(settled.busy, false, "nothing was sent, so nothing is locked");
-      assert.equal(settled.error, null, "and nothing was refused, so there is nothing to say");
+      assert.deepEqual(settled.errors, [], "and nothing was refused, so there is nothing to say");
       assert.equal(
         settled.view!.currentTurnPlayerId,
         settled.view!.you.id,
@@ -1406,7 +1422,7 @@ describe("slapping down", () => {
 
       const landed = await waitForSnapshot(host, "the slap to land", (s) => !s.busy);
       const after = landed.view!;
-      assert.equal(landed.error, null);
+      assert.deepEqual(landed.errors, []);
       assert.equal(playingSelf(after).hand.length, playingSelf(before).hand.length - 1, "a card lighter");
       assert.equal(
         after.lastDiscard.length,
@@ -1435,7 +1451,7 @@ describe("slapping down", () => {
       host.slapDown();
 
       const landed = await waitForSnapshot(host, "the slap to land", (s) => !s.busy);
-      assert.equal(landed.error, null, "a second slap would have been refused");
+      assert.deepEqual(landed.errors, [], "a second slap would have been refused");
       assert.equal(playingSelf(landed.view!).hand.length, playingSelf(before).hand.length - 1);
     } finally {
       await server.close();
@@ -1485,7 +1501,7 @@ describe("slapping down", () => {
         "a card lighter, or holding what they had — never anything else",
       );
       assert.ok(
-        seen.every((s) => s.error === null),
+        seen.every((s) => s.errors.length === 0),
         "a lost race is told by the window closing, not by a refusal",
       );
       assert.equal(host.getSnapshot().busy, false);
@@ -1504,7 +1520,7 @@ describe("slapping down", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       const settled = host.getSnapshot();
       assert.equal(settled.busy, false, "nothing was sent, so nothing is locked");
-      assert.equal(settled.error, null, "and nothing was refused, so there is nothing to say");
+      assert.deepEqual(settled.errors, [], "and nothing was refused, so there is nothing to say");
     } finally {
       await server.close();
     }
@@ -1588,7 +1604,7 @@ describe("refusals the table already explains", () => {
       // Nobody is moving, so the lock coming back is the ack refusing it.
       await waitForSnapshot(waiting, "the refusal", (s) => !s.busy);
       assert.ok(
-        seen.every((s) => s.error === null),
+        seen.every((s) => s.errors.length === 0),
         "the board already says whose turn it is",
       );
     } finally {
@@ -1616,7 +1632,7 @@ describe("refusals the table already explains", () => {
 
       await waitForSnapshot(host, "the refusal", (s) => !s.busy);
       assert.ok(
-        seen.every((s) => s.error === null),
+        seen.every((s) => s.errors.length === 0),
         "the scored round on the table is the answer",
       );
     } finally {
@@ -1636,7 +1652,7 @@ describe("refusals the table already explains", () => {
       assert.equal(host.getSnapshot().busy, true, "the request was sent");
 
       await waitForSnapshot(host, "the refusal", (s) => !s.busy);
-      assert.ok(seen.every((s) => s.error === null), "the new round on the table is the answer");
+      assert.ok(seen.every((s) => s.errors.length === 0), "the new round on the table is the answer");
     } finally {
       await server.close();
     }
@@ -1652,7 +1668,77 @@ describe("refusals the table already explains", () => {
       assert.equal(host.getSnapshot().busy, true, "the request was sent");
 
       await waitForSnapshot(host, "the refusal", (s) => !s.busy);
-      assert.ok(seen.every((s) => s.error === null), "the new match on the table is the answer");
+      assert.ok(seen.every((s) => s.errors.length === 0), "the new match on the table is the answer");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("errors the player dismisses", () => {
+  it("stacks every refusal in the order it arrived, the same one twice included", async () => {
+    const server = await startServer(26);
+    try {
+      const session = await server.openSession();
+      session.joinRoom("ZZZZ", "Ada");
+      await settled(session, "the first refusal");
+      session.joinRoom("ZZZZ", "Ada");
+      await settled(session, "the second, identical");
+      session.createRoom("   ");
+
+      const { errors } = session.getSnapshot();
+      assert.deepEqual(
+        errors.map((t) => t.error.code),
+        ["ROOM_NOT_FOUND", "ROOM_NOT_FOUND", "INVALID_NAME"],
+        "newest last, so a toast already up never moves when another arrives",
+      );
+      assert.equal(new Set(errors.map((t) => t.id)).size, 3, "each its own toast");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("dismisses only the toast asked for, sending nothing and touching nothing else", async () => {
+    const server = await startServer(26, 0);
+    try {
+      const [host] = await hostARoom(server, "Ada");
+      // A lone host who asked for no bots: two refusals, and a table to leave alone.
+      host.startGame();
+      await settled(host, "the first refusal");
+      host.startGame();
+      const before = await settled(host, "the second refusal");
+      const [first, second] = before.errors;
+      const sent = server.outgoing(host);
+
+      host.dismissError(first!.id);
+
+      const after = host.getSnapshot();
+      assert.deepEqual(after.errors, [second], "the other toast stays, and stays the same");
+      assert.equal(after.view, before.view);
+      assert.equal(after.account, before.account);
+      assert.equal(after.busy, before.busy);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(sent, [], "a toast is the screen's, not the server's");
+
+      // An id that is not up — one already dismissed — changes nothing at all.
+      host.dismissError(first!.id);
+      assert.equal(host.getSnapshot(), after, "not even a new snapshot");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps a refusal across leaving the room it was made in", async () => {
+    const server = await startServer(26, 0);
+    try {
+      const [host] = await hostARoom(server, "Ada");
+      host.startGame();
+      await settled(host, "the refusal");
+
+      host.exitToMenu();
+      const menu = await waitForSnapshot(host, "the menu", (s) => s.view === null && !s.busy);
+
+      assert.deepEqual(menu.errors.map((t) => t.error.code), ["NOT_ENOUGH_PLAYERS"]);
     } finally {
       await server.close();
     }
@@ -2100,7 +2186,7 @@ describe("calling Yaniv", () => {
       // broadcasts the scored round, so a lock released on the ack would let go over a
       // position still showing a round in progress.
       assert.equal(scored.view!.phase, "roundEnd", "released on the scored round, not the ack");
-      assert.equal(scored.error, null);
+      assert.deepEqual(scored.errors, []);
 
       const result = scored.view!.roundResult;
       assert.ok(result, "a finished round comes with the round it finished");
@@ -2140,7 +2226,7 @@ describe("calling Yaniv", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       const settled = host.getSnapshot();
       assert.equal(settled.busy, false, "nothing was sent, so nothing is locked");
-      assert.equal(settled.error, null);
+      assert.deepEqual(settled.errors, []);
       assert.equal(settled.view!.phase, "playing", "the round is still being played");
       assert.equal(settled.view!.currentTurnPlayerId, settled.view!.you.id, "the turn is still theirs");
     } finally {
@@ -2235,7 +2321,7 @@ describe("a finished match", () => {
         "another match",
         (s) => s.view?.phase === "playing",
       );
-      assert.equal(dealt.error, null);
+      assert.deepEqual(dealt.errors, []);
       assert.equal(dealt.view!.roundNumber, 1, "a fresh match, not the next round of the old one");
       assert.equal(dealt.view!.you.score, 0, "and everybody starts level again");
       assert.equal(playingSelf(dealt.view!).hand.length, HAND_SIZE);
@@ -2269,7 +2355,7 @@ describe("a finished match", () => {
         "the new match",
         (s) => s.view!.phase === "playing",
       );
-      assert.equal(dealt.error, null, "nothing they asked for was refused");
+      assert.deepEqual(dealt.errors, [], "nothing they asked for was refused");
       assert.equal(dealt.view!.roundNumber, 1, "a new match, not another round");
 
       const other = await waitForSnapshot(
@@ -2294,7 +2380,7 @@ describe("a finished match", () => {
       guest.exitToMenu();
 
       const gone = await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null);
-      assert.equal(gone.error, null, "leaving a finished match is not a failure");
+      assert.deepEqual(gone.errors, [], "leaving a finished match is not a failure");
 
       const shrunk = await waitForSnapshot(
         host,
@@ -2323,14 +2409,14 @@ describe("a finished match", () => {
       host.exitToMenu();
 
       const menu = await waitForSnapshot(host, "the main menu", (s) => s.view === null);
-      assert.equal(menu.error, null);
+      assert.deepEqual(menu.errors, []);
 
       // Straight into another room, which is what makes this an exit rather than a
       // disconnect — a connection still bound to the finished match would be told
       // ALREADY_IN_ROOM.
       host.createRoom("Ada");
       const another = await waitForSnapshot(host, "a room of their own", (s) => s.view !== null);
-      assert.equal(another.error, null);
+      assert.deepEqual(another.errors, []);
       assert.equal(another.view!.phase, "lobby");
     } finally {
       await server.close();
@@ -2501,7 +2587,7 @@ describe("when the match goes on without you", () => {
       const after = watcher.getSnapshot();
       assert.deepEqual(after.selection, [], "there is no hand for a choice to be about");
       assert.equal(after.busy, false, "and nothing was sent to be waiting on");
-      assert.equal(after.error, null, "so nothing was refused either");
+      assert.deepEqual(after.errors, [], "so nothing was refused either");
       assert.equal(after.view, view, "the position is exactly where it was");
     } finally {
       await server.close();
@@ -2525,7 +2611,7 @@ describe("when the match goes on without you", () => {
       assert.equal(back.view!.roomCode, table.roomCode, "the same table, not the menu");
       assert.equal(back.view!.you.spectating, true, "and the same standing at it");
       assert.equal(back.notice, null, "nothing was lost, so there is nothing to say");
-      assert.equal(back.error, null);
+      assert.deepEqual(back.errors, []);
       assert.equal(back.busy, false);
       assert.deepEqual(back.selection, [], "and no hand to have anything chosen from");
 
@@ -2608,14 +2694,14 @@ describe("when the connection goes", () => {
       assert.equal(back.view!.roomCode, table.roomCode, "the same table, not the menu");
       assert.equal(back.view!.phase, "playing");
       assert.equal(back.notice, null, "nothing was lost, so there is nothing to say");
-      assert.equal(back.error, null);
+      assert.deepEqual(back.errors, []);
       assert.equal(back.busy, false);
 
       // A seat really claimed back, not merely a position left on the screen: the proof
       // is a move made from it.
       takeATurn(host, back.view!);
       const played = await waitForSnapshot(host, "the move", (s) => !s.busy);
-      assert.equal(played.error, null, "the server took the turn from this connection");
+      assert.deepEqual(played.errors, [], "the server took the turn from this connection");
     } finally {
       await server.close();
     }
@@ -2651,7 +2737,7 @@ describe("when the connection goes", () => {
       );
       assert.equal(back.view, null, "there is no table to return to");
       assert.ok(back.notice, "and the player is told so");
-      assert.equal(back.error, null, "which is news, not a refusal of anything they did");
+      assert.deepEqual(back.errors, [], "which is news, not a refusal of anything they did");
       assert.equal(back.busy, false);
       assert.equal(tokens.stored(), null, "the credential goes with the seat");
 
@@ -2722,8 +2808,9 @@ describe("when the connection goes", () => {
 
       server.announce(pushed);
 
-      const told = await waitForSnapshot(host, "the error", (s) => s.error !== null);
-      assert.deepEqual(told.error, pushed);
+      const told = await waitForSnapshot(host, "the error", (s) => s.errors.length > 0);
+      assert.deepEqual(told.errors.map((t) => t.error), [pushed]);
+      assert.equal(told.busy, false, "and it answers nothing in flight, so it locks nothing");
       assert.equal(told.view!.phase, "playing", "the table is still there to show it on");
     } finally {
       await server.close();
@@ -2740,7 +2827,7 @@ describe("when the connection goes", () => {
       server.announce({ code: "WRONG_PHASE", message: "Something went wrong" });
 
       await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.equal(menu.getSnapshot().error, null);
+      assert.deepEqual(menu.getSnapshot().errors, []);
     } finally {
       await server.close();
     }
@@ -2773,7 +2860,7 @@ describe("when the connection goes", () => {
       assert.equal(seat.view!.you.name, "Ada", "and the same seat at it");
       assert.equal(seat.busy, false, "with the controls back");
       assert.equal(seat.notice, null);
-      assert.equal(seat.error, null);
+      assert.deepEqual(seat.errors, []);
     } finally {
       await server.close();
     }
@@ -2797,7 +2884,7 @@ describe("when the connection goes", () => {
 
       assert.equal(menu.view, null, "which leaves the main menu");
       assert.ok(menu.notice, "and says why they are looking at it");
-      assert.equal(menu.error, null, "news, not a refusal of anything they did");
+      assert.deepEqual(menu.errors, [], "news, not a refusal of anything they did");
       assert.equal(menu.busy, false);
       assert.equal(tokens.stored(), null, "a credential that fails is not kept to fail again");
     } finally {
@@ -2940,7 +3027,7 @@ describe("an account", () => {
         signedIn.account.status === "signedIn" && signedIn.account.account.displayName,
         "Ada",
       );
-      assert.equal(signedIn.error, null);
+      assert.deepEqual(signedIn.errors, []);
       assert.ok(account.stored()?.startsWith(SESSION_TOKEN_MARK), "the session is written down");
       assert.equal(signedIn.view, null, "still the main menu: signing in is not a room");
     } finally {
@@ -3024,7 +3111,7 @@ describe("an account", () => {
       session.signOut();
       assert.equal(session.getSnapshot().busy, true);
       const out = await settled(session, "signOut's ack");
-      assert.equal(out.error, null);
+      assert.deepEqual(out.errors, []);
     } finally {
       await server.close();
     }
@@ -3042,7 +3129,7 @@ describe("an account", () => {
       const answer = await settled(session, "the answer");
 
       assert.equal(answer.account.status, "nameNeeded", "the first was the one sent");
-      assert.equal(answer.error, null);
+      assert.deepEqual(answer.errors, []);
     } finally {
       await server.close();
     }
@@ -3056,7 +3143,7 @@ describe("an account", () => {
       session.signIn("a token nobody vouched for");
       const refused = await settled(session, "the refusal");
 
-      assert.equal(refused.error?.code, "INVALID_CREDENTIAL");
+      assert.equal(refused.errors.at(-1)?.error.code, "INVALID_CREDENTIAL");
       assert.deepEqual(refused.account, { status: "guest" });
     } finally {
       await server.close();
@@ -3098,7 +3185,7 @@ describe("an account", () => {
 
       session.createAccount("   ");
       const refused = session.getSnapshot();
-      assert.equal(refused.error?.code, "INVALID_NAME");
+      assert.equal(refused.errors.at(-1)?.error.code, "INVALID_NAME");
       assert.equal(refused.busy, false, "answered here, with nothing sent");
       assert.equal(refused.account.status, "nameNeeded", "still there to be answered");
 
@@ -3106,11 +3193,11 @@ describe("an account", () => {
       session.createAccount("Ada");
       const signedIn = await settled(session, "the account");
       assert.equal(signedIn.account.status, "signedIn");
-      assert.equal(signedIn.error, null);
+      assert.equal(signedIn.errors.length, 1, "the first refusal stays up until dismissed");
 
       session.renameAccount("x".repeat(MAX_DISPLAY_NAME_LENGTH + 1));
       const tooLong = session.getSnapshot();
-      assert.equal(tooLong.error?.code, "INVALID_NAME");
+      assert.equal(tooLong.errors.at(-1)?.error.code, "INVALID_NAME");
       assert.equal(tooLong.busy, false);
       assert.equal(
         tooLong.account.status === "signedIn" && tooLong.account.account.displayName,
@@ -3119,8 +3206,8 @@ describe("an account", () => {
 
       session.renameAccount("Ada$");
       const symbol = session.getSnapshot();
-      assert.equal(symbol.error?.code, "INVALID_NAME");
-      assert.match(symbol.error!.message, /letters, digits and single spaces/);
+      assert.equal(symbol.errors.at(-1)?.error.code, "INVALID_NAME");
+      assert.match(symbol.errors.at(-1)!.error.message, /letters, digits and single spaces/);
       assert.equal(symbol.busy, false);
       assert.equal(
         symbol.account.status === "signedIn" && symbol.account.account.displayName,
@@ -3144,12 +3231,12 @@ describe("an account", () => {
       const asked = session.getSnapshot().account;
 
       session.renameAccount("   ");
-      assert.equal(session.getSnapshot().error?.code, "INVALID_NAME");
+      assert.equal(session.getSnapshot().errors.at(-1)?.error.code, "INVALID_NAME");
       assert.equal(session.getSnapshot().account, asked, "refused: the same standing");
 
       session.renameAccount("Ada");
       const renamed = await settled(session, "renameAccount's ack");
-      assert.equal(renamed.error, null);
+      assert.equal(renamed.errors.length, 1, "the earlier refusal, still up");
       assert.notEqual(renamed.account, asked, "landed, if to the very same name: a new one");
       assert.deepEqual(renamed.account, asked);
     } finally {
@@ -3157,25 +3244,25 @@ describe("an account", () => {
     }
   });
 
-  /*
-   * What the rename panel does on its way in and out: a refusal it was showing is about a
-   * question nobody is asking once it closes, and one left over from the menu is not an
-   * answer about a name — so neither is carried across the panel's edge.
-   */
-  it("lets go of a refusal once it has been read, and of nothing else", async () => {
+  it("keeps a refusal the player backs out of signing in over", async () => {
     const server = await startServer(26);
     try {
-      const session = await signUp(server, { sub: "google-ada", name: "Ada" });
-      const standing = session.getSnapshot().account;
-      session.renameAccount("   ");
-      assert.equal(session.getSnapshot().error?.code, "INVALID_NAME");
+      const idToken = `${ID_TOKEN_MARK}ada`;
+      server.vouchFor(idToken, { sub: "google-ada", name: "Ada" });
+      const session = await server.openSession();
+      session.signIn(idToken);
+      await settled(session, "the name to confirm");
+      session.createAccount("   ");
 
-      session.clearError();
+      session.cancelSignIn();
 
-      const after = session.getSnapshot();
-      assert.equal(after.error, null);
-      assert.equal(after.account, standing, "the rename panel it was asked from stays open");
-      assert.equal(after.busy, false, "nothing was sent");
+      const guest = session.getSnapshot();
+      assert.deepEqual(guest.account, { status: "guest" });
+      assert.deepEqual(
+        guest.errors.map((t) => t.error.code),
+        ["INVALID_NAME"],
+        "backing out is not reading it — only ✕ is",
+      );
     } finally {
       await server.close();
     }
@@ -3192,7 +3279,7 @@ describe("an account", () => {
       session.createRoom("");
       const lobby = await seated(session, "the account");
 
-      assert.equal(lobby.error, null);
+      assert.deepEqual(lobby.errors, []);
       assert.equal(lobby.view!.you.name, "Countess", "the account's name, renamed");
       assert.ok(lobby.view!.you.accountId, "and a seat taken by the account");
       assert.equal(
@@ -3332,7 +3419,7 @@ describe("custom calls", () => {
       session.setCustomCall("yaniv", " I WIN! ");
       assert.equal(session.getSnapshot().busy, true, "locked on the way out");
       const yaniv = await settled(session, "setCustomCall's ack");
-      assert.equal(yaniv.error, null);
+      assert.deepEqual(yaniv.errors, []);
       assert.deepEqual(customCalls(yaniv), { customYanivCall: "I WIN!", customAssafCall: null });
       assert.equal(yaniv.view, null, "still the main menu");
 
@@ -3359,7 +3446,7 @@ describe("custom calls", () => {
       session.setCustomCall("yaniv", "   ");
       const unset = await settled(session, "the custom Yaniv call unset");
 
-      assert.equal(unset.error, null);
+      assert.deepEqual(unset.errors, []);
       assert.deepEqual(customCalls(unset), { customYanivCall: null, customAssafCall: "GOTCHA" });
     } finally {
       await server.close();
@@ -3404,8 +3491,8 @@ describe("custom calls", () => {
       ] as const) {
         session.setCustomCall("yaniv", text);
         const refused = session.getSnapshot();
-        assert.equal(refused.error?.code, "INVALID_CUSTOM_CALL", what);
-        assert.match(refused.error!.message, /letters, digits, single spaces/, what);
+        assert.equal(refused.errors.at(-1)?.error.code, "INVALID_CUSTOM_CALL", what);
+        assert.match(refused.errors.at(-1)!.error.message, /letters, digits, single spaces/, what);
         assert.equal(refused.busy, false, `${what}: answered here, with nothing sent`);
         assert.equal(refused.account, asked, `${what}: the same standing`);
       }
@@ -3644,7 +3731,7 @@ describe("custom calls at the table", () => {
 
       ada.setCustomCall("yaniv", "Mine");
       const changed = await settled(ada, "the change");
-      assert.equal(changed.error, null, "the account takes it, seated or not");
+      assert.deepEqual(changed.errors, [], "the account takes it, seated or not");
 
       const grace = await server.openSession();
       grace.joinRoom(roomCode, "Grace");
@@ -3802,7 +3889,7 @@ describe("the account's stats", () => {
       const after = await settled(session, "both answers");
 
       assert.equal(after.stats, null);
-      assert.equal(after.error?.code, "INVALID_CREDENTIAL", "the read added no error of its own");
+      assert.equal(after.errors.at(-1)?.error.code, "INVALID_CREDENTIAL", "the read added no error of its own");
     } finally {
       await server.close();
     }
@@ -3907,7 +3994,7 @@ describe("a cold boot with an account", () => {
       assert.equal(table.view!.you.id, lobby.view!.you.id, "the account's own seat");
       assert.equal(table.account.status, "signedIn");
       assert.equal(table.notice, null);
-      assert.equal(table.error, null);
+      assert.deepEqual(table.errors, []);
       assert.deepEqual(
         seen.filter(readsAsMainMenu),
         [],
@@ -3966,7 +4053,7 @@ describe("a cold boot with an account", () => {
       assert.equal(menu.view, null, "the account's seat cannot be claimed by a guest");
       assert.deepEqual(menu.account, { status: "guest" });
       assert.ok(menu.notice, "and the player is told");
-      assert.equal(menu.error, null, "news, not a refusal of anything they did");
+      assert.deepEqual(menu.errors, [], "news, not a refusal of anything they did");
       assert.equal(
         new Set(seen.map((s) => s.notice).filter((n) => n !== null)).size,
         1,

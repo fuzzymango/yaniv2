@@ -32,17 +32,10 @@ import { useSession } from "./useSession.ts";
 export function App({ session }: { session: Session }) {
   const snapshot = useSession(session);
 
-  /*
-   * The session holds one error for now; it is handed over in the list shape the layer
-   * already takes, and ✕ clears it.
-   */
   return (
     <>
       <Screen session={session} snapshot={snapshot} />
-      <ErrorToasts
-        toasts={snapshot.error ? [{ id: 0, error: snapshot.error }] : []}
-        onDismiss={session.clearError}
-      />
+      <ErrorToasts toasts={snapshot.errors} onDismiss={session.dismissError} />
     </>
   );
 }
@@ -94,7 +87,6 @@ function Screen({ session, snapshot }: { session: Session; snapshot: SessionSnap
         onCancelSignIn={session.cancelSignIn}
         onRenameAccount={session.renameAccount}
         onSetCustomCall={session.setCustomCall}
-        onClearError={session.clearError}
         onSignOut={session.signOut}
         onLoadStats={session.loadStats}
       />

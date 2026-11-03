@@ -603,7 +603,7 @@ editing one field and confirming are exclusive — one `Panel` value — and Esc
 level, each editor and the question stopping the key before `Modal` sees it. `NameDialog` is
 confirm-only, the first sign-in's non-dismissible step with a "Not now". Neither draws an error,
 nor does the menu: a refusal is a toast over whichever is up (`ErrorToasts`, spec #245), which
-`App` draws once over every screen. Google's script is fetched when the signed-out form
+`App` draws once over every screen, and which leaves on its ✕ alone (docs/adr/0027). Google's script is fetched when the signed-out form
 mounts and a failure draws **nothing** (`google.ts`,
 docs/adr/0020) — sign-in is an option, never a wall.
 
@@ -621,7 +621,8 @@ it, which `docs/code-map.md` names.
 Snapshots are **replaced wholesale, never mutated**, `useSyncExternalStore` comparing by
 identity. Ten fields, each answering a different question: `view` (null *is* the main menu),
 `account` (tagged: `guest` / `nameNeeded` / `signedIn`), `stats` (read by `loadStats`, dropped
-whenever the signed-in account changes, so one account never reads another's), `error`,
+whenever the signed-in account changes, so one account never reads another's), `errors`
+(toasts stacked in arrival order, each leaving only by `dismissError`, docs/adr/0027),
 `notice`, `connected`, `resuming`, `selection` (surviving the views that arrive underneath
 it), and the two
 **one-shots**, `flight` and `announcement`. **No credential is on it**: the Google ID token a

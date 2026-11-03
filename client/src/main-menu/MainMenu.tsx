@@ -54,7 +54,6 @@ interface MainMenuProps {
   onCancelSignIn: () => void;
   onRenameAccount: (displayName: string) => void;
   onSetCustomCall: (call: Call, text: string) => void;
-  onClearError: () => void;
   onSignOut: () => void;
   onLoadStats: () => void;
 }
@@ -71,7 +70,6 @@ export function MainMenu({
   onCancelSignIn,
   onRenameAccount,
   onSetCustomCall,
-  onClearError,
   onSignOut,
   onLoadStats,
 }: MainMenuProps) {
@@ -101,7 +99,6 @@ export function MainMenu({
             onLoadStats={onLoadStats}
             onRename={onRenameAccount}
             onSetCustomCall={onSetCustomCall}
-            onClearError={onClearError}
             onSignOut={onSignOut}
           />
         </div>

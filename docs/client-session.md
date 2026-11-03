@@ -31,8 +31,11 @@ identity. Ten fields, and each answers a different question:
 - **`stats`** — the signed-in account's six counters as last read, or `null`: not read yet, being
   read, or refused. Read only when asked for (`loadStats`), and **one account's and never the
   next's** — see "Accounts" below.
-- **`error`** — a `GameError`: something the player asked for and was refused, or one the server
-  pushed as `errorMessage`. Cleared the moment they try again — a refusal costs them nothing.
+- **`errors`** — every **toast** still up, oldest first: a `Toast` is a `GameError` — something
+  the player asked for and was refused, or one the server pushed as `errorMessage` — and an `id`
+  from the session's own counter, fixed for the toast's life. Appended, never replaced, so the
+  same refusal twice is two toasts, there is no cap, and one already on screen never moves when
+  another arrives below it. **Only `dismissError(id)` takes one down** — see "A toast leaves on its ✕" below.
   Never one the table already explains — see "Refusals the board already explains" below.
 - **`notice`** — news that is *not* a refusal: a seat that could not be claimed back, or a session
   that has lapsed. No action to blame and nothing to retry, and it arrives while they sit still.
@@ -95,7 +98,7 @@ exactly where a rejected ack is**, being the same news, **but does not touch `bu
 nobody's answer, and letting go would put a second copy of the action on the wire.
 
 **Refusals the board already explains are never published** (#246). Each releases `busy`, and
-the move stays the player's to make, but `error` is left alone: what they see next — the turn
+the move stays the player's to make, but no toast is added: what they see next — the turn
 indicator, the slapdown window closing, the round ending, the next round dealt — already says
 what happened. A move (`play`: `takeTurn`, `callYaniv`, `slapDown`) is silent on
 `NOT_YOUR_TURN`, `SLAPDOWN_NOT_AVAILABLE`, `WRONG_PHASE` and `CARD_NOT_PICKUP_ELIGIBLE`
@@ -178,12 +181,13 @@ judges the text again regardless (ADR-0002); its refusal of one is the server's 
 Both calls ride every `AccountView`, so a sign-in, an account created, a resumed session and a
 rename all answer them.
 
-**A refusal is put down when the panel that asked for it closes.** `cancelSignIn` clears `error`
-on its way back to a guest, and `clearError` — nothing sent, nothing else touched, the account
-standing included — is the profile's way in and out, and its editors' (#229, #237): a refusal
-left over from the menu is no answer about a name or a call, and one an editor was showing is
-about a question nobody is asking once it has closed. None of them is the session's: the profile
-decides when it and its editors open.
+**A toast leaves on its ✕ and on nothing else** (docs/adr/0027). Trying again, entering or
+leaving a room, a seat claimed back, `cancelSignIn`, and the profile and its editors opening or
+closing all leave `errors` as it stands — whether a refusal has been read is the player's to say,
+and a toast that vanished under the tap that retried would be a jump of its own. `dismissError(id)`
+removes that one toast and nothing else: nothing is sent, `account`, `view` and `busy` are left
+as they were, and an id not up publishes nothing at all. `notice` is not a toast and keeps its
+own rule: put down by the next attempt to enter a room or act on the account.
 
 **Stats are read fresh, and belong to one account** (docs/adr/0026). `loadStats()` blanks
 `stats`, emits, and fills it from the ack — only the latest read's, and only while the account it
