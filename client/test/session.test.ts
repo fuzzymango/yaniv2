@@ -869,16 +869,14 @@ describe("the session core", () => {
     }
   });
 
-  it("does not blame a guest for an action the closing room refused", async () => {
+  it("lets two players leave at once with nothing to say to either", async () => {
     const server = await startServer(26);
     try {
       const [host, guest] = await hostAndGuest(server);
 
-      // Both leave at once. The server sees them in some order, and if the host's lands
-      // first the guest's own exit comes back `PLAYER_NOT_FOUND` — the room they were
-      // asking to leave is already gone. Either way the guest ends up on the menu, and
-      // either way that must be the whole of it: a refusal costs the player nothing, so
-      // it cannot leave them reading an error about a room that no longer exists.
+      // Both leave at once. The server takes them in some order, and both are accepted
+      // whichever it is: a room ends only when its last seat leaves (#147), so the second
+      // exit is that last seat's, never a request about a room already gone.
       host.exitToMenu();
       guest.exitToMenu();
 
@@ -889,7 +887,34 @@ describe("the session core", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       const settled = guest.getSnapshot();
       assert.equal(settled.view, null);
-      assert.deepEqual(settled.errors, [], "nothing the guest did was their fault");
+      assert.deepEqual(settled.errors, [], "nothing the guest did was refused");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not show a refusal that lands with no room on the screen", async () => {
+    const server = await startServer(26);
+    try {
+      const [, guest] = await hostAndGuest(server);
+      guest.exitToMenu();
+      await waitForSnapshot(guest, "the guest's menu", (s) => s.view === null && !s.busy);
+      const seen = recordSnapshots(guest);
+
+      // An action for the table just left, asked from the menu: the server holds no seat
+      // for this connection now and refuses it `PLAYER_NOT_FOUND`. The lock taken on the way
+      // out means no screen sends one while an exit is in flight, so this is the one way to
+      // put a room's refusal in front of the menu on purpose — and a refusal about a table
+      // the player is no longer at is news they can do nothing with.
+      guest.startGame();
+      assert.equal(guest.getSnapshot().busy, true, "the request was sent");
+
+      const refused = await waitForSnapshot(guest, "the refusal", (s) => !s.busy);
+      assert.equal(refused.view, null);
+      assert.ok(
+        seen.every((s) => s.errors.length === 0),
+        "a refusal with no room to be about is dropped",
+      );
     } finally {
       await server.close();
     }
@@ -1528,12 +1553,6 @@ describe("slapping down", () => {
 });
 
 /**
- * The move a position was reached by, published for whatever draws the cards flying
- * (issue #69). What counts as one is `flight.ts`'s question and is answered there, against
- * fixtures; these are about the field arriving where a screen would read it, off a real
- * server and a real chain of bot turns.
- */
-/**
  * The refusals the table never reports. In each the board already says what happened —
  * whose turn it is, a window closed, a round over or already dealt — so the session
  * releases the lock and publishes nothing else. Keyed by the action as well as the code:
@@ -1745,6 +1764,12 @@ describe("errors the player dismisses", () => {
   });
 });
 
+/**
+ * The move a position was reached by, published for whatever draws the cards flying
+ * (issue #69). What counts as one is `flight.ts`'s question and is answered there, against
+ * fixtures; these are about the field arriving where a screen would read it, off a real
+ * server and a real chain of bot turns.
+ */
 describe("the move to animate", () => {
   /** Every flight the session published, in order — one per move it had something to show for. */
   function flightsShownTo(session: Session): CardFlight[] {
