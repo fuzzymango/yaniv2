@@ -22,6 +22,7 @@ import type {
   Call,
   ClientToServerEvents,
   GameError,
+  GameErrorCode,
   PlayerGameView,
   ResumeRequest,
   RoomSettings,
@@ -394,9 +395,9 @@ export interface Session {
    * is meant.
    *
    * The one intent sent while the turn belongs to somebody else, and the one racing them
-   * for it: losing comes back as `SLAPDOWN_NOT_AVAILABLE` and costs nothing, exactly as
-   * any other refusal does. A tap with no window open sends nothing and says nothing —
-   * the pile should not have been offering itself.
+   * for it: losing comes back as `SLAPDOWN_NOT_AVAILABLE`, costs nothing and says nothing,
+   * the window closing being the news (`SILENT_MOVE`). A tap with no window open sends
+   * nothing and says nothing — the pile should not have been offering itself.
    */
   slapDown: () => void;
   /**
@@ -469,6 +470,27 @@ const UNUSABLE_ACCOUNT_NAME: GameError = {
  * the sign-in lapsing, and signing back in is what gets it back.
  */
 const SESSION_LAPSED = "You've been signed out. Sign in again to pick up where you left off.";
+
+/**
+ * Refusals the table never reports, keyed by what was asked: in each the board already
+ * says what happened — whose turn it is, a window closed, a round over or already dealt —
+ * so a red line on top of it tells the player nothing. Keyed on the action as well as the
+ * code because the lobby's `WRONG_PHASE` is news and the table's is not.
+ *
+ * `SILENT_MOVE` is every move's — a turn, a call and a slapdown alike, since any of them
+ * can cross the position that made it pointless. `SILENT_DEAL` is the next round's and the
+ * replay's, refused only where somebody else dealt first.
+ */
+const SILENT_MOVE: ReadonlySet<GameErrorCode> = new Set<GameErrorCode>([
+  "NOT_YOUR_TURN",
+  "SLAPDOWN_NOT_AVAILABLE",
+  "WRONG_PHASE",
+  "CARD_NOT_PICKUP_ELIGIBLE",
+]);
+const SILENT_DEAL: ReadonlySet<GameErrorCode> = new Set<GameErrorCode>(["WRONG_PHASE"]);
+
+/** What an action that reports every refusal passes for its silent set. */
+const REPORT_ALL: ReadonlySet<GameErrorCode> = new Set();
 
 /**
  * Whether two standings are the one signed-in account — the question `stats` is kept or
@@ -929,9 +951,12 @@ export function createSession(
    * having dropped their session, so the ack comes back `PLAYER_NOT_FOUND`. They are
    * already on the menu, and blaming them for it on top would be exactly what a refusal
    * must never cost.
+   *
+   * A code in `silent` lets go of the lock and says nothing either: the action it answers
+   * is one whose refusal the table already shows (`SILENT_MOVE`, `SILENT_DEAL`).
    */
-  const refuse = (error: GameError): void => {
-    if (snapshot.view === null) publish({ busy: false });
+  const refuse = (error: GameError, silent: ReadonlySet<GameErrorCode>): void => {
+    if (snapshot.view === null || silent.has(error.code)) publish({ busy: false });
     else settle(error);
   };
 
@@ -942,14 +967,20 @@ export function createSession(
    * `leavesRoom` is the one thing an ack alone decides. Every other action is confirmed
    * by the broadcast behind it, but leaving is confirmed by nothing — the server has
    * stopped publishing to this connection, so the session has to learn it is out from
-   * the ack itself.
+   * the ack itself. `silent` is the refusals the screen already explains, none unless said.
    */
-  const act = (emit: (ack: Ack<null>) => void, leavesRoom = false): void => {
+  const act = (
+    emit: (ack: Ack<null>) => void,
+    {
+      leavesRoom = false,
+      silent = REPORT_ALL,
+    }: { leavesRoom?: boolean; silent?: ReadonlySet<GameErrorCode> } = {},
+  ): void => {
     if (snapshot.busy) return;
     publish({ error: null, busy: true });
     emit((result) => {
       if (!result.ok) {
-        refuse(result.error);
+        refuse(result.error, silent);
         return;
       }
       // A credential kept for a seat this player has just given away would only sit them
@@ -973,7 +1004,8 @@ export function createSession(
    * so the ack cannot be mistaken for the position being waited on.
    *
    * A refusal is the exception and lets go at once. Nothing was published, so no newer
-   * position is coming — and the move is still theirs to make.
+   * position is coming — and the move is still theirs to make. Those in `SILENT_MOVE` say
+   * nothing as they do.
    *
    * Unlike `act` it takes no `busy` guard of its own: each caller has already turned back
    * for reasons of its own — a locked screen, no room, a move the rules do not permit —
@@ -986,7 +1018,7 @@ export function createSession(
     emit((result) => {
       if (result.ok) return;
       committedAt = null;
-      refuse(result.error);
+      refuse(result.error, SILENT_MOVE);
     });
   };
 
@@ -1210,7 +1242,7 @@ export function createSession(
 
     // The view goes with the seat: there is no room to render any more, and a null view
     // *is* the main menu.
-    exitToMenu: () => act((ack) => socket.emit("exitToMenu", ack), true),
+    exitToMenu: () => act((ack) => socket.emit("exitToMenu", ack), { leavesRoom: true }),
 
     // Choosing costs nothing and asks for nothing, so there is no error to clear and no
     // lock to take — only the one already held by a turn on its way out.
@@ -1286,10 +1318,10 @@ export function createSession(
     // Ack-settled, like `startGame` and for the same reason: dealing is answered by the
     // ack itself rather than by a move landing in a position already on the screen. The
     // lock still holds across the round trip, which is what a double tap needs it to.
-    startNextRound: () => act((ack) => socket.emit("startNextRound", ack)),
+    startNextRound: () => act((ack) => socket.emit("startNextRound", ack), { silent: SILENT_DEAL }),
 
     // The same shape, and for the same reason: another match is a position produced rather
     // than a move within one.
-    playAgain: () => act((ack) => socket.emit("playAgain", ack)),
+    playAgain: () => act((ack) => socket.emit("playAgain", ack), { silent: SILENT_DEAL }),
   };
 }

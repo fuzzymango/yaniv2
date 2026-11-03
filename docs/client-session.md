@@ -33,6 +33,7 @@ identity. Ten fields, and each answers a different question:
   next's** — see "Accounts" below.
 - **`error`** — a `GameError`: something the player asked for and was refused, or one the server
   pushed as `errorMessage`. Cleared the moment they try again — a refusal costs them nothing.
+  Never one the table already explains — see "Refusals the board already explains" below.
 - **`notice`** — news that is *not* a refusal: a seat that could not be claimed back, or a session
   that has lapsed. No action to blame and nothing to retry, and it arrives while they sit still.
 - **`connected`** — whether there is a socket to play over (this session's own, not the wire's
@@ -92,6 +93,15 @@ crossing an action still in flight acks `PLAYER_NOT_FOUND` about a room they hav
 error is dropped whenever `view` is already null. **An `errorMessage` shows and is dropped
 exactly where a rejected ack is**, being the same news, **but does not touch `busy`**: it is
 nobody's answer, and letting go would put a second copy of the action on the wire.
+
+**Refusals the board already explains are never published** (#246). Each releases `busy`, and
+the move stays the player's to make, but `error` is left alone: what they see next — the turn
+indicator, the slapdown window closing, the round ending, the next round dealt — already says
+what happened. A move (`play`: `takeTurn`, `callYaniv`, `slapDown`) is silent on
+`NOT_YOUR_TURN`, `SLAPDOWN_NOT_AVAILABLE`, `WRONG_PHASE` and `CARD_NOT_PICKUP_ELIGIBLE`
+(`SILENT_MOVE`); `startNextRound` and `playAgain` on `WRONG_PHASE`, somebody else having dealt
+first (`SILENT_DEAL`, handed to `act`). **Keyed on the action as well as the code**: the lobby's
+`WRONG_PHASE` ("Settings are locked once the match has started") is news, and is shown.
 
 **`playerJoined`/`playerLeft` are deliberately unhandled.** The roster arrives right behind each
 as a fresh view, and a screen that re-renders in place shows a seat filling or emptying by

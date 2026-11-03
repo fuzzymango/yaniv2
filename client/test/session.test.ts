@@ -1162,21 +1162,27 @@ describe("taking a turn", () => {
     }
   });
 
-  it("gives the controls back when a turn is refused", async () => {
+  it("gives the controls back when a turn is refused, and says nothing", async () => {
     const server = await startServer(26);
     try {
       const [, waiting] = await twoHumanMatch(server);
       const chosen = playingSelf(waiting.getSnapshot().view!).hand[0]!;
+      const seen = recordSnapshots(waiting);
 
       // A legal discard, out of turn. Turn order is the server's to own — the client
-      // does not second-guess it, so the refusal is how this player is told.
+      // does not second-guess it, so the move is sent and refused `NOT_YOUR_TURN`. The
+      // turn indicator already says whose move it is, so the refusal is not repeated.
       waiting.toggleCard(chosen.id);
       waiting.commitTurn({ kind: "deck" });
       assert.equal(waiting.getSnapshot().busy, true);
 
-      const refused = await waitForSnapshot(waiting, "the refusal", (s) => s.error !== null);
-      assert.equal(refused.error!.code, "NOT_YOUR_TURN");
-      assert.equal(refused.busy, false, "released on the ack — no new position is coming");
+      // The player on turn is a human who is not moving, so no new position is coming:
+      // the lock coming back is the ack, and nothing else.
+      const refused = await waitForSnapshot(waiting, "the refusal", (s) => !s.busy);
+      assert.ok(
+        seen.every((s) => s.error === null),
+        "the board already says whose turn it is",
+      );
       assert.deepEqual(
         refused.selection,
         [chosen.id],
@@ -1439,13 +1445,16 @@ describe("slapping down", () => {
   /**
    * Both events in flight with nothing arbitrating them but the order the server takes
    * them in (ADR-0005). Whichever way it falls, the player is left with one whole
-   * outcome — a card lighter, or told why not — and never half of each.
+   * outcome — a card lighter, or the window closed in front of them — and never half of
+   * each. Losing is never reported: the window closing is the news.
    */
   it("resolves a race with the next player one way or the other", async () => {
     const server = await startServer(26, 0);
     try {
       const [host, guest] = await playToAnOpenWindow(server);
       const before = host.getSnapshot().view!;
+      const hostId = before.you.id;
+      const seen = recordSnapshots(host);
 
       // Sent from the position the host is still holding: the broadcast that closes the
       // window has not reached them, which is exactly when a real thumb loses this race.
@@ -1462,18 +1471,24 @@ describe("slapping down", () => {
         "the race to settle",
         (s) =>
           !s.busy &&
-          (s.error !== null || playingSelf(s.view!).hand.length === playingSelf(before).hand.length - 1),
+          (playingSelf(s.view!).hand.length === playingSelf(before).hand.length - 1 ||
+            s.view!.currentTurnPlayerId === hostId),
       );
-      if (landed.error === null) {
-        assert.equal(playingSelf(landed.view!).hand.length, playingSelf(before).hand.length - 1);
-      } else {
-        assert.equal(landed.error.code, "SLAPDOWN_NOT_AVAILABLE");
-        assert.equal(
-          playingSelf(landed.view!).hand.length,
-          playingSelf(before).hand.length,
-          "a refused slap left them holding what they had",
-        );
-      }
+      // The refusal, if there is one, is answered a round trip behind the position that
+      // closed the window, so give it one before believing it said nothing.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const handBefore = playingSelf(before).hand.length;
+      const handAfter = playingSelf(landed.view!).hand.length;
+      assert.ok(
+        handAfter === handBefore - 1 || handAfter === handBefore,
+        "a card lighter, or holding what they had — never anything else",
+      );
+      assert.ok(
+        seen.every((s) => s.error === null),
+        "a lost race is told by the window closing, not by a refusal",
+      );
+      assert.equal(host.getSnapshot().busy, false);
     } finally {
       await server.close();
     }
@@ -1502,6 +1517,148 @@ describe("slapping down", () => {
  * fixtures; these are about the field arriving where a screen would read it, off a real
  * server and a real chain of bot turns.
  */
+/**
+ * The refusals the table never reports. In each the board already says what happened —
+ * whose turn it is, a window closed, a round over or already dealt — so the session
+ * releases the lock and publishes nothing else. Keyed by the action as well as the code:
+ * a lobby's `WRONG_PHASE` is still news, which "refuses the host's own edit once the match
+ * has started" holds the session to.
+ */
+describe("refusals the table already explains", () => {
+  /**
+   * A two-human table played on, nobody calling, until the seat waiting for its turn
+   * holds a hand Yaniv could be called on — handed back as that seat. Each move is waited
+   * out on both connections before the next is made, so the seat returned is looking at
+   * the position the other is about to move from, and nobody is moving.
+   */
+  async function offTurnWithACall(sessions: [Session, Session]): Promise<Session> {
+    const dealt = await waitForSnapshot(
+      sessions[0],
+      "the deal",
+      (s) => s.view?.phase === "playing" && !s.busy,
+    );
+    let turn = dealt.view!.currentTurnPlayerId;
+
+    for (let move = 0; move < 200; move++) {
+      const rest = await Promise.all(
+        sessions.map((session) =>
+          waitForSnapshot(
+            session,
+            "the table at rest",
+            (s) => s.view?.phase === "playing" && s.view.currentTurnPlayerId === turn && !s.busy,
+          ),
+        ),
+      );
+      const mover = rest.findIndex((s) => s.view!.you.id === turn);
+      const waiting = 1 - mover;
+      const theirs = rest[waiting]!.view!;
+      if (isLegalCall(playingSelf(theirs).hand, theirs.settings.yanivThreshold)) {
+        return sessions[waiting]!;
+      }
+
+      takeATurn(sessions[mover]!, rest[mover]!.view!);
+      turn = theirs.you.id;
+    }
+    throw new Error("the seat off turn never held a hand Yaniv could be called on");
+  }
+
+  it("says nothing when Yaniv is called off turn", async () => {
+    const server = await startServer(26, 0);
+    try {
+      const [host, guest] = await hostAndGuest(server);
+      // The highest threshold the rules allow, so a hand gets under it within a few turns.
+      host.updateSettings({
+        handSize: HAND_SIZE,
+        yanivThreshold: 11,
+        maxScore: MAX_SCORE,
+        botCount: 0,
+      });
+      await waitForSnapshot(
+        host,
+        "the threshold to be raised",
+        (s) => s.view?.settings.yanivThreshold === 11 && !s.busy,
+      );
+      host.startGame();
+      const waiting = await offTurnWithACall([host, guest]);
+      const seen = recordSnapshots(waiting);
+
+      waiting.callYaniv();
+      assert.equal(waiting.getSnapshot().busy, true, "a legal hand, so the call was sent");
+
+      // Nobody is moving, so the lock coming back is the ack refusing it.
+      await waitForSnapshot(waiting, "the refusal", (s) => !s.busy);
+      assert.ok(
+        seen.every((s) => s.error === null),
+        "the board already says whose turn it is",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says nothing when Yaniv is called on a round already over", async () => {
+    const server = await startServer(HUMAN_CALLS_FIRST);
+    try {
+      const host = await soloMatch(server);
+      await playUntilCallable(host);
+      host.callYaniv();
+      await waitForSnapshot(
+        host,
+        "the scored round",
+        (s) => s.view?.phase === "roundEnd" && !s.busy,
+      );
+      const seen = recordSnapshots(host);
+
+      // The thumb that called a beat too late: the hand it called on is still a legal one,
+      // so the call is sent, and the round it was meant for is already over.
+      host.callYaniv();
+      assert.equal(host.getSnapshot().busy, true, "the call was sent");
+
+      await waitForSnapshot(host, "the refusal", (s) => !s.busy);
+      assert.ok(
+        seen.every((s) => s.error === null),
+        "the scored round on the table is the answer",
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says nothing when the next round is asked for once it is being played", async () => {
+    const server = await startServer(26);
+    try {
+      // The position a second dealer lands on: somebody else dealt first, and the round
+      // their tap was for is already being played.
+      const host = await soloMatch(server);
+      const seen = recordSnapshots(host);
+
+      host.startNextRound();
+      assert.equal(host.getSnapshot().busy, true, "the request was sent");
+
+      await waitForSnapshot(host, "the refusal", (s) => !s.busy);
+      assert.ok(seen.every((s) => s.error === null), "the new round on the table is the answer");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says nothing when a replay is asked for once it is being played", async () => {
+    const server = await startServer(26);
+    try {
+      const host = await soloMatch(server);
+      const seen = recordSnapshots(host);
+
+      host.playAgain();
+      assert.equal(host.getSnapshot().busy, true, "the request was sent");
+
+      await waitForSnapshot(host, "the refusal", (s) => !s.busy);
+      assert.ok(seen.every((s) => s.error === null), "the new match on the table is the answer");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 describe("the move to animate", () => {
   /** Every flight the session published, in order — one per move it had something to show for. */
   function flightsShownTo(session: Session): CardFlight[] {
