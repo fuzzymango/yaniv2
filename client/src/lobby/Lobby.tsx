@@ -17,7 +17,7 @@
  * ordinary roster update with the marker on somebody else.
  */
 
-import type { GameError, PlayerGameView, RoomSettings } from "@yaniv/shared";
+import type { PlayerGameView, RoomSettings } from "@yaniv/shared";
 import { effectiveBotCount } from "@yaniv/shared";
 import { SettingsEditor } from "./SettingsEditor.tsx";
 import { SettingsPanel } from "../settings/SettingsPanel.tsx";
@@ -28,7 +28,6 @@ import { STATUS_LABEL, seatStatus } from "../status.ts";
 
 interface LobbyProps {
   view: PlayerGameView;
-  error: GameError | null;
   busy: boolean;
   onStart: () => void;
   onUpdateSettings: (settings: RoomSettings) => void;
@@ -37,7 +36,6 @@ interface LobbyProps {
 
 export function Lobby({
   view,
-  error,
   busy,
   onStart,
   onUpdateSettings,
@@ -150,12 +148,6 @@ export function Lobby({
         */}
         <WayOut busy={busy} onExit={onExit} />
       </div>
-
-      {error && (
-        <p className="notice notice--error" role="alert">
-          {error.message}
-        </p>
-      )}
     </main>
   );
 }

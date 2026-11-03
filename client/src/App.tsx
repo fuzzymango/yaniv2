@@ -15,6 +15,7 @@
  */
 
 import { Disconnected } from "./connection/Disconnected.tsx";
+import { ErrorToasts } from "./shared/ErrorToasts.tsx";
 import { Resuming } from "./connection/Resuming.tsx";
 import { GameEnd } from "./game-end/GameEnd.tsx";
 import { Lobby } from "./lobby/Lobby.tsx";
@@ -84,16 +85,30 @@ export function App({ session }: { session: Session }) {
   // phase is then a typecheck here rather than a blank screen in a browser.
   const { phase } = view;
 
+  /*
+   * What the room refused, over whichever of its screens is up and part of none of them, so
+   * nothing on any of them moves when one appears. The session holds one error for now; it
+   * is handed over in the list shape the layer already takes, and ✕ clears it.
+   */
+  const toasts = (
+    <ErrorToasts
+      toasts={error ? [{ id: 0, error }] : []}
+      onDismiss={session.clearError}
+    />
+  );
+
   if (phase === "lobby") {
     return (
-      <Lobby
-        view={view}
-        error={error}
-        busy={busy}
-        onStart={session.startGame}
-        onUpdateSettings={session.updateSettings}
-        onExit={session.exitToMenu}
-      />
+      <>
+        <Lobby
+          view={view}
+          busy={busy}
+          onStart={session.startGame}
+          onUpdateSettings={session.updateSettings}
+          onExit={session.exitToMenu}
+        />
+        {toasts}
+      </>
     );
   }
 
@@ -123,12 +138,6 @@ export function App({ session }: { session: Session }) {
       <Table
         view={view}
         selection={selection}
-        /*
-         * A finished match reports through the panel over the table, which is what every
-         * action left on this screen is asked through: one message, in the one place a
-         * player is looking.
-         */
-        error={phase === "gameEnd" ? null : error}
         busy={busy}
         flight={flight}
         announcement={announcement}
@@ -141,7 +150,14 @@ export function App({ session }: { session: Session }) {
       />
     );
 
-    if (phase !== "gameEnd") return table;
+    if (phase !== "gameEnd") {
+      return (
+        <>
+          {table}
+          {toasts}
+        </>
+      );
+    }
 
     /*
      * The finished match: the table it finished on, with the standings floating over it.
@@ -154,14 +170,19 @@ export function App({ session }: { session: Session }) {
         {table}
         <GameEnd
           view={view}
-          error={error}
           busy={busy}
           onPlayAgain={session.playAgain}
           onExit={session.exitToMenu}
         />
+        {toasts}
       </>
     );
   }
 
-  return <Room view={view} phase={phase} />;
+  return (
+    <>
+      <Room view={view} phase={phase} />
+      {toasts}
+    </>
+  );
 }

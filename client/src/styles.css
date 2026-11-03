@@ -226,6 +226,86 @@ body {
   color: var(--danger);
 }
 
+/* --- what the session was refused --- */
+
+/*
+ * Fixed to the top of the viewport and part of no layout, so nothing on the screen under it
+ * moves when a toast arrives or goes (spec #245). Capped and centred like the column, with the
+ * same 16px gutter a phone gets everywhere.
+ *
+ * Above everything else drawn over a screen — the modal (10), a hand's open card (11) and the
+ * call banner (20) — because a refusal is about the thing just asked, whichever panel it was
+ * asked from. The layer is inert to taps and each toast is not, so the felt either side of a
+ * toast still takes a tap meant for it.
+ */
+.toasts {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 30rem;
+  margin: 0 auto;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem 0;
+  pointer-events: none;
+}
+
+/* Opaque, like the modal: it can sit over cards, and a sentence read through a fan is not. */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--felt-dark);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
+  color: var(--danger);
+  pointer-events: auto;
+  animation: toast-in 0.25s ease-out;
+}
+
+.toast__message {
+  flex: 1;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.toast__dismiss {
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.toast__dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* In from above, and only in: ✕ takes a toast away at once. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+/* Asked not to be moved, a toast is simply there — what it says is no less worth reading. */
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
 /* --- a lost connection --- */
 
 /*

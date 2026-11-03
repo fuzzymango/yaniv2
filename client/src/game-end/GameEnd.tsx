@@ -29,14 +29,13 @@
  * client could read it out of.
  */
 
-import type { GameError, PlayerGameView } from "@yaniv/shared";
+import type { PlayerGameView } from "@yaniv/shared";
 import { standings } from "@yaniv/shared";
 import { SettingsDialog } from "../settings/SettingsDialog.tsx";
 import { WayOut } from "../shared/WayOut.tsx";
 
 interface GameEndProps {
   view: PlayerGameView;
-  error: GameError | null;
   busy: boolean;
   onPlayAgain: () => void;
   onExit: () => void;
@@ -53,7 +52,6 @@ function spokenList(names: string[]): string {
 
 export function GameEnd({
   view,
-  error,
   busy,
   onPlayAgain,
   onExit,
@@ -159,12 +157,6 @@ export function GameEnd({
           {/* The lobby's way out, meaning the same thing here — see `WayOut.tsx`. */}
           <WayOut busy={busy} onExit={onExit} />
         </div>
-
-        {error && (
-          <p className="notice notice--error" role="alert">
-            {error.message}
-          </p>
-        )}
       </section>
     </div>
   );
