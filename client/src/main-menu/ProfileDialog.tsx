@@ -35,9 +35,9 @@
  * **The custom calls are shown as the table would shout them** (#237): upper-cased the way
  * the banner is, in the banner's yellow or red, and — where the player has chosen none — the
  * banner's own `YANIV` or `ASSAF`, dimmed. Each row is edited exactly as the name is, by the
- * same editor, an empty save putting the banner's word back. Unlike a name, a call is asked
- * of `shared`'s rule here rather than in the session, which sends a call as given: the
- * refusal is worded by this panel, the server judging it again regardless (ADR-0002).
+ * same editor, an empty save putting the banner's word back. A call is asked of `shared`'s
+ * rule by the session before it is sent, as a name is, and refused in the session's words
+ * under the field — the server judging it again regardless (ADR-0002).
  *
  * **The panel does one thing at a time** — showing, editing one field, or confirming the
  * sign-out — one value (`Panel`) rather than a flag per field, so opening one editor closes
@@ -56,7 +56,6 @@
  */
 
 import { useState } from "react";
-import { MAX_CUSTOM_CALL_LENGTH, normalizeCustomCall } from "@yaniv/shared";
 import type { Call, GameError, Stats } from "@yaniv/shared";
 import type { AccountStanding } from "../session.ts";
 import { CALL_WORD } from "../announcement.ts";
@@ -215,13 +214,6 @@ const CALL_NAME: Record<Call, string> = {
   assaf: "Assaf call",
 };
 
-/**
- * The profile's own sentence for a call the shared rule refuses, as the session words its
- * own for a name: the rule is `shared`'s, its wording each caller's. Asked before sending so
- * a typo is not a round trip, the server applying the same rule regardless (ADR-0002).
- */
-const UNUSABLE_CALL = `Enter up to ${MAX_CUSTOM_CALL_LENGTH} letters, digits, single spaces and ! ? . , ' -`;
-
 interface PencilProps {
   label: string;
   autoFocus: boolean;
@@ -252,11 +244,6 @@ interface EditInPlaceProps {
   initial: string;
   placeholder?: string;
   autoComplete: string;
-  /**
-   * The panel's own check, asked before `onSave` and answered with a refusal to show, or
-   * null to send. Absent where the session asks the rule itself, as it does for a name.
-   */
-  refuse?: (draft: string) => string | null;
   /** The session's refusal, shown under the field while the panel is open. */
   error: GameError | null;
   busy: boolean;
@@ -269,9 +256,8 @@ interface EditInPlaceProps {
  * name's editor first, and each custom call's the same one (#237), so the three behave alike
  * by construction. The rest of the panel stays where it is: editing takes the player nowhere.
  *
- * The draft is this component's own, and so is a refusal it answered itself: a value
- * half-typed is no use outside the field holding it, and the field mounts afresh on every
- * open, so neither can outlive the edit it belongs to.
+ * The draft is this component's own: a value half-typed is no use outside the field holding
+ * it, and the field mounts afresh on every open, so it cannot outlive the edit it belongs to.
  */
 function EditInPlace({
   label,
@@ -279,24 +265,19 @@ function EditInPlace({
   initial,
   placeholder,
   autoComplete,
-  refuse,
   error,
   busy,
   onSave,
   onCancel,
 }: EditInPlaceProps) {
   const [draft, setDraft] = useState(initial);
-  const [refusal, setRefusal] = useState<string | null>(null);
-  const message = refusal ?? error?.message ?? null;
 
   return (
     <form
       className="profile__edit"
       onSubmit={(event) => {
         event.preventDefault();
-        const refused = refuse?.(draft) ?? null;
-        setRefusal(refused);
-        if (refused === null) onSave(draft);
+        onSave(draft);
       }}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
@@ -346,9 +327,9 @@ function EditInPlace({
         </button>
       </div>
 
-      {message !== null && (
+      {error !== null && (
         <p className="notice notice--error" role="alert">
-          {message}
+          {error.message}
         </p>
       )}
     </form>
@@ -450,13 +431,6 @@ interface ProfileDialogProps {
 const callText = (standing: SignedIn, call: Call): string | null =>
   call === "yaniv" ? standing.account.customYanivCall : standing.account.customAssafCall;
 
-/**
- * The rule asked before a call is sent, refused in the profile's own words. What passes is
- * sent as typed, the server trimming it by the same rule — empty, after that, unsetting it.
- */
-const refuseCall = (draft: string): string | null =>
-  normalizeCustomCall(draft).accepted ? null : UNUSABLE_CALL;
-
 export function ProfileDialog({
   standing,
   stats,
@@ -505,7 +479,6 @@ export function ProfileDialog({
         initial={text ?? ""}
         placeholder={CALL_WORD[call]}
         autoComplete="off"
-        refuse={refuseCall}
         error={error}
         busy={busy}
         onSave={(draft) => onSetCustomCall(call, draft)}

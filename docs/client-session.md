@@ -167,15 +167,16 @@ not sent over a dead socket: the next connection would arrive bound to no accoun
 server would have no session to end. A `renameAccount` or `setCustomCall` refused
 `INVALID_SESSION` lands where a lapsed session does, below.
 
-**Custom calls are set one at a time, and judged by the server** (#126). `setCustomCall(call,
-text)` sends the text as given — signed in only, nothing sent for a guest — locks `busy` and
-settles on the ack, which answers with the account as it now stands: landed, the signed-in
-standing is replaced from it, as a rename's is, and an empty text comes back as that call
-`null`, the banner's own word; refused (`INVALID_CUSTOM_CALL`), the standing is kept, the same
-object, and `error` says why. Unlike `renameAccount` it applies no rule before sending: the
-profile asks `normalizeCustomCall` itself before it calls the intent, so the session's suite
-meets the server's refusals rather than its own. Both calls ride every `AccountView`, so a
-sign-in, an account created, a resumed session and a rename all answer them.
+**Custom calls are set one at a time, and judged before they are sent** (#126, #248).
+`setCustomCall(call, text)` — signed in only, nothing sent for a guest — asks
+`normalizeCustomCall` first, as `renameAccount` asks the name rule: a text it refuses publishes a
+local `INVALID_CUSTOM_CALL` in the session's own words and sends nothing, the standing kept, the
+same object. What passes is sent as typed, locks `busy` and settles on the ack, which answers
+with the account as it now stands: landed, the signed-in standing is replaced from it, as a
+rename's is, and an empty text comes back as that call `null`, the banner's own word. The server
+judges the text again regardless (ADR-0002); its refusal of one is the server's flow suite's.
+Both calls ride every `AccountView`, so a sign-in, an account created, a resumed session and a
+rename all answer them.
 
 **A refusal is put down when the panel that asked for it closes.** `cancelSignIn` clears `error`
 on its way back to a guest, and `clearError` — nothing sent, nothing else touched, the account

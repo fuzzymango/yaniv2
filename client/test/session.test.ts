@@ -3312,9 +3312,8 @@ describe("an account", () => {
 /**
  * The words an account's seat will shout (`CONTEXT.md`, **Custom calls**): set over the wire
  * one call at a time, kept on the account, and on every `AccountView` the server answers.
- * The session sends what it is handed and lets the server judge it — the profile asks the
- * shared rule before it sends — so a refusal here is the server's, as an off-contract
- * client would meet it.
+ * The session asks the shared rule before it sends, as it does for a name, so an unusable
+ * text is refused here; the server's refusal of one is its own flow suite's.
  */
 describe("custom calls", () => {
   /** The account standing's custom calls, or a failed assertion where there is no account. */
@@ -3388,9 +3387,10 @@ describe("custom calls", () => {
 
   /*
    * The profile's editor stays open on exactly this — the standing it was opened over still
-   * being the one on screen — as the rename panel does, so it is pinned by identity.
+   * being the one on screen — as the rename panel does, so it is pinned by identity. Answered
+   * here, as an unusable name is: the server's own refusal of a text is its flow suite's.
    */
-  it("keeps the standing and says why when the server refuses a text", async () => {
+  it("refuses an unusable custom call without asking the server", async () => {
     const server = await startServer(26);
     try {
       const session = await signUp(server, { sub: "google-ada", name: "Ada" });
@@ -3401,11 +3401,12 @@ describe("custom calls", () => {
         ["too long", "W".repeat(MAX_CUSTOM_CALL_LENGTH + 1)],
         ["an emoji", "I WIN 🃏"],
         ["a doubled space", "I  WIN"],
-        ["not a string", 42 as unknown as string],
       ] as const) {
         session.setCustomCall("yaniv", text);
-        const refused = await settled(session, `the refusal of ${what}`);
+        const refused = session.getSnapshot();
         assert.equal(refused.error?.code, "INVALID_CUSTOM_CALL", what);
+        assert.match(refused.error!.message, /letters, digits, single spaces/, what);
+        assert.equal(refused.busy, false, `${what}: answered here, with nothing sent`);
         assert.equal(refused.account, asked, `${what}: the same standing`);
       }
     } finally {

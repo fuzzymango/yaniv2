@@ -29,7 +29,12 @@ import type {
   ServerToClientEvents,
   Stats,
 } from "@yaniv/shared";
-import { MAX_DISPLAY_NAME_LENGTH, normalizeDisplayName } from "@yaniv/shared";
+import {
+  MAX_CUSTOM_CALL_LENGTH,
+  MAX_DISPLAY_NAME_LENGTH,
+  normalizeCustomCall,
+  normalizeDisplayName,
+} from "@yaniv/shared";
 import type { Socket } from "socket.io-client";
 import type { Announcement } from "./announcement.ts";
 import { announcementFrom } from "./announcement.ts";
@@ -300,9 +305,9 @@ export interface Session {
   renameAccount: (displayName: string) => void;
   /**
    * Set the account's custom Yaniv call or custom Assaf call, from the next room on; an
-   * empty text puts the banner's own word back. Signed in only. Sent as given and judged by
-   * the server — the profile asks the shared rule before it sends — so a refusal is the
-   * server's, settled on its ack with the standing kept, as a refused rename's is.
+   * empty text puts the banner's own word back. Signed in only. Asked of the shared rule
+   * first, as a rename is, a refusal published here and nothing sent; what passes is sent as
+   * given and settled on its ack, the standing kept on a refusal, as a refused rename's is.
    */
   setCustomCall: (call: Call, text: string) => void;
   /**
@@ -458,6 +463,16 @@ const UNAVAILABLE = "That game is no longer available.";
 const UNUSABLE_ACCOUNT_NAME: GameError = {
   code: "INVALID_NAME",
   message: `Enter a name of 1-${MAX_DISPLAY_NAME_LENGTH} letters, digits and single spaces`,
+};
+
+/**
+ * Its sibling for a custom call (#237): the call rule's refusal, worded here as a name's is,
+ * the rule being `shared`'s and its sentence each caller's. Asked before sending so a typo is
+ * not a round trip, the server applying the same rule regardless (ADR-0002).
+ */
+const UNUSABLE_CALL: GameError = {
+  code: "INVALID_CUSTOM_CALL",
+  message: `Enter up to ${MAX_CUSTOM_CALL_LENGTH} letters, digits, single spaces and ! ? . , ' -`,
 };
 
 /**
@@ -1149,8 +1164,16 @@ export function createSession(
       accountEvent(() => socket.emit("renameAccount", name, accountChanged));
     },
 
+    /*
+     * What passes is sent as typed, the server trimming it by the same rule — empty, after
+     * that, unsetting the call.
+     */
     setCustomCall: (call, text) => {
       if (snapshot.busy || snapshot.account.status !== "signedIn") return;
+      if (!normalizeCustomCall(text).accepted) {
+        publish({ error: UNUSABLE_CALL });
+        return;
+      }
       accountEvent(() => socket.emit("setCustomCall", call, text, accountChanged));
     },
 

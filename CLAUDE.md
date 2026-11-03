@@ -596,8 +596,8 @@ the one place an account is renamed, its custom calls chosen or it is signed out
 yellow or red, the banner's own word dimmed where unset — for a field, ✓/Enter saves, ✕
 cancels, an empty call saves as unset, and the field stays open while the standing it was opened
 over is still the one on screen — the session replaces it when an edit lands and keeps it on a
-refusal, shown under the field. A call is asked of `customCall.ts` in the profile, worded there,
-before the intent sends it. A sign-out icon opposite the title asks "Sign out of <name>?",
+refusal, shown under the field. A call is asked of `customCall.ts` by the session, as a name is,
+and worded there before anything is sent. A sign-out icon opposite the title asks "Sign out of <name>?",
 Cancel focused — sign-out forgets the seat too, hence a panel only the menu opens. Showing,
 editing one field and confirming are exclusive — one `Panel` value — and Escape backs out one
 level, each editor and the question stopping the key before `Modal` sees it. `NameDialog` is
