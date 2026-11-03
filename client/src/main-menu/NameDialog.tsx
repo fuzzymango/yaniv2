@@ -11,24 +11,19 @@
  * unique (see "Display name" in CONTEXT.md), so there is no "already taken" to be told; the
  * only refusal is the shared display-name rule.
  *
- * **The panel shows the session's `error` while it is open**, and the menu behind it shows
- * none: a refused name is about what was typed here, and one message belongs in the one
- * place the player is looking — the trick `App.tsx` uses for `GameEnd`. Nothing left over
- * from the menu is here to be misread as an answer about a name: the session puts it down as
- * the panel opens, `signIn` sending.
+ * **A refused name is a toast over the panel**, as every refusal is (`ErrorToasts`, spec
+ * #245), rather than a line in it: the panel draws no error of its own.
  *
  * The draft is this component's own, on the settings editor's precedent: a name half-typed
  * is no use outside the panel holding it.
  */
 
 import { useState } from "react";
-import type { GameError } from "@yaniv/shared";
 import { Modal } from "../shared/Modal.tsx";
 
 interface NameDialogProps {
   /** What the field starts out holding. */
   suggestedName: string;
-  error: GameError | null;
   busy: boolean;
   onSave: (displayName: string) => void;
   /** "Not now": the player stays the guest they were. */
@@ -37,7 +32,6 @@ interface NameDialogProps {
 
 export function NameDialog({
   suggestedName,
-  error,
   busy,
   onSave,
   onDismiss,
@@ -80,12 +74,6 @@ export function NameDialog({
           </button>
         </div>
       </form>
-
-      {error && (
-        <p className="notice notice--error" role="alert">
-          {error.message}
-        </p>
-      )}
     </Modal>
   );
 }

@@ -12,6 +12,10 @@
  *
  * One branch renders two screens rather than one: a finished match is `Table` with `GameEnd`
  * drawn over it (issue #130). Everywhere else a phase picks exactly one component.
+ *
+ * And whatever the screen, what the session was refused is held up over it, part of none of
+ * them (`ErrorToasts`, spec #245): drawn once, here, beside whichever screen is up, so no
+ * screen draws an error of its own and nothing on any of them moves when one appears.
  */
 
 import { Disconnected } from "./connection/Disconnected.tsx";
@@ -22,15 +26,33 @@ import { Lobby } from "./lobby/Lobby.tsx";
 import { MainMenu } from "./main-menu/MainMenu.tsx";
 import { Room } from "./table/Room.tsx";
 import { Table } from "./table/Table.tsx";
-import type { Session } from "./session.ts";
+import type { Session, SessionSnapshot } from "./session.ts";
 import { useSession } from "./useSession.ts";
 
 export function App({ session }: { session: Session }) {
+  const snapshot = useSession(session);
+
+  /*
+   * The session holds one error for now; it is handed over in the list shape the layer
+   * already takes, and ✕ clears it.
+   */
+  return (
+    <>
+      <Screen session={session} snapshot={snapshot} />
+      <ErrorToasts
+        toasts={snapshot.error ? [{ id: 0, error: snapshot.error }] : []}
+        onDismiss={session.clearError}
+      />
+    </>
+  );
+}
+
+/** Which one screen is up, the toasts aside. */
+function Screen({ session, snapshot }: { session: Session; snapshot: SessionSnapshot }) {
   const {
     view,
     account,
     stats,
-    error,
     notice,
     busy,
     connected,
@@ -38,7 +60,7 @@ export function App({ session }: { session: Session }) {
     selection,
     flight,
     announcement,
-  } = useSession(session);
+  } = snapshot;
 
   /*
    * Before anything else, and whatever position was last drawn: with no socket there is
@@ -63,7 +85,6 @@ export function App({ session }: { session: Session }) {
       <MainMenu
         account={account}
         stats={stats}
-        error={error}
         notice={notice}
         busy={busy}
         onCreate={session.createRoom}
@@ -85,30 +106,15 @@ export function App({ session }: { session: Session }) {
   // phase is then a typecheck here rather than a blank screen in a browser.
   const { phase } = view;
 
-  /*
-   * What the room refused, over whichever of its screens is up and part of none of them, so
-   * nothing on any of them moves when one appears. The session holds one error for now; it
-   * is handed over in the list shape the layer already takes, and ✕ clears it.
-   */
-  const toasts = (
-    <ErrorToasts
-      toasts={error ? [{ id: 0, error }] : []}
-      onDismiss={session.clearError}
-    />
-  );
-
   if (phase === "lobby") {
     return (
-      <>
-        <Lobby
-          view={view}
-          busy={busy}
-          onStart={session.startGame}
-          onUpdateSettings={session.updateSettings}
-          onExit={session.exitToMenu}
-        />
-        {toasts}
-      </>
+      <Lobby
+        view={view}
+        busy={busy}
+        onStart={session.startGame}
+        onUpdateSettings={session.updateSettings}
+        onExit={session.exitToMenu}
+      />
     );
   }
 
@@ -150,14 +156,7 @@ export function App({ session }: { session: Session }) {
       />
     );
 
-    if (phase !== "gameEnd") {
-      return (
-        <>
-          {table}
-          {toasts}
-        </>
-      );
-    }
+    if (phase !== "gameEnd") return table;
 
     /*
      * The finished match: the table it finished on, with the standings floating over it.
@@ -174,15 +173,9 @@ export function App({ session }: { session: Session }) {
           onPlayAgain={session.playAgain}
           onExit={session.exitToMenu}
         />
-        {toasts}
       </>
     );
   }
 
-  return (
-    <>
-      <Room view={view} phase={phase} />
-      {toasts}
-    </>
-  );
+  return <Room view={view} phase={phase} />;
 }

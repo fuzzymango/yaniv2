@@ -222,10 +222,6 @@ body {
   text-align: center;
 }
 
-.notice--error {
-  color: var(--danger);
-}
-
 /* --- what the session was refused --- */
 
 /*

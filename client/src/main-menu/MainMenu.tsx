@@ -6,8 +6,9 @@
  * an intent is called with them, so they live here rather than in the session.
  *
  * Neither button decides anything: an unusable name is refused by the session core and
- * a bad code by the server, and both come back the same way, as an error to show. This
- * file only says what happened.
+ * a bad code by the server, and both come back the same way, as an error — which is held
+ * up over this screen as over every other (`ErrorToasts`, spec #245), so this file draws
+ * none of its own, a panel open over it included.
  *
  * It is also where a player lands when a room goes away underneath them, which is what
  * the notice is for — news about the room they were in rather than a refusal of anything
@@ -35,7 +36,7 @@
  */
 
 import { useState } from "react";
-import type { Call, GameError, Stats } from "@yaniv/shared";
+import type { Call, Stats } from "@yaniv/shared";
 import type { AccountStanding } from "../session.ts";
 import { GoogleButton } from "./GoogleButton.tsx";
 import { NameDialog } from "./NameDialog.tsx";
@@ -44,7 +45,6 @@ import { ProfileDialog } from "./ProfileDialog.tsx";
 interface MainMenuProps {
   account: AccountStanding;
   stats: Stats | null;
-  error: GameError | null;
   notice: string | null;
   busy: boolean;
   onCreate: (playerName: string) => void;
@@ -62,7 +62,6 @@ interface MainMenuProps {
 export function MainMenu({
   account,
   stats,
-  error,
   notice,
   busy,
   onCreate,
@@ -80,15 +79,6 @@ export function MainMenu({
   const [roomCode, setRoomCode] = useState("");
 
   /**
-   * Whether the profile is up — held here rather than in it, because while it is the menu
-   * shows no error (see `ProfileDialog.tsx`). Put down the moment there is no account to
-   * show, as an edit refused for a lapsed session leaves, so the next sign-in does not
-   * land with it already open: state adjusted in render, before anything is drawn from it.
-   */
-  const [profileOpen, setProfileOpen] = useState(false);
-  if (profileOpen && account.status !== "signedIn") setProfileOpen(false);
-
-  /**
    * Nothing to join until a code has been typed, so joining is inert until then rather
    * than sending a blank code and reporting back that no room has that code — which is
    * true, and no answer at all to a player who has not typed one. The name field shares
@@ -96,28 +86,18 @@ export function MainMenu({
    */
   const canJoin = roomCode.trim().length > 0;
 
-  const dialog =
-    account.status === "nameNeeded" ? (
-      <NameDialog
-        suggestedName={account.suggestedName}
-        error={error}
-        busy={busy}
-        onSave={onCreateAccount}
-        onDismiss={onCancelSignIn}
-      />
-    ) : null;
-
   return (
     <main className="screen menu">
+      {/*
+        Drawn only while signed in, so the profile goes with the account — a sign-out, or an
+        edit refused for a lapsed session — and the next sign-in finds it closed.
+      */}
       {account.status === "signedIn" && (
         <div className="menu__corner">
           <ProfileDialog
             standing={account}
             stats={stats}
-            error={error}
             busy={busy}
-            open={profileOpen}
-            onOpenChange={setProfileOpen}
             onLoadStats={onLoadStats}
             onRename={onRenameAccount}
             onSetCustomCall={onSetCustomCall}
@@ -206,14 +186,14 @@ export function MainMenu({
         </button>
       </form>
 
-      {/* The panel's while one is open: see `NameDialog.tsx` and `ProfileDialog.tsx`. */}
-      {error && dialog === null && !profileOpen && (
-        <p className="notice notice--error" role="alert">
-          {error.message}
-        </p>
+      {account.status === "nameNeeded" && (
+        <NameDialog
+          suggestedName={account.suggestedName}
+          busy={busy}
+          onSave={onCreateAccount}
+          onDismiss={onCancelSignIn}
+        />
       )}
-
-      {dialog}
     </main>
   );
 }

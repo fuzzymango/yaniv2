@@ -182,8 +182,8 @@ rename all answer them.
 on its way back to a guest, and `clearError` — nothing sent, nothing else touched, the account
 standing included — is the profile's way in and out, and its editors' (#229, #237): a refusal
 left over from the menu is no answer about a name or a call, and one an editor was showing is
-about a question nobody is asking once it has closed. None of them is the session's: the menu
-decides when the panels open, the profile when its editors do.
+about a question nobody is asking once it has closed. None of them is the session's: the profile
+decides when it and its editors open.
 
 **Stats are read fresh, and belong to one account** (docs/adr/0026). `loadStats()` blanks
 `stats`, emits, and fills it from the ack — only the latest read's, and only while the account it

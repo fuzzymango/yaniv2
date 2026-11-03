@@ -596,14 +596,14 @@ the one place an account is renamed, its custom calls chosen or it is signed out
 yellow or red, the banner's own word dimmed where unset — for a field, ✓/Enter saves, ✕
 cancels, an empty call saves as unset, and the field stays open while the standing it was opened
 over is still the one on screen — the session replaces it when an edit lands and keeps it on a
-refusal, shown under the field. A call is asked of `customCall.ts` by the session, as a name is,
+refusal. A call is asked of `customCall.ts` by the session, as a name is,
 and worded there before anything is sent. A sign-out icon opposite the title asks "Sign out of <name>?",
 Cancel focused — sign-out forgets the seat too, hence a panel only the menu opens. Showing,
 editing one field and confirming are exclusive — one `Panel` value — and Escape backs out one
 level, each editor and the question stopping the key before `Modal` sees it. `NameDialog` is
-confirm-only, the first sign-in's non-dismissible step with a "Not now". While either is open
-the menu shows no `error` — the panel does, the profile under whichever field is open — which
-is why the menu, not the profile, holds whether the profile is open. Google's script is fetched when the signed-out form
+confirm-only, the first sign-in's non-dismissible step with a "Not now". Neither draws an error,
+nor does the menu: a refusal is a toast over whichever is up (`ErrorToasts`, spec #245), which
+`App` draws once over every screen. Google's script is fetched when the signed-out form
 mounts and a failure draws **nothing** (`google.ts`,
 docs/adr/0020) — sign-in is an option, never a wall.
 

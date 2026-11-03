@@ -17,27 +17,26 @@
  * session core's (`stats`) and not state here — it has to go the moment the account does,
  * which is a rule about the account standing, not about a panel.
  *
- * Whether the panel is open is the main menu's rather than this component's, unlike
- * `SettingsDialog`'s, for one reason: while it is open the menu shows no error, the panel
- * showing a refusal under the field instead — one message in the one place the player
- * is looking, as `NameDialog` does. The error is put down on the way in and on the way out,
- * so anything on the screen while the panel is open is an answer about something typed in it.
- * Nothing on the wire knows or cares that somebody is looking at it.
+ * Whether the panel is open is this component's, as `SettingsDialog`'s is: nothing on the
+ * wire knows or cares that somebody is looking at it, and the main menu draws this only while
+ * signed in, so a sign-out takes the open panel with it. **A refusal is a toast over the
+ * panel** (`ErrorToasts`, spec #245), never a line in it — though the error is still put down
+ * on the way in and on the way out, and as a field opens, until the toasts stack (#250).
  *
  * **Signing out is asked before it is done, and asked here alone** (#230): an icon in the
  * header, opposite the title and as far from Close as the panel allows, swaps the panel's
  * contents for "Sign out of <name>?" with Cancel holding the focus, so a mis-tap on an icon
  * or an Enter pressed out of habit costs nothing. It forgets the seat as well as the account
  * (docs/adr/0020), which is why it lives on a panel the main menu alone opens. Confirmed, the
- * standing becomes a guest's at once and the menu puts the profile down in render; nothing
- * here closes it.
+ * standing becomes a guest's at once and the menu stops drawing the profile; nothing here
+ * closes it.
  *
  * **The custom calls are shown as the table would shout them** (#237): upper-cased the way
  * the banner is, in the banner's yellow or red, and — where the player has chosen none — the
  * banner's own `YANIV` or `ASSAF`, dimmed. Each row is edited exactly as the name is, by the
  * same editor, an empty save putting the banner's word back. A call is asked of `shared`'s
- * rule by the session before it is sent, as a name is, and refused in the session's words
- * under the field — the server judging it again regardless (ADR-0002).
+ * rule by the session before it is sent, as a name is, and refused in the session's words —
+ * the server judging it again regardless (ADR-0002).
  *
  * **The panel does one thing at a time** — showing, editing one field, or confirming the
  * sign-out — one value (`Panel`) rather than a flag per field, so opening one editor closes
@@ -46,9 +45,8 @@
  * reset every time the panel opens. An edit already sent is not a draft and is not called
  * back: tapping sign-out or another pencil while one is out leaves Sign out disabled and the
  * new field read-only until it is answered, and the answer lands on whatever is showing — a
- * rename landing closes a call's field opened behind it, a refusal shows under it, or is
- * cleared unseen on the way back to the profile. A race of one tap against one round trip,
- * accepted.
+ * rename landing closes a call's field opened behind it, and a refusal leaves it open. A race
+ * of one tap against one round trip, accepted.
  *
  * **Escape backs out one level.** `Modal` catches it on its wrapper, so an editor and the
  * confirmation each stop the key there and go back to showing the profile; from there it
@@ -56,7 +54,7 @@
  */
 
 import { useState } from "react";
-import type { Call, GameError, Stats } from "@yaniv/shared";
+import type { Call, Stats } from "@yaniv/shared";
 import type { AccountStanding } from "../session.ts";
 import { CALL_WORD } from "../announcement.ts";
 import { Modal } from "../shared/Modal.tsx";
@@ -191,8 +189,8 @@ type Field = "name" | Call;
  * screen**, the rule the main menu's rename panel used before the profile replaced it: the
  * session replaces the standing when an edit lands — even to the same value — and keeps it
  * when one is refused (pinned in the session suite), so the field closes on the answer that
- * means "done" and stays open, the reason under it, on the one that means "not that". No
- * effect watches for either.
+ * means "done" and stays open, the reason in a toast over it, on the one that means "not
+ * that". No effect watches for either.
  *
  * `returnTo` is the field whose editor closed last, so its pencil takes the focus back: an
  * input that unmounts with the focus in it leaves it on the page behind the panel, where
@@ -244,8 +242,6 @@ interface EditInPlaceProps {
   initial: string;
   placeholder?: string;
   autoComplete: string;
-  /** The session's refusal, shown under the field while the panel is open. */
-  error: GameError | null;
   busy: boolean;
   onSave: (draft: string) => void;
   onCancel: () => void;
@@ -265,7 +261,6 @@ function EditInPlace({
   initial,
   placeholder,
   autoComplete,
-  error,
   busy,
   onSave,
   onCancel,
@@ -326,12 +321,6 @@ function EditInPlace({
           <CrossIcon />
         </button>
       </div>
-
-      {error !== null && (
-        <p className="notice notice--error" role="alert">
-          {error.message}
-        </p>
-      )}
     </form>
   );
 }
@@ -412,12 +401,7 @@ interface ProfileDialogProps {
   standing: SignedIn;
   /** The account's stats as last read, or null while they are being read or were refused. */
   stats: Stats | null;
-  /** The session's, shown under whichever field is being edited. */
-  error: GameError | null;
   busy: boolean;
-  /** Whether the panel is up — the main menu's to hold, for the reason above. */
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   /** Read the stats afresh — called every time the profile opens. */
   onLoadStats: () => void;
   onRename: (displayName: string) => void;
@@ -434,16 +418,14 @@ const callText = (standing: SignedIn, call: Call): string | null =>
 export function ProfileDialog({
   standing,
   stats,
-  error,
   busy,
-  open,
-  onOpenChange,
   onLoadStats,
   onRename,
   onSetCustomCall,
   onClearError,
   onSignOut,
 }: ProfileDialogProps) {
+  const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<Panel>(SHOWING);
 
   /** The field being edited, if any — none once the standing it was opened over is gone. */
@@ -466,7 +448,7 @@ export function ProfileDialog({
 
   const close = () => {
     onClearError();
-    onOpenChange(false);
+    setOpen(false);
   };
 
   const callRow = (call: Call) => {
@@ -479,7 +461,6 @@ export function ProfileDialog({
         initial={text ?? ""}
         placeholder={CALL_WORD[call]}
         autoComplete="off"
-        error={error}
         busy={busy}
         onSave={(draft) => onSetCustomCall(call, draft)}
         onCancel={() => showProfile(call)}
@@ -509,7 +490,7 @@ export function ProfileDialog({
           onClearError();
           onLoadStats();
           setPanel(SHOWING);
-          onOpenChange(true);
+          setOpen(true);
         }}
       >
         <PersonIcon />
@@ -552,7 +533,6 @@ export function ProfileDialog({
                   saveLabel="Save name"
                   initial={displayName}
                   autoComplete="nickname"
-                  error={error}
                   busy={busy}
                   onSave={onRename}
                   onCancel={() => showProfile("name")}
