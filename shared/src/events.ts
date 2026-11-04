@@ -121,6 +121,12 @@ export interface ClientToServerEvents {
    * `startGame` locks the lot for the life of the room.
    */
   updateSettings: (settings: RoomSettings, ack: Ack<null>) => void;
+  /**
+   * Host only, lobby only: free another player's seat. docs/adr/0028. `NOT_HOST`,
+   * `WRONG_PHASE`, or `PLAYER_NOT_FOUND` for the host's own seat, an id no seat here holds, or
+   * a connection in no room. It bans nobody: whoever held the seat may join the code again.
+   */
+  kickPlayer: (playerId: string, ack: Ack<null>) => void;
   startGame: (ack: Ack<null>) => void;
   takeTurn: (action: TurnAction, ack: Ack<null>) => void;
   callYaniv: (ack: Ack<null>) => void;
@@ -159,5 +165,11 @@ export interface ServerToClientEvents {
   gameStateUpdate: (view: PlayerGameView) => void;
   playerJoined: (playerName: string) => void;
   playerLeft: (playerName: string) => void;
+  /**
+   * The host has freed the seat this connection held (`kickPlayer`), and it is no longer in
+   * that room. Sent to that connection alone, and the last it hears of the room. Its account
+   * and the connection itself are untouched. docs/adr/0028.
+   */
+  kicked: () => void;
   errorMessage: (error: GameError) => void;
 }

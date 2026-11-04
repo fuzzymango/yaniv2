@@ -330,7 +330,7 @@ both views in every phase, with no redaction.
 Lobby → host calls `startGame` → `playing` → `roundEnd` after a Yaniv call → any player still in
 the match calls `startNextRound` (or the server deals it where only bots are left playing,
 docs/adr/0014), or `gameEnd` once one player is left — by a scoring or a departure (#147). 2–6
-players, held in `RoomManager`'s **in-memory `Map`**.
+players, held in `RoomManager`'s **in-memory `Map`**. In the lobby the host may kick any other.
 
 **`startGame` fills up to `settings.botCount` empty seats with bots**, reevaluated against the
 room's current human count at read time rather than a stored, possibly-stale number
@@ -390,8 +390,8 @@ The exit is `Rooms.leave`, not `apply`: `removePlayer` is a pure transition and 
 be destroyed" is no `GameState` it could return, so `leave` answers whether the room ended, and
 the leaver's name. Inside its `accepted` the adapter **clears `socket.data.seat`** (or
 `ALREADY_IN_ROOM` would mean "for the life of this connection") **and calls
-`socket.leave(roomCode)`**, keeping it out of the next broadcast, then acks and sends
-`playerLeft` — which reaches nobody where the room has ended.
+`socket.leave(roomCode)`**, out of the next broadcast, then acks and sends `playerLeft`, reaching
+nobody where the room has ended. A kick is that release behind the host's ack, `kicked` first.
 
 **`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a table
 that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS`. It does clear every
@@ -406,7 +406,7 @@ so no handler can apply a transition without the publication, the reconsideratio
 turns behind it. `Rooms` constructs the timer registry, the bot runner, the auto-dealer, the
 sweeper and the stats observer itself. What stays in the adapter is what only a transport knows:
 binding and clearing the seat, `ALREADY_IN_ROOM`, socket.io room membership, eviction and newer
-wins, the six account events, acks, `playerJoined`/`playerLeft`, and **calling
+wins, the six account events, acks, `playerJoined`/`playerLeft`/`kicked`, and **calling
 `attendanceChanged` after a seat binds and on a seated disconnect** — seating publishes nothing,
 because an arrival is not connected until its socket is in the room. The bots-only harness
 `play.ts` does not use `Rooms`, on purpose (above).

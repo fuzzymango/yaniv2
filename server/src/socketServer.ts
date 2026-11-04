@@ -650,7 +650,7 @@ export function createSocketServer(
 
     /**
      * Leave the room without dropping the connection — the one exit that is not a
-     * disconnect, and now the only way out of a room there is (docs/adr/0012).
+     * disconnect, and now the only way to leave a room there is (docs/adr/0012).
      *
      * It costs the rest of the table nothing, whoever is leaving: the host is no longer
      * a special case here, because from the lobby the role migrates to the next seat and
@@ -677,6 +677,36 @@ export function createSocketServer(
         io.to(seat.roomCode).emit("playerLeft", name);
       });
       if (!left.ok) ack({ ok: false, error: left.error });
+    });
+
+    /**
+     * The host frees another seat in the lobby (docs/adr/0028): `exitToMenu`'s shape, for a
+     * seat that is not the caller's. Who is asking comes from the connection, as ever; the
+     * id says only whose seat is meant, and goes on untrusted for `kickPlayer` to check.
+     *
+     * Everything this layer does is inside `accepted`, before the position is published. The
+     * ack first, so the host hears it ahead of the broadcast. Then whichever connection holds
+     * the seat is told and released, which keeps it out of both the announcement and the roster
+     * behind it — and a seat whose player is away has no connection, and nobody to tell. Its
+     * account binding is not this handler's to touch: an account survives leaving a room.
+     */
+    socket.on("kickPlayer", (playerId, ack) => {
+      const seat = socket.data.seat;
+      if (!seat) {
+        ack(notSeated());
+        return;
+      }
+
+      const kicked = rooms.kick(seat.roomCode, seat.playerId, playerId, (target) => {
+        ack({ ok: true, value: null });
+        for (const member of membersOf(seat.roomCode)) {
+          if (member.data.seat?.playerId !== target.playerId) continue;
+          member.emit("kicked");
+          release(member, seat.roomCode);
+        }
+        io.to(seat.roomCode).emit("playerLeft", target.name);
+      });
+      if (!kicked.ok) ack({ ok: false, error: kicked.error });
     });
 
     /**

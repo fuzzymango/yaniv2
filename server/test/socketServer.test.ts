@@ -2487,6 +2487,291 @@ describe("play again and exit to menu", () => {
 });
 
 /**
+ * The host freeing another seat in the lobby (docs/adr/0028). The rule is `game.test.ts`'s and
+ * what follows it `rooms.test.ts`'s; this is what only a transport can get wrong — who is told
+ * what, in which order, and that the connection comes away as good as a fresh one.
+ */
+describe("kickPlayer", () => {
+  let table: Harness;
+
+  before(async () => {
+    // No bots, so a `startGame` needs only the humans a test seated and nothing plays by itself.
+    table = await startServer(undefined, 0);
+  });
+  after(async () => {
+    await table.close();
+  });
+
+  interface Seat {
+    client: ClientSocket;
+    id: string;
+    resumeToken: string;
+    views: Watcher;
+    /** The name of every event this connection has been sent, oldest first. */
+    heard: string[];
+  }
+
+  function hear(client: ClientSocket): string[] {
+    const heard: string[] = [];
+    client.onAny((event: string) => heard.push(event));
+    return heard;
+  }
+
+  /**
+   * Everybody in `names` sitting in one fresh lobby, the first of them its host, each with a
+   * clean record. An arrival's broadcast travels on the other connections, so a seat's own ack
+   * says nothing of it, and each is waited for or it would land in the test's record.
+   */
+  async function lobby(...names: string[]): Promise<{ roomCode: string; seats: Seat[] }> {
+    const [hostName, ...guestNames] = names;
+    const hostClient = await table.connect();
+    const hostViews = watch(hostClient);
+    const hostHeard = hear(hostClient);
+    const created = expectOk(
+      await ask<{ roomCode: string; playerId: string; resumeToken: string }>(
+        hostClient,
+        "createRoom",
+        hostName!,
+      ),
+    );
+    const seats: Seat[] = [
+      {
+        client: hostClient,
+        id: created.playerId,
+        resumeToken: created.resumeToken,
+        views: hostViews,
+        heard: hostHeard,
+      },
+    ];
+
+    for (const name of guestNames) {
+      const client = await table.connect();
+      const views = watch(client);
+      const heard = hear(client);
+      const joined = expectOk(
+        await ask<{ playerId: string; resumeToken: string }>(
+          client,
+          "joinRoom",
+          created.roomCode,
+          name,
+        ),
+      );
+      seats.push({ client, id: joined.playerId, resumeToken: joined.resumeToken, views, heard });
+    }
+
+    for (const seat of seats) {
+      await seat.views.until(
+        (v) => v.opponents.length === names.length - 1,
+        "everyone to be seated",
+      );
+      seat.views.reset();
+      seat.heard.length = 0;
+    }
+    return { roomCode: created.roomCode, seats };
+  }
+
+  /**
+   * Everything the server has sent these seats so far has arrived. A socket delivers in order,
+   * so a round trip on the connection itself is what says so — and `loadStats` is answered
+   * whoever asks, seated or not, signed in or not, and moves nothing.
+   */
+  async function caughtUp(...seats: Seat[]): Promise<void> {
+    await Promise.all(seats.map((seat) => ask(seat.client, "loadStats")));
+  }
+
+  it("acks the host before anything is broadcast", async () => {
+    const { seats } = await lobby("Ada", "Grace");
+    const [host, guest] = seats;
+
+    // Recorded in the callback itself: awaiting `ask` would resolve a microtask later, which
+    // two frames arriving in one chunk can land the broadcast ahead of.
+    host!.client.emit("kickPlayer", guest!.id, (result: AckResult<null>) => {
+      host!.heard.push(result.ok ? "ack" : `refused ${result.error.code}`);
+    });
+    await host!.views.until((v) => v.opponents.length === 0, "the roster to shrink");
+
+    assert.deepEqual(host!.heard, ["ack", "playerLeft", "gameStateUpdate"]);
+  });
+
+  it("tells the target, and then nothing more about that room", async () => {
+    const { roomCode, seats } = await lobby("Ada", "Grace");
+    const [host, guest] = seats;
+
+    const told = nextEvent<void>(guest!.client, "kicked");
+    expectOk(await ask(host!.client, "kickPlayer", guest!.id));
+    await told;
+    await host!.views.until((v) => v.opponents.length === 0, "the roster to shrink");
+
+    // A position the room moves to afterwards, which is what a connection still in it would
+    // be sent — the kick's own broadcast having been built before it could be left out of it.
+    const latecomer = await table.connect();
+    expectOk(await ask(latecomer, "joinRoom", roomCode, "Alan"));
+    await host!.views.until((v) => v.opponents.length === 1, "the latecomer to sit down");
+    await caughtUp(guest!);
+
+    assert.deepEqual(guest!.heard, ["kicked"]);
+    assert.equal(guest!.client.connected, true, "the connection is released, not dropped");
+  });
+
+  it("tells everyone else who went, and then the roster without them", async () => {
+    const { seats } = await lobby("Ada", "Grace", "Alan");
+    const [host, target, bystander] = seats;
+
+    const announced = nextEvent<string>(bystander!.client, "playerLeft");
+    expectOk(await ask(host!.client, "kickPlayer", target!.id));
+
+    assert.equal(await announced, "Grace");
+    const roster = await bystander!.views.until(
+      (v) => v.opponents.length === 1,
+      "the roster to shrink",
+    );
+    assert.deepEqual(bystander!.heard, ["playerLeft", "gameStateUpdate"]);
+    assert.ok(!roster.seating.includes(target!.id), "the seat is spliced out");
+    assert.equal(roster.hostId, host!.id, "and the host is still the host");
+
+    await host!.views.until((v) => v.opponents.length === 1, "the host's roster to shrink");
+    assert.ok(!host!.heard.includes("kicked"), "`kicked` is for the target alone");
+  });
+
+  /**
+   * Both halves of no ban list: the seat's connection comes away free to sit down — no
+   * `ALREADY_IN_ROOM` following it — and the room keeps nothing to refuse it with.
+   */
+  it("lets a kicked guest join the same code again, as a new seat", async () => {
+    const { roomCode, seats } = await lobby("Ada", "Grace");
+    const [host, guest] = seats;
+    const told = nextEvent<void>(guest!.client, "kicked");
+    expectOk(await ask(host!.client, "kickPlayer", guest!.id));
+    await told;
+
+    const again = expectOk(
+      await ask<{ playerId: string; resumeToken: string }>(
+        guest!.client,
+        "joinRoom",
+        roomCode,
+        "Grace",
+      ),
+    );
+
+    assert.notEqual(again.playerId, guest!.id);
+    assert.notEqual(again.resumeToken, guest!.resumeToken);
+    await host!.views.until(
+      (v) => v.opponents.some((o) => o.id === again.playerId),
+      "the new seat to reach the host",
+    );
+  });
+
+  /**
+   * An account binds at the main menu and survives leaving a room, so losing a seat cannot be
+   * what signs anybody out — and a seat that no longer exists has nothing to hand back.
+   */
+  it("keeps a kicked account signed in, and seats it anew", async () => {
+    const { roomCode, seats } = await lobby("Ada");
+    const [host] = seats;
+    const client = await table.connect();
+    await signUp(client, "Grace", table);
+    const { playerId } = expectOk(
+      await ask<{ playerId: string }>(client, "joinRoom", roomCode, "ignored"),
+    );
+    await host!.views.until((v) => v.opponents.length === 1, "the account's arrival");
+
+    const told = nextEvent<void>(client, "kicked");
+    expectOk(await ask(host!.client, "kickPlayer", playerId));
+    await told;
+
+    expectOk(await ask<{ stats: Stats }>(client, "loadStats"));
+    const again = expectOk(
+      await ask<{ playerId: string }>(client, "joinRoom", roomCode, "ignored"),
+    );
+    assert.notEqual(again.playerId, playerId);
+  });
+
+  /**
+   * A lobby seat outlives its socket, and "away" is half of why a host would kick at all.
+   * There is nobody to tell, so the player finds out by coming back to a seat that is gone.
+   */
+  it("frees a seat whose connection has gone, and refuses its resume", async () => {
+    const { roomCode, seats } = await lobby("Ada", "Grace");
+    const [host, guest] = seats;
+    guest!.client.disconnect();
+    await host!.views.until(
+      (v) => v.opponents.some((o) => o.id === guest!.id && !o.connected),
+      "the seat to go quiet",
+    );
+
+    const announced = nextEvent<string>(host!.client, "playerLeft");
+    expectOk(await ask(host!.client, "kickPlayer", guest!.id));
+    assert.equal(await announced, "Grace");
+    await host!.views.until((v) => v.opponents.length === 0, "the roster to shrink");
+
+    const returning = await table.connect();
+    const result = await ask(returning, "resumeSeat", {
+      roomCode,
+      playerId: guest!.id,
+      resumeToken: guest!.resumeToken,
+    });
+    assert.equal(expectError(result).code, "INVALID_RESUME_TOKEN");
+  });
+
+  describe("refused", () => {
+    /** A refusal is its code and nothing else: no seat told anything, no position published. */
+    async function refusedAtNoCost(
+      seats: Seat[],
+      asker: Seat,
+      target: unknown,
+      code: GameError["code"],
+    ): Promise<void> {
+      for (const seat of seats) seat.heard.length = 0;
+
+      const result = await ask(asker.client, "kickPlayer", target);
+
+      assert.equal(expectError(result).code, code);
+      await caughtUp(...seats);
+      for (const seat of seats) assert.deepEqual(seat.heard, [], "a refusal publishes nothing");
+    }
+
+    it("NOT_HOST for anyone but the host", async () => {
+      const { seats } = await lobby("Ada", "Grace", "Alan");
+      await refusedAtNoCost(seats, seats[1]!, seats[2]!.id, "NOT_HOST");
+    });
+
+    it("WRONG_PHASE once the cards are out, for the one who was host too", async () => {
+      const { seats } = await lobby("Ada", "Grace");
+      const [host, guest] = seats;
+      expectOk(await ask(host!.client, "startGame"));
+      await host!.views.until((v) => v.phase === "playing", "the deal");
+      await guest!.views.until((v) => v.phase === "playing", "the deal");
+      await refusedAtNoCost(seats, host!, guest!.id, "WRONG_PHASE");
+    });
+
+    it("PLAYER_NOT_FOUND for the host's own seat", async () => {
+      const { seats } = await lobby("Ada", "Grace");
+      await refusedAtNoCost(seats, seats[0]!, seats[0]!.id, "PLAYER_NOT_FOUND");
+    });
+
+    it("PLAYER_NOT_FOUND for an id no seat here holds", async () => {
+      const { seats } = await lobby("Ada", "Grace");
+      await refusedAtNoCost(seats, seats[0]!, "nobody", "PLAYER_NOT_FOUND");
+    });
+
+    // The wire type is a claim by whoever sent it.
+    it("PLAYER_NOT_FOUND for a payload that is not a string", async () => {
+      const { seats } = await lobby("Ada", "Grace");
+      await refusedAtNoCost(seats, seats[0]!, 42, "PLAYER_NOT_FOUND");
+    });
+
+    it("PLAYER_NOT_FOUND for a connection that is not in a room", async () => {
+      const { seats } = await lobby("Ada", "Grace");
+      const stranger = await table.connect();
+
+      const result = await ask(stranger, "kickPlayer", seats[1]!.id);
+
+      assert.equal(expectError(result).code, "PLAYER_NOT_FOUND");
+    });
+  });
+});
+
+/**
  * Slapping down, and the race for the window it opens.
  *
  * Two humans seated next to each other is the arrangement this suite races in, because it
