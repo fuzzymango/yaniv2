@@ -105,6 +105,7 @@ function Screen({ session, snapshot }: { session: Session; snapshot: SessionSnap
         busy={busy}
         onStart={session.startGame}
         onUpdateSettings={session.updateSettings}
+        onKick={session.kickPlayer}
         onExit={session.exitToMenu}
       />
     );

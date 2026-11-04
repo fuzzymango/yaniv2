@@ -6,15 +6,15 @@
  * URL to reach it by; a player is looking at the lobby because the server says the room is
  * in it. See docs/adr/0004.
  *
- * Nothing here decides anything. The host marker and the start control are display: who
- * may actually start is the server's call, and it answers anyone else with `NOT_HOST`.
- * Showing the control to the host alone spares a guest hunting for a button that was never
- * theirs — it is not what enforces the rule.
+ * Nothing here decides anything. The host marker, the start control and the ✕ on a row are
+ * display: who may actually start or remove is the server's call, and it answers anyone else
+ * with `NOT_HOST`. Showing the controls to the host alone spares a guest hunting for a button
+ * that was never theirs — it is not what enforces the rule.
  *
  * The one screen in this client with a host on it at all. The role is the lobby's — the
- * settings and the start — and it retires at the first deal, `view.hostId` going null with
- * it (docs/adr/0012). A host who leaves hands it to the next seat, which arrives here as an
- * ordinary roster update with the marker on somebody else.
+ * settings, the start and freeing a seat (docs/adr/0028) — and it retires at the first deal,
+ * `view.hostId` going null with it (docs/adr/0012). A host who leaves hands it to the next
+ * seat, which arrives here as an ordinary roster update with the marker on somebody else.
  */
 
 import type { PlayerGameView, RoomSettings } from "@yaniv/shared";
@@ -31,6 +31,7 @@ interface LobbyProps {
   busy: boolean;
   onStart: () => void;
   onUpdateSettings: (settings: RoomSettings) => void;
+  onKick: (playerId: string) => void;
   onExit: () => void;
 }
 
@@ -39,6 +40,7 @@ export function Lobby({
   busy,
   onStart,
   onUpdateSettings,
+  onKick,
   onExit,
 }: LobbyProps) {
   const isHost = view.hostId === view.you.id;
@@ -93,6 +95,22 @@ export function Lobby({
                   <span className={`seat__status seat__status--${status}`}>
                     {STATUS_LABEL[status]}
                   </span>
+                )}
+                {/*
+                  One tap and no confirm (docs/adr/0028): a seat removed by mistake costs that
+                  player the code again, and an "away" row gets one too, being the seat most
+                  worth freeing. Never the host's own row — leaving is the way out below.
+                */}
+                {isHost && seat.id !== view.you.id && (
+                  <button
+                    className="seat__remove"
+                    type="button"
+                    aria-label={`Remove ${seat.name}`}
+                    onClick={() => onKick(seat.id)}
+                    disabled={busy}
+                  >
+                    ✕
+                  </button>
                 )}
               </li>
             );
