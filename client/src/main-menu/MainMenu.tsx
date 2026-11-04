@@ -7,7 +7,7 @@
  *
  * Neither button decides anything: an unusable name is refused by the session core and
  * a bad code by the server, and both come back the same way, as an error — which is held
- * up over this screen as over every other (`ErrorToasts`, spec #245), so this file draws
+ * up over this screen as over every other (`Toasts`, spec #245), so this file draws
  * none of its own, a panel open over it included.
  *
  * It is also where a player lands when a room goes away underneath them, which is what

@@ -20,7 +20,7 @@
  * Whether the panel is open is this component's, as `SettingsDialog`'s is: nothing on the
  * wire knows or cares that somebody is looking at it, and the main menu draws this only while
  * signed in, so a sign-out takes the open panel with it. **A refusal is a toast over the
- * panel** (`ErrorToasts`, spec #245), never a line in it, and opening, closing or switching
+ * panel** (`Toasts`, spec #245), never a line in it, and opening, closing or switching
  * fields puts none down: a toast goes on its own ✕ (#250).
  *
  * **Signing out is asked before it is done, and asked here alone** (#230): an icon in the

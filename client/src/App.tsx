@@ -14,12 +14,12 @@
  * drawn over it (issue #130). Everywhere else a phase picks exactly one component.
  *
  * And whatever the screen, what the session was refused is held up over it, part of none of
- * them (`ErrorToasts`, spec #245): drawn once, here, beside whichever screen is up, so no
+ * them (`Toasts`, spec #245): drawn once, here, beside whichever screen is up, so no
  * screen draws an error of its own and nothing on any of them moves when one appears.
  */
 
 import { Disconnected } from "./connection/Disconnected.tsx";
-import { ErrorToasts } from "./shared/ErrorToasts.tsx";
+import { Toasts } from "./shared/Toasts.tsx";
 import { Resuming } from "./connection/Resuming.tsx";
 import { GameEnd } from "./game-end/GameEnd.tsx";
 import { Lobby } from "./lobby/Lobby.tsx";
@@ -35,7 +35,7 @@ export function App({ session }: { session: Session }) {
   return (
     <>
       <Screen session={session} snapshot={snapshot} />
-      <ErrorToasts toasts={snapshot.errors} onDismiss={session.dismissError} />
+      <Toasts toasts={snapshot.toasts} onDismiss={session.dismissToast} />
     </>
   );
 }

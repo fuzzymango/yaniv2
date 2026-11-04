@@ -31,11 +31,11 @@ identity. Ten fields, and each answers a different question:
 - **`stats`** — the signed-in account's six counters as last read, or `null`: not read yet, being
   read, or refused. Read only when asked for (`loadStats`), and **one account's and never the
   next's** — see "Accounts" below.
-- **`errors`** — every **toast** still up, oldest first: a `Toast` is a `GameError` — something
+- **`toasts`** — every **toast** still up, oldest first: a `Toast` is a `GameError` — something
   the player asked for and was refused, or one the server pushed as `errorMessage` — and an `id`
   from the session's own counter, fixed for the toast's life. Appended, never replaced, so the
   same refusal twice is two toasts, there is no cap, and one already on screen never moves when
-  another arrives below it. **Only `dismissError(id)` takes one down** — see "A toast leaves on its ✕" below.
+  another arrives below it. **Only `dismissToast(id)` takes one down** — see "A toast leaves on its ✕" below.
   Never one the table already explains — see "Refusals the board already explains" below.
 - **`notice`** — news that is *not* a refusal: a seat that could not be claimed back, or a session
   that has lapsed. No action to blame and nothing to retry, and it arrives while they sit still.
@@ -183,8 +183,8 @@ rename all answer them.
 
 **A toast leaves on its ✕ and on nothing else** (docs/adr/0027). Trying again, entering or
 leaving a room, a seat claimed back, `cancelSignIn`, and the profile and its editors opening or
-closing all leave `errors` as it stands — whether a refusal has been read is the player's to say,
-and a toast that vanished under the tap that retried would be a jump of its own. `dismissError(id)`
+closing all leave `toasts` as it stands — whether a refusal has been read is the player's to say,
+and a toast that vanished under the tap that retried would be a jump of its own. `dismissToast(id)`
 removes that one toast and nothing else: nothing is sent, `account`, `view` and `busy` are left
 as they were, and an id not up publishes nothing at all. `notice` is not a toast and keeps its
 own rule: put down by the next attempt to enter a room or act on the account.

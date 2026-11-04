@@ -8,7 +8,7 @@
  * player is looking at moves when a toast comes or goes.
  *
  * The session's list, drawn as it stands: each toast an id and the error it carries, ✕
- * handing back the id, and ✕ the only way one goes (`dismissError`).
+ * handing back the id, and ✕ the only way one goes (`dismissToast`).
  *
  * The layer is inert to every tap and each toast is not, so the felt around a toast still
  * takes a tap meant for it.
@@ -16,13 +16,13 @@
 
 import type { Toast } from "../session.ts";
 
-interface ErrorToastsProps {
+interface ToastsProps {
   /** Oldest first, so a toast already on screen never moves when another arrives below it. */
   toasts: readonly Toast[];
   onDismiss: (id: number) => void;
 }
 
-export function ErrorToasts({ toasts, onDismiss }: ErrorToastsProps) {
+export function Toasts({ toasts, onDismiss }: ToastsProps) {
   return (
     <div className="toasts">
       {toasts.map(({ id, error }) => (

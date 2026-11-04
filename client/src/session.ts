@@ -205,14 +205,14 @@ export interface SessionSnapshot {
    * #245). A refused action costs them nothing, so these are news rather than a state to
    * recover from — and news stays up until it has been read, which only the player can say:
    * trying again, entering or leaving a room and backing out of a sign-in leave every one of
-   * them where it was, and `dismissError` is the only way one goes. Appended, never
+   * them where it was, and `dismissToast` is the only way one goes. Appended, never
    * replaced, so a toast already on the screen never moves when another arrives below it;
    * the same refusal twice is two toasts, and there is no cap.
    */
-  readonly errors: readonly Toast[];
+  readonly toasts: readonly Toast[];
   /**
    * News that is not a refusal of anything the player did — a seat that could not be
-   * claimed back, or a sign-in that has lapsed. Separate from `errors` because there is no
+   * claimed back, or a sign-in that has lapsed. Separate from `toasts` because there is no
    * action to blame and nothing to retry: it arrives while they are sitting still.
    */
   readonly notice: string | null;
@@ -333,9 +333,9 @@ export interface Session {
   loadStats: () => void;
   /**
    * The ✕ on one toast: that one taken down, with nothing sent and nothing else touched. The
-   * only way an error leaves the screen. An id not up — already dismissed — changes nothing.
+   * only way a toast leaves the screen. An id not up — already dismissed — changes nothing.
    */
-  dismissError: (id: number) => void;
+  dismissToast: (id: number) => void;
   /**
    * Sign out, from the profile over the main menu: both credentials forgotten, Google told
    * not to sign straight back in, and a guest from here on. The profile asks first (#230);
@@ -535,7 +535,7 @@ export function createSession(
     view: null,
     account: GUEST,
     stats: null,
-    errors: [],
+    toasts: [],
     notice: null,
     busy: false,
     connected: true,
@@ -551,7 +551,7 @@ export function createSession(
 
   /** The toasts with this refusal added below them: what a publication reporting it carries. */
   const reported = (error: GameError): readonly Toast[] => [
-    ...snapshot.errors,
+    ...snapshot.toasts,
     { id: ++toastsMade, error },
   ];
 
@@ -930,7 +930,7 @@ export function createSession(
    * would let a second copy of that action go out behind the first.
    */
   socket.on("errorMessage", (error) => {
-    if (snapshot.view !== null) publish({ errors: reported(error) });
+    if (snapshot.view !== null) publish({ toasts: reported(error) });
   });
 
   /*
@@ -958,7 +958,7 @@ export function createSession(
         ? snapshot.account.account.displayName
         : normalizeDisplayName(playerName);
     if (name === null) {
-      publish({ errors: reported(UNUSABLE_NAME) });
+      publish({ toasts: reported(UNUSABLE_NAME) });
       return null;
     }
 
@@ -976,7 +976,7 @@ export function createSession(
    * lobby before it acks.
    */
   const settle = (error: GameError | null): void =>
-    publish(error === null ? { busy: false } : { errors: reported(error), busy: false });
+    publish(error === null ? { busy: false } : { toasts: reported(error), busy: false });
 
   /**
    * How a refusal lands, wherever it comes from.
@@ -1098,7 +1098,7 @@ export function createSession(
    */
   const accountName = (displayName: string): string | null => {
     const name = normalizeDisplayName(displayName);
-    if (name === null) publish({ errors: reported(UNUSABLE_ACCOUNT_NAME) });
+    if (name === null) publish({ toasts: reported(UNUSABLE_ACCOUNT_NAME) });
     return name;
   };
 
@@ -1165,9 +1165,9 @@ export function createSession(
       );
     },
 
-    dismissError: (id) => {
-      const errors = snapshot.errors.filter((toast) => toast.id !== id);
-      if (errors.length !== snapshot.errors.length) publish({ errors });
+    dismissToast: (id) => {
+      const toasts = snapshot.toasts.filter((toast) => toast.id !== id);
+      if (toasts.length !== snapshot.toasts.length) publish({ toasts });
     },
 
     cancelSignIn: () => {
@@ -1191,7 +1191,7 @@ export function createSession(
     setCustomCall: (call, text) => {
       if (snapshot.busy || snapshot.account.status !== "signedIn") return;
       if (!normalizeCustomCall(text).accepted) {
-        publish({ errors: reported(UNUSABLE_CALL) });
+        publish({ toasts: reported(UNUSABLE_CALL) });
         return;
       }
       accountEvent(() => socket.emit("setCustomCall", call, text, accountChanged));
