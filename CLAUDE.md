@@ -360,15 +360,16 @@ disconnects whatever socket still held it.
 ### The host owns the lobby, and leaving costs nobody else anything
 
 **The host is the lobby's and nothing else** (docs/adr/0012): the one seat that may edit the
-settings and deal the first round, `NOT_HOST` to anyone else, and the role **migrates to the
-next seat** when a host leaves the lobby — `hostId` is the one mutable field of a match, and
+settings, deal the first round and free another seat (`kickPlayer`, `Rooms.kick`, `leave`'s
+sibling; docs/adr/0028 — it bans nobody and never ends a room), `NOT_HOST` to anyone else, and
+the role **migrates to the next seat** when a host leaves the lobby — `hostId` is the one mutable field of a match, and
 `removePlayer` in the lobby the one writer. From `playing` onward nobody is host and `hostId`
 is sent null. Two eligibility rules replace it: **`startNextRound` is any player still in the
 match** (`NOT_IN_MATCH` otherwise), **`playAgain` is anyone still in the room**, spectators
 included, since the one player left at `gameEnd` may be a bot and a bot asks for nothing.
 
 **`closeRoom` is gone**, and with it `roomClosed`: no player can end anybody else's game.
-`exitToMenu` is the only way out, allowed **from every phase** (#147), and **it means the same
+`exitToMenu` is the only way to leave, allowed **from every phase** (#147), and **it means the same
 thing whoever invokes it**: their own seat and nobody else's, told by `playerLeft` and then the
 roster with that seat spliced out (lobby) or marked (once a match exists). A room ends when its
 last seat leaves (`abandoned`, in `rooms.ts`, whose `leave` then cancels its timers and drops

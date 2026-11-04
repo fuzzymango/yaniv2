@@ -27,7 +27,9 @@ deal.**
 - **Another match is dealt by anyone still in the room** (`playAgain`), spectators
   included. A departed seat is refused with `PLAYER_NOT_FOUND`.
 - **`closeRoom` is gone** — the event, the handler and both clients' controls. No player
-  can end anybody else's game. A room ends when its last seat leaves.
+  can end anybody else's game. A room ends when its last seat leaves. *Amended by ADR-0028:* nor
+  take anybody's seat once the cards are out — in the lobby the host may free another seat
+  (`kickPlayer`), which never ends the room.
 
 This supersedes the exit asymmetry documented at length in `CONTEXT.md` and `CLAUDE.md`:
 "who invokes `exitToMenu` decides what it costs everyone else" is no longer true, and there

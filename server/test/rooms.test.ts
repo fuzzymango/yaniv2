@@ -15,7 +15,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { PlayerGameView, RoomSettings } from "@yaniv/shared";
+import type { GameErrorCode, PlayerGameView, RoomSettings } from "@yaniv/shared";
 import { MAX_PLAYERS, MAX_SCORE_LIMITS } from "@yaniv/shared";
 import { decideTurn } from "../src/bot.ts";
 import { AUTO_DEAL_MS, BOT_THINK_MS, ROOM_SWEEP_MS } from "../src/config.ts";
@@ -529,6 +529,155 @@ describe("leave", () => {
       ended: false,
     });
     assert.ok(h.rooms.viewFor(ada.roomCode, ada.playerId), "the room was ended");
+  });
+});
+
+/**
+ * The host freeing another seat in the lobby (docs/adr/0028). The kicked connection is
+ * released inside `accepted`, where the adapter does it, so `kicked` here takes the seat off
+ * the port there: a lobby splices the seat out, leaving no view to build for it, so being
+ * published to only after `accepted` is what keeps the kicked seat out of the delivery.
+ */
+describe("kick", () => {
+  function kicked(h: Harness, seat: Seated): void {
+    h.port.setConnected(
+      seat.roomCode,
+      [...h.port.connected(seat.roomCode)].filter((id) => id !== seat.playerId),
+    );
+  }
+
+  it("calls accepted with the seat, then publishes once to whoever is left", () => {
+    const h = harness();
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    const before = h.port.deliveries(ada.roomCode).length;
+
+    let atAccept: { delivered: number; playerId: string; name: string } | null = null;
+    const answer = unwrap(
+      h.rooms.kick(ada.roomCode, ada.playerId, grace.playerId, ({ playerId, name }) => {
+        atAccept = { delivered: h.port.deliveries(ada.roomCode).length, playerId, name };
+        kicked(h, grace);
+      }),
+    );
+
+    assert.deepEqual(answer, { playerId: grace.playerId, name: "Grace" });
+    assert.deepEqual(atAccept, { delivered: before, playerId: grace.playerId, name: "Grace" });
+
+    const published = h.port.deliveries(ada.roomCode).slice(before);
+    assert.equal(published.length, 1, "the kick was published once");
+    assert.deepEqual([...published[0]!.keys()], [ada.playerId], "to the seat still connected");
+    assert.deepEqual(published[0]!.get(ada.playerId)!.opponents, [], "with the seat gone from it");
+    assert.equal(published[0]!.get(ada.playerId)!.hostId, ada.playerId, "and the host unmoved");
+  });
+
+  it("delivers the kicked seat nothing, and keeps delivering it nothing", () => {
+    const h = harness();
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    const seen = h.port.received(ada.roomCode, grace.playerId).length;
+
+    unwrap(h.rooms.kick(ada.roomCode, ada.playerId, grace.playerId, () => kicked(h, grace)));
+    join(h, ada.roomCode, "Alan");
+
+    assert.equal(h.port.received(ada.roomCode, grace.playerId).length, seen);
+  });
+
+  /** A lobby seat survives its socket dropping, and has no connection for `accepted` to release. */
+  it("takes a seat whose player is only away", () => {
+    const h = harness();
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+    drop(h, grace);
+
+    const answer = unwrap(h.rooms.kick(ada.roomCode, ada.playerId, grace.playerId, () => {}));
+
+    assert.deepEqual(answer, { playerId: grace.playerId, name: "Grace" });
+    assert.deepEqual(viewOf(h, ada).opponents, []);
+  });
+
+  /** The host is still seated, so unlike a departure a kick has no way to end the room. */
+  it("leaves the room open to the next arrival", () => {
+    const h = harness();
+    const ada = host(h);
+    const grace = join(h, ada.roomCode, "Grace");
+
+    unwrap(h.rooms.kick(ada.roomCode, ada.playerId, grace.playerId, () => kicked(h, grace)));
+
+    unwrap(h.rooms.joinRoom(ada.roomCode, occupant("Alan")));
+    assert.equal(viewOf(h, ada).opponents.length, 1);
+  });
+
+  describe("refused", () => {
+    function assertCostsNothing(
+      h: Harness,
+      seat: Seated,
+      refuse: (accepted: () => void) => Result<unknown>,
+      code: GameErrorCode,
+    ): void {
+      const delivered = h.port.deliveries(seat.roomCode).length;
+      const waiting = h.clock.delays();
+      const view = viewOf(h, seat);
+
+      let accepted = false;
+      expectErr(
+        refuse(() => {
+          accepted = true;
+        }),
+        code,
+      );
+
+      assert.equal(accepted, false, "accepted was called for a refusal");
+      assert.equal(h.port.deliveries(seat.roomCode).length, delivered, "a refusal was published");
+      assert.deepEqual(h.clock.delays(), waiting, "a refusal scheduled something");
+      assert.deepEqual(viewOf(h, seat), view, "the position moved under a refusal");
+    }
+
+    it("costs a guest asking nothing", () => {
+      const h = harness();
+      const ada = host(h);
+      const grace = join(h, ada.roomCode, "Grace");
+      const alan = join(h, ada.roomCode, "Alan");
+
+      assertCostsNothing(
+        h,
+        ada,
+        (accepted) => h.rooms.kick(ada.roomCode, grace.playerId, alan.playerId, accepted),
+        "NOT_HOST",
+      );
+    });
+
+    it("costs a table already dealt nothing", () => {
+      const h = harness();
+      const ada = host(h);
+      const grace = join(h, ada.roomCode, "Grace");
+      start(h, ada);
+
+      assertCostsNothing(
+        h,
+        ada,
+        (accepted) => h.rooms.kick(ada.roomCode, ada.playerId, grace.playerId, accepted),
+        "WRONG_PHASE",
+      );
+    });
+
+    it("costs a target that is not a seat nothing", () => {
+      const h = harness();
+      const ada = host(h);
+      join(h, ada.roomCode, "Grace");
+
+      assertCostsNothing(
+        h,
+        ada,
+        (accepted) => h.rooms.kick(ada.roomCode, ada.playerId, 42, accepted),
+        "PLAYER_NOT_FOUND",
+      );
+    });
+
+    it("answers a room that does not exist", () => {
+      const h = harness();
+
+      expectErr(h.rooms.kick("NOPE", "p1", "p2", () => {}), "ROOM_NOT_FOUND");
+    });
   });
 });
 

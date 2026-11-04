@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { RoomSettings } from "@yaniv/shared";
+import type { GameErrorCode, RoomSettings } from "@yaniv/shared";
 import {
   callYaniv,
   playAgain,
+  kickPlayer,
   removePlayer,
   slapDown,
   startGame,
@@ -13,6 +14,7 @@ import {
 } from "../src/game.ts";
 import { mulberry32 } from "../src/rng.ts";
 import { RoomManager } from "../src/roomManager.ts";
+import type { GameState } from "../src/state.ts";
 import type { StateOptions } from "./helpers.ts";
 import {
   RESUME_TOKEN_MARK,
@@ -2832,4 +2834,69 @@ describe("removePlayer", () => {
 
     assert.equal(JSON.stringify(lobby), before);
   });
+});
+
+describe("kickPlayer", () => {
+  const lobby = () =>
+    makeState({
+      phase: "lobby",
+      players: [{ id: "p1" }, { id: "p2" }, { id: "p3" }],
+      roundNumber: 0,
+    });
+
+  it("splices the target out of the roster, the host staying host", () => {
+    const after = unwrap(kickPlayer(lobby(), "p1", "p2"));
+
+    assert.deepEqual(
+      after.players.map((p) => p.id),
+      ["p1", "p3"],
+    );
+    assert.equal(after.hostId, "p1");
+  });
+
+  /** Each refusal is asserted to cost nothing: a refused kick must leave the room as it was. */
+  function assertRefused(state: GameState, requesterId: string, target: unknown, code: GameErrorCode) {
+    const before = JSON.stringify(state);
+
+    expectErr(kickPlayer(state, requesterId, target), code);
+
+    assert.equal(JSON.stringify(state), before, "a refusal moved the state");
+  }
+
+  for (const phase of ["playing", "roundEnd", "gameEnd"] as const) {
+    it(`refuses the host once the match has been dealt: ${phase}`, () => {
+      assertRefused(makeState({ phase }), "p1", "p2", "WRONG_PHASE");
+    });
+  }
+
+  it("refuses anyone but the host", () => {
+    assertRefused(lobby(), "p2", "p3", "NOT_HOST");
+  });
+
+  /** A guest asking is told they are not host, not whether the seat they named exists. */
+  it("refuses a guest as a guest, whatever they name", () => {
+    assertRefused(lobby(), "p2", "ghost", "NOT_HOST");
+  });
+
+  it("refuses the host's own seat: leaving is exitToMenu", () => {
+    assertRefused(lobby(), "p1", "p1", "PLAYER_NOT_FOUND");
+  });
+
+  it("refuses a seat that is not in the room", () => {
+    assertRefused(lobby(), "p1", "ghost", "PLAYER_NOT_FOUND");
+  });
+
+  /** A wire type is a claim by whoever sent it, so the payload stays `unknown` until checked. */
+  const notAnId: Array<[string, unknown]> = [
+    ["a number", 42],
+    ["nothing at all", null],
+    ["a missing payload", undefined],
+    ["an array holding a real id", ["p2"]],
+  ];
+
+  for (const [what, target] of notAnId) {
+    it(`refuses ${what} for a target`, () => {
+      assertRefused(lobby(), "p1", target, "PLAYER_NOT_FOUND");
+    });
+  }
 });

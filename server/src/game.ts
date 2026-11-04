@@ -313,6 +313,32 @@ export function removePlayer(state: GameState, playerId: string): ActionResult {
 }
 
 /**
+ * The host frees another seat in the lobby (issue #252): one more power of the role, so
+ * lobby only as the rest of them are, and never the host's own seat — leaving is
+ * `exitToMenu`. docs/adr/0028.
+ *
+ * The target arrives as `unknown`, a claim by whoever sent it, until it names a seat here.
+ * Nothing is kept of the seat afterwards, so there is no ban: whoever was kicked may join
+ * again and sit in a new one.
+ */
+export function kickPlayer(
+  state: GameState,
+  requesterId: string,
+  targetId: unknown,
+): ActionResult {
+  if (state.phase !== "lobby") {
+    return err("WRONG_PHASE", "Players can only be removed before the match starts");
+  }
+  if (requesterId !== state.hostId) {
+    return err("NOT_HOST", "Only the host can remove a player");
+  }
+  if (typeof targetId !== "string" || targetId === requesterId || !getPlayer(state, targetId)) {
+    return err("PLAYER_NOT_FOUND", "There is no other player by that id");
+  }
+  return removePlayer(state, targetId);
+}
+
+/**
  * Take a seat out of the round being played, leaving the round playable by whoever is
  * left (issue #147).
  *

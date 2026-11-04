@@ -31,7 +31,7 @@ import { createAutoDealer } from "./autoDeal.ts";
 import type { BotTurnRunnerOptions } from "./botTurns.ts";
 import { createBotTurnRunner } from "./botTurns.ts";
 import type { Clock } from "./clock.ts";
-import { removePlayer } from "./game.ts";
+import { kickPlayer, removePlayer } from "./game.ts";
 import type { ProfileStore } from "./profiles.ts";
 import { ok, type Result } from "./result.ts";
 import type { Claimant, Occupant, RoomManager } from "./roomManager.ts";
@@ -87,6 +87,16 @@ export interface Departure {
   ended: boolean;
 }
 
+/**
+ * A seat the host freed, as the transport needs it: which seat, to find any connection still
+ * bound to it, and whose, to tell the room — read before the removal, as a departure's name is.
+ * Nothing says whether the room ended, the host still being seated in it.
+ */
+export interface KickedSeat {
+  playerId: string;
+  name: string;
+}
+
 export interface Rooms {
   /**
    * Open a room seated with its host. Publishes nothing: the host is not connected to it
@@ -134,6 +144,18 @@ export interface Rooms {
     playerId: string,
     accepted: (departure: Departure) => void,
   ) => Result<Departure>;
+  /**
+   * The host frees another seat in the lobby (`kickPlayer`, docs/adr/0028), and the same tail
+   * `apply` runs. `accepted` is called first, handed the seat this answers with, so the
+   * caller can release its connection and tell whoever stayed before the roster that
+   * explains it goes out. A refusal calls nothing, publishes nothing and schedules nothing.
+   */
+  kick: (
+    roomCode: string,
+    requesterId: string,
+    targetId: unknown,
+    accepted: (kicked: KickedSeat) => void,
+  ) => Result<KickedSeat>;
   /**
    * Who is connected moved — a seat was bound or a connection went — so the position is
    * republished and the auto-deal and sweep reconsidered. No bot turns: attendance changes
@@ -334,6 +356,18 @@ export function createRooms(
       if (departure.ended) destroy(roomCode);
       else afterNewPosition(roomCode);
       return ok(departure);
+    },
+
+    kick: (roomCode, requesterId, targetId, accepted) => {
+      const target = manager.getState(roomCode)?.players.find((p) => p.id === targetId);
+
+      const result = manager.apply(roomCode, (state) => kickPlayer(state, requesterId, targetId));
+      if (!result.ok) return result;
+
+      const kicked: KickedSeat = { playerId: target?.id ?? "", name: target?.name ?? "" };
+      accepted(kicked);
+      afterNewPosition(roomCode);
+      return ok(kicked);
     },
 
     attendanceChanged: publish,

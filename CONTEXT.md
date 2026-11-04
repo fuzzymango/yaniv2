@@ -32,7 +32,7 @@ Two distinct concepts, easy to conflate because both sit "before the game":
   server-side, has a code, and players are staged in it up to the player cap.
 
 **Exit to main menu** is the action that leaves a room and returns to the main menu, and
-it is the only way out of a room there is. It is available **in every phase**, to players
+it is the only way a player can leave one themselves. It is available **in every phase**, to players
 and spectators alike: nobody is trapped at a table that has gone quiet, and a seat given up
 mid-round is taken out of the round on the spot rather than the round being abandoned
 around it (`docs/rules.md` §7, "Out of the match" below).
@@ -47,7 +47,9 @@ scoreboard for whoever is still looking at it.
 **A room ends when its last seat leaves**, and there is no control that ends one for
 anybody else: the **close room** action that used to be the host's exception was removed
 with [ADR-0012](docs/adr/0012-the-host-retires-at-the-first-deal.md), along with the
-asymmetry that made a host's exit cost everyone else their match.
+asymmetry that made a host's exit cost everyone else their match. Leaving costs nobody else
+anything; the one thing another player can do to a seat is the host's **kick** (see "Host"),
+which takes that seat in the lobby and never the room.
 
 A room also ends **unattended** — with no seat held by a human who is connected — for a
 minute, which is the other way out and the one nobody takes deliberately: a tab closed, a
@@ -59,7 +61,7 @@ cancels the sweep. Out of the match is not out of the room — a spectator is at
 ## Host
 
 The seat that owns the **lobby**, and only the lobby: the one player who may edit the
-room's settings and deal the first round. Everyone else asking is refused `NOT_HOST`.
+room's settings, deal the first round and **kick**. Everyone else asking is refused `NOT_HOST`.
 
 **The role retires at that deal.** From `playing` onward nobody is host: the next round is
 dealt by any player still in the match (`NOT_IN_MATCH` to a seat it has gone on without),
@@ -71,6 +73,15 @@ A host who **leaves the lobby** hands the role to the next remaining seat, so a 
 of people is not stranded by whoever clicked create wandering off. This is the one mutable
 fact about a match, and it is mutable only in the lobby.
 [ADR-0012](docs/adr/0012-the-host-retires-at-the-first-deal.md).
+
+### Kick
+
+The host freeing another player's seat in the lobby. The seat is spliced out just as if its
+player had left, and whoever was holding it is sent back to the main menu and told why; a
+seat whose player is away is kicked the same way, and they find the game gone when they come
+back. It bans nobody: the room keeps no record of the seat, so a kicked player may join the
+same code again and sit in a new one. From the first deal there is no host, so nobody can kick.
+[ADR-0028](docs/adr/0028-the-host-may-remove-a-lobby-seat.md).
 
 ## Selection
 
