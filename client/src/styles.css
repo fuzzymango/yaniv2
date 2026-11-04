@@ -13,6 +13,7 @@
   --ink-dim: #cbd5e1;
   --accent: #fde047;
   --danger: #fca5a5;
+  --news: #86efac;
   --surface: rgb(0 0 0 / 25%);
 
   /*
@@ -222,7 +223,7 @@ body {
   text-align: center;
 }
 
-/* --- what the session was refused --- */
+/* --- what the session has to tell the player --- */
 
 /*
  * Fixed to the top of the viewport and part of no layout, so nothing on the screen under it
@@ -261,6 +262,11 @@ body {
   color: var(--danger);
   pointer-events: auto;
   animation: toast-in 0.25s ease-out;
+}
+
+/* News rather than a refusal: the same toast, and only the colour says it is not one. */
+.toast--news {
+  color: var(--news);
 }
 
 .toast__message {

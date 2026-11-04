@@ -623,7 +623,8 @@ Snapshots are **replaced wholesale, never mutated**, `useSyncExternalStore` comp
 identity. Ten fields, each answering a different question: `view` (null *is* the main menu),
 `account` (tagged: `guest` / `nameNeeded` / `signedIn`), `stats` (read by `loadStats`, dropped
 whenever the signed-in account changes, so one account never reads another's), `toasts`
-(stacked in arrival order, each leaving only by `dismissToast`, docs/adr/0027),
+(stacked in arrival order, a refusal in red or the news of a kick in green, each leaving only by
+`dismissToast`, docs/adr/0027),
 `notice`, `connected`, `resuming`, `selection` (surviving the views that arrive underneath
 it), and the two
 **one-shots**, `flight` and `announcement`. **No credential is on it**: the Google ID token a

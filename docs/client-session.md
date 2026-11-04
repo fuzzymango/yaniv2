@@ -31,14 +31,17 @@ identity. Ten fields, and each answers a different question:
 - **`stats`** — the signed-in account's six counters as last read, or `null`: not read yet, being
   read, or refused. Read only when asked for (`loadStats`), and **one account's and never the
   next's** — see "Accounts" below.
-- **`toasts`** — every **toast** still up, oldest first: a `Toast` is a `GameError` — something
-  the player asked for and was refused, or one the server pushed as `errorMessage` — and an `id`
-  from the session's own counter, fixed for the toast's life. Appended, never replaced, so the
+- **`toasts`** — every **toast** still up, oldest first. A `Toast` is tagged by `tone`: `error`
+  carries a `GameError` — something the player asked for and was refused, or one the server
+  pushed as `errorMessage` — and is drawn red; `news` carries a `message`, today only that of being
+  kicked, and is drawn green. Each has an `id` from the session's own counter, fixed for the
+  toast's life. Appended, never replaced, so the
   same refusal twice is two toasts, there is no cap, and one already on screen never moves when
   another arrives below it. **Only `dismissToast(id)` takes one down** — see "A toast leaves on its ✕" below.
   Never one the table already explains — see "Refusals the board already explains" below.
 - **`notice`** — news that is *not* a refusal: a seat that could not be claimed back, or a session
   that has lapsed. No action to blame and nothing to retry, and it arrives while they sit still.
+  Being kicked is the one piece of such news that is a toast instead.
 - **`connected`** — whether there is a socket to play over (this session's own, not the wire's
   per-seat `connected`). See "A session that loses its socket" below.
 - **`resuming`** — an account or a seat is being claimed back and the answer has not landed.
@@ -65,8 +68,8 @@ identity. Ten fields, and each answers a different question:
 on the **ack**: entry has been broadcast before it is acked, and a departing connection is
 published to no longer. The six account events that act settle on the ack too (`loadStats`, a read, locks nothing), producing no position at
 all, so there is no newer broadcast to wait for. So do dealing the next round, dealing another match,
-and editing the room's settings, which produce a position rather than moving within one —
-and, in the settings case, none at all when refused, since a rejected edit is broadcast to
+editing the room's settings and kicking a player, which produce a position rather than moving
+within one — and, in the last two, none at all when refused, since a rejected one is broadcast to
 nobody. A **move settles on a strictly newer position** — a turn, the Yaniv call that replaces
 one, or a slapdown, all sent through the same `play` helper, which keeps the CLI's
 `Position { view, version }` / `actedOn` watermark in the session core. A slapdown is the one
@@ -91,6 +94,16 @@ offered, sent, and refused by it.
 broadcast behind it, but the server stops publishing to a connection that has left, so
 `exitToMenu` clears the view itself.
 
+**Being kicked is the way out nobody asked this session for** (docs/adr/0028). The server sends
+`kicked` and releases the connection, so nothing follows it. The handler forgets the seat, drops
+the watermark and lands on `view: null` with `busy` released and no `notice`, through the same
+`leaveTable` a refused claim uses — with the green toast, "Host removed you from the room.", **in
+that same publication**, so the menu is never drawn without the reason for it. The account standing
+is untouched, the binding having survived. An action of the player's own still in flight is
+answered `PLAYER_NOT_FOUND` about a seat they no longer hold, and dropped as any refusal landing
+on the menu is. A seat kicked while its connection was down has nobody to tell: the claim is
+refused on return and lands on the ordinary "That game is no longer available." `notice`.
+
 **A rejection that lands after the room has gone is swallowed, not shown** — a player's own exit
 crossing an action still in flight acks `PLAYER_NOT_FOUND` about a room they have left, so an
 error is dropped whenever `view` is already null. **An `errorMessage` shows and is dropped
@@ -103,7 +116,8 @@ indicator, the slapdown window closing, the round ending, the next round dealt �
 what happened. A move (`play`: `takeTurn`, `callYaniv`, `slapDown`) is silent on
 `NOT_YOUR_TURN`, `SLAPDOWN_NOT_AVAILABLE`, `WRONG_PHASE` and `CARD_NOT_PICKUP_ELIGIBLE`
 (`SILENT_MOVE`); `startNextRound` and `playAgain` on `WRONG_PHASE`, somebody else having dealt
-first (`SILENT_DEAL`, handed to `act`). **Keyed on the action as well as the code**: the lobby's
+first (`SILENT_DEAL`, handed to `act`); `kickPlayer` on `PLAYER_NOT_FOUND`, the target having left
+first and the roster already showing it (`SILENT_KICK`). **Keyed on the action as well as the code**: the lobby's
 `WRONG_PHASE` ("Settings are locked once the match has started") is news, and is shown.
 
 **`playerJoined`/`playerLeft` are deliberately unhandled.** The roster arrives right behind each
@@ -133,7 +147,8 @@ given none still resumes across a live reconnect and starts over on a reload. Th
 The credential is written down at the two ways in and nowhere else, the ack of a seating
 event being the only place a token is sent; `joinRoom`'s names the seat but not the room, so
 the room is completed from what was sent — upper-cased as the server matched it. It is
-forgotten in exactly two cases: the player's own `exitToMenu`, and a claim the server refuses.
+forgotten in exactly three cases: the player's own `exitToMenu`, a claim the server refuses, and
+being kicked.
 **A dropped connection is pointedly not one of them.**
 
 A claim goes out on session creation (a stored seat, i.e. a cold boot) and on every
