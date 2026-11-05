@@ -16,8 +16,9 @@ Requested in #252, specified in #254.
   never the host, so `hostId` does not move.
 - **The target is a claim until checked.** It arrives as `unknown`, on `updateSettings`' grounds. A
   non-string, an id that is no seat here and the host's own id are all `PLAYER_NOT_FOUND`. No new
-  error code: only an off-contract client can send any of them, and the host's own way out is
-  `exitToMenu`.
+  error code: a host's own client sends an id that is no seat here only when the target left first,
+  which the roster already shows, so that refusal is silent (`SILENT_KICK`). Only an off-contract
+  client can send the other two, and the host's own way out is `exitToMenu`.
 - **Nothing is kept of the seat, so nothing is banned.** The player may join the same code again
   and gets a new seat, with a new id and token. A signed-in player is not handed the old seat back,
   because it no longer exists to be claimed.

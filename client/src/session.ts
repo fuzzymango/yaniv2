@@ -1022,7 +1022,7 @@ export function createSession(
    * must never cost.
    *
    * A code in `silent` lets go of the lock and says nothing either: the action it answers
-   * is one whose refusal the table already shows (`SILENT_MOVE`, `SILENT_DEAL`).
+   * is one whose refusal the screen already shows (`SILENT_MOVE`, `SILENT_DEAL`, `SILENT_KICK`).
    */
   const refuse = (error: GameError, silent: ReadonlySet<GameErrorCode>): void => {
     if (snapshot.view === null || silent.has(error.code)) publish({ busy: false });

@@ -13,9 +13,10 @@
  * One branch renders two screens rather than one: a finished match is `Table` with `GameEnd`
  * drawn over it (issue #130). Everywhere else a phase picks exactly one component.
  *
- * And whatever the screen, what the session was refused is held up over it, part of none of
- * them (`Toasts`, spec #245): drawn once, here, beside whichever screen is up, so no
- * screen draws an error of its own and nothing on any of them moves when one appears.
+ * And whatever the screen, what the session has to tell the player, a refusal or the news of
+ * a kick, is held up over it, part of none of them (`Toasts`, spec #245): drawn once, here,
+ * beside whichever screen is up, so no screen draws an error of its own and nothing on any of
+ * them moves when one appears.
  */
 
 import { Disconnected } from "./connection/Disconnected.tsx";

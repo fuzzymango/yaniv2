@@ -2985,12 +2985,11 @@ describe("when the connection goes", () => {
    * A seat that cannot be had back — the room has gone from the server, or the credential
    * was refused — lands on the main menu with the news and nothing to retry.
    *
-   * Driven from a cold boot rather than a reconnect, because there is no longer a way for
-   * a room to disappear under a player who is sitting in it (docs/adr/0012): a room ends
-   * when its last seat leaves, and that seat is the one leaving. A page opening on a
-   * credential for a room the server does not have is the case that remains — a restart,
-   * the documented cost of rooms living in memory — and it is the same `claimSeat` a
-   * returning connection uses.
+   * Driven from a cold boot, a page opening on a credential for a room the server does not
+   * have: a restart, the documented cost of rooms living in memory. A returning connection
+   * reaches the same `claimSeat`, and can find its seat gone while it was away, a host having
+   * kicked it (docs/adr/0028) or the room having been swept (docs/adr/0015). That path is not
+   * covered here.
    */
   it("returns to the main menu, saying why, when the seat cannot be had back", async () => {
     const server = await startServer(26);
