@@ -6,17 +6,18 @@
  * URL to reach it by; a player is looking at the lobby because the server says the room is
  * in it. See docs/adr/0004.
  *
- * Nothing here decides anything. The host marker and the start control are display: who
- * may actually start is the server's call, and it answers anyone else with `NOT_HOST`.
- * Showing the control to the host alone spares a guest hunting for a button that was never
- * theirs — it is not what enforces the rule.
+ * Nothing here decides anything. The host marker, the start control and the ✕ on a row are
+ * display: who may actually start or remove is the server's call, and it answers anyone else
+ * with `NOT_HOST`. Showing the controls to the host alone spares a guest hunting for a button
+ * that was never theirs — it is not what enforces the rule.
  *
  * The one screen in this client with a host on it at all. The role is the lobby's — the
- * settings and the start — and it retires at the first deal, `view.hostId` going null with
- * it (docs/adr/0012). A host who leaves hands it to the next seat, which arrives here as an
- * ordinary roster update with the marker on somebody else.
+ * settings, the start and freeing a seat (docs/adr/0028) — and it retires at the first deal,
+ * `view.hostId` going null with it (docs/adr/0012). A host who leaves hands it to the next
+ * seat, which arrives here as an ordinary roster update with the marker on somebody else.
  */
 
+import { useEffect, useRef } from "react";
 import type { PlayerGameView, RoomSettings } from "@yaniv/shared";
 import { effectiveBotCount } from "@yaniv/shared";
 import { SettingsEditor } from "./SettingsEditor.tsx";
@@ -26,11 +27,21 @@ import { WayOut } from "../shared/WayOut.tsx";
 import { bySeat } from "../seating.ts";
 import { STATUS_LABEL, seatStatus } from "../status.ts";
 
+/**
+ * How long a ✕ ignores taps, counted from the last tap and from the last time the rows moved
+ * (docs/adr/0028). `busy` lets go on the ack and the rows below close up, so a tap meant for one
+ * player would land on the next player's ✕. A tap that is ignored still counts, or a third tap
+ * of a burst would get through. It outlasts a double tap's gap and is short enough for a
+ * deliberate second kick.
+ */
+const KICK_HOLD_MS = 400;
+
 interface LobbyProps {
   view: PlayerGameView;
   busy: boolean;
   onStart: () => void;
   onUpdateSettings: (settings: RoomSettings) => void;
+  onKick: (playerId: string) => void;
   onExit: () => void;
 }
 
@@ -39,11 +50,23 @@ export function Lobby({
   busy,
   onStart,
   onUpdateSettings,
+  onKick,
   onExit,
 }: LobbyProps) {
   const isHost = view.hostId === view.you.id;
 
   const seats = [view.you, ...view.opponents].sort(bySeat(view));
+
+  const heldUntil = useRef(0);
+  const hold = () => {
+    heldUntil.current = performance.now() + KICK_HOLD_MS;
+  };
+  useEffect(hold, [seats.length]);
+  const kick = (playerId: string) => {
+    const held = performance.now() < heldUntil.current;
+    hold();
+    if (!held) onKick(playerId);
+  };
 
   /*
    * Everyone in a lobby is a person: bots are seated by `startGame` and not before, so
@@ -93,6 +116,22 @@ export function Lobby({
                   <span className={`seat__status seat__status--${status}`}>
                     {STATUS_LABEL[status]}
                   </span>
+                )}
+                {/*
+                  One tap and no confirm (docs/adr/0028): a seat removed by mistake costs that
+                  player the code again, and an "away" row gets one too, being the seat most
+                  worth freeing. Never the host's own row — leaving is the way out below.
+                */}
+                {isHost && seat.id !== view.you.id && (
+                  <button
+                    className="seat__remove"
+                    type="button"
+                    aria-label={`Remove ${seat.name}`}
+                    onClick={() => kick(seat.id)}
+                    disabled={busy}
+                  >
+                    ✕
+                  </button>
                 )}
               </li>
             );

@@ -11,7 +11,7 @@
  * unique (see "Display name" in CONTEXT.md), so there is no "already taken" to be told; the
  * only refusal is the shared display-name rule.
  *
- * **A refused name is a toast over the panel**, as every refusal is (`ErrorToasts`, spec
+ * **A refused name is a toast over the panel**, as every refusal is (`Toasts`, spec
  * #245), rather than a line in it: the panel draws no error of its own.
  *
  * The draft is this component's own, on the settings editor's precedent: a name half-typed

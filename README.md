@@ -71,6 +71,8 @@ host alone at the table is turned away with `NOT_ENOUGH_PLAYERS` until they eith
 bot count or somebody joins. The moment the match starts the settings lock for the life of
 the room — `Play again` deals another match with the same ones — and move behind the small
 icon in the top corner of every in-match screen, which opens them read-only for everybody.
+Until then the host can also remove anyone else with the ✕ on their row; they are told so back
+at the main menu, and may rejoin (`docs/adr/0028`).
 
 Where everybody sits is drawn at random when the first match is dealt, host and bots alike,
 and kept for every match played in the room after it; play goes round the table in that
@@ -214,7 +216,9 @@ goes on without you too, your hand buried and the turn moved along. Leaving a lo
 hands it to the next seat, so the room is not stranded. `q` or Ctrl-D is the other exit and
 is not the same one: it drops the connection without giving the seat up, which leaves the
 room standing and the seat held — this harness cannot resume it, and a minute after the last
-person in the room drops, the room is swept (`docs/adr/0015`).
+person in the room drops, the room is swept (`docs/adr/0015`). This harness cannot remove a
+player from a lobby, but it can be removed by a host in the browser: it says so, and enter
+takes you to the main menu.
 
 Illegal moves come back with the engine's real error codes (`INVALID_SET`,
 `YANIV_THRESHOLD_NOT_MET`, ...) and cost you nothing — the turn is still yours. Every bot

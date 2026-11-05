@@ -13,6 +13,7 @@
   --ink-dim: #cbd5e1;
   --accent: #fde047;
   --danger: #fca5a5;
+  --news: #86efac;
   --surface: rgb(0 0 0 / 25%);
 
   /*
@@ -222,7 +223,7 @@ body {
   text-align: center;
 }
 
-/* --- what the session was refused --- */
+/* --- what the session has to tell the player --- */
 
 /*
  * Fixed to the top of the viewport and part of no layout, so nothing on the screen under it
@@ -261,6 +262,11 @@ body {
   color: var(--danger);
   pointer-events: auto;
   animation: toast-in 0.25s ease-out;
+}
+
+/* News rather than a refusal: the same toast, and only the colour says it is not one. */
+.toast--news {
+  color: var(--news);
 }
 
 .toast__message {
@@ -535,6 +541,34 @@ body {
 .seat__status--away {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/*
+ * The host's ✕ on a lobby row: pushed to the far end, away from the name and its chips, and
+ * flush with the row's edge so a full tap target costs the row no height or width.
+ */
+.seat__remove {
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  margin: 0 -0.875rem 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.seat__remove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.seat__remove:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .lobby__actions {

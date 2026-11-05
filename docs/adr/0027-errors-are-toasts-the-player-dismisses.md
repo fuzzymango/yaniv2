@@ -57,3 +57,19 @@ modal and the call banner. The layer ignores taps and each toast does not, so th
 toast still takes a tap. No screen draws an error of its own: the profile's custom-call check
 moved into the session's `setCustomCall` (#248), so its refusal is a toast like the rest. Arrival
 slides in, except under reduced motion, and there is no exit animation.
+
+## Amended: a toast is not always a refusal (spec #254)
+
+The host's kick (ADR-0028) tells the kicked player why they are back at the menu, and that is news
+rather than a refusal. The text above stands as written, with three changes:
+
+- **The names** (#257). `SessionSnapshot.errors`, `dismissError` and `ErrorToasts` are now `toasts`,
+  `dismissToast` and `Toasts`, because a toast is a general message.
+- **A toast has a tone** (#260). `Toast` is `{ id, tone: "error", error }` or
+  `{ id, tone: "news", message }`. Red is a refusal and green is news. A news toast is dismissed the
+  same way, by its ✕ alone. Today the only one is "Host removed you from the room.", put up in the
+  same publication as `view: null`. The drop-after-the-room-has-gone rule above is about refusals
+  and never reaches it. `notice` still carries the rest of the news that is not a refusal.
+- **A seventh silent refusal** (#260). `kickPlayer` is silent on `PLAYER_NOT_FOUND` (`SILENT_KICK`):
+  it arises only where the target left first, and the roster already shows that. Its other refusals
+  are still reported.

@@ -330,7 +330,7 @@ both views in every phase, with no redaction.
 Lobby → host calls `startGame` → `playing` → `roundEnd` after a Yaniv call → any player still in
 the match calls `startNextRound` (or the server deals it where only bots are left playing,
 docs/adr/0014), or `gameEnd` once one player is left — by a scoring or a departure (#147). 2–6
-players, held in `RoomManager`'s **in-memory `Map`**.
+players, held in `RoomManager`'s **in-memory `Map`**. In the lobby the host may kick any other.
 
 **`startGame` fills up to `settings.botCount` empty seats with bots**, reevaluated against the
 room's current human count at read time rather than a stored, possibly-stale number
@@ -360,15 +360,17 @@ disconnects whatever socket still held it.
 ### The host owns the lobby, and leaving costs nobody else anything
 
 **The host is the lobby's and nothing else** (docs/adr/0012): the one seat that may edit the
-settings and deal the first round, `NOT_HOST` to anyone else, and the role **migrates to the
-next seat** when a host leaves the lobby — `hostId` is the one mutable field of a match, and
-`removePlayer` in the lobby the one writer. From `playing` onward nobody is host and `hostId`
-is sent null. Two eligibility rules replace it: **`startNextRound` is any player still in the
-match** (`NOT_IN_MATCH` otherwise), **`playAgain` is anyone still in the room**, spectators
-included, since the one player left at `gameEnd` may be a bot and a bot asks for nothing.
+settings, deal the first round and free another seat (`kickPlayer`, `Rooms.kick`, `leave`'s
+sibling; docs/adr/0028 — it bans nobody and never ends a room), `NOT_HOST` to anyone else, and
+the role **migrates to the next seat** when a host leaves the lobby — `hostId` is the one
+mutable field of a match, and `removePlayer` in the lobby the one writer. From `playing` onward
+nobody is host and `hostId` is sent null. Two eligibility rules replace it: **`startNextRound`
+is any player still in the match** (`NOT_IN_MATCH` otherwise), **`playAgain` is anyone still in
+the room**, spectators included, since the one player left at `gameEnd` may be a bot and a bot
+asks for nothing.
 
 **`closeRoom` is gone**, and with it `roomClosed`: no player can end anybody else's game.
-`exitToMenu` is the only way out, allowed **from every phase** (#147), and **it means the same
+`exitToMenu` is the only way to leave, allowed **from every phase** (#147), and **it means the same
 thing whoever invokes it**: their own seat and nobody else's, told by `playerLeft` and then the
 roster with that seat spliced out (lobby) or marked (once a match exists). A room ends when its
 last seat leaves (`abandoned`, in `rooms.ts`, whose `leave` then cancels its timers and drops
@@ -389,8 +391,8 @@ The exit is `Rooms.leave`, not `apply`: `removePlayer` is a pure transition and 
 be destroyed" is no `GameState` it could return, so `leave` answers whether the room ended, and
 the leaver's name. Inside its `accepted` the adapter **clears `socket.data.seat`** (or
 `ALREADY_IN_ROOM` would mean "for the life of this connection") **and calls
-`socket.leave(roomCode)`**, keeping it out of the next broadcast, then acks and sends
-`playerLeft` — which reaches nobody where the room has ended.
+`socket.leave(roomCode)`**, out of the next broadcast, then acks and sends `playerLeft`, reaching
+nobody where the room has ended. A kick is that release behind the host's ack, `kicked` first.
 
 **`playAgain` seats no bots**, unlike `startGame`: a seat given up stays given up, so a table
 that has shrunk below two is turned away with `NOT_ENOUGH_PLAYERS`. It does clear every
@@ -405,7 +407,7 @@ so no handler can apply a transition without the publication, the reconsideratio
 turns behind it. `Rooms` constructs the timer registry, the bot runner, the auto-dealer, the
 sweeper and the stats observer itself. What stays in the adapter is what only a transport knows:
 binding and clearing the seat, `ALREADY_IN_ROOM`, socket.io room membership, eviction and newer
-wins, the six account events, acks, `playerJoined`/`playerLeft`, and **calling
+wins, the six account events, acks, `playerJoined`/`playerLeft`/`kicked`, and **calling
 `attendanceChanged` after a seat binds and on a seated disconnect** — seating publishes nothing,
 because an arrival is not connected until its socket is in the room. The bots-only harness
 `play.ts` does not use `Rooms`, on purpose (above).
@@ -602,7 +604,7 @@ Cancel focused — sign-out forgets the seat too, hence a panel only the menu op
 editing one field and confirming are exclusive — one `Panel` value — and Escape backs out one
 level, each editor and the question stopping the key before `Modal` sees it. `NameDialog` is
 confirm-only, the first sign-in's non-dismissible step with a "Not now". Neither draws an error,
-nor does the menu: a refusal is a toast over whichever is up (`ErrorToasts`, spec #245), which
+nor does the menu: a refusal is a toast over whichever is up (`Toasts`, spec #245), which
 `App` draws once over every screen, and which leaves on its ✕ alone (docs/adr/0027). Google's script is fetched when the signed-out form
 mounts and a failure draws **nothing** (`google.ts`,
 docs/adr/0020) — sign-in is an option, never a wall.
@@ -621,8 +623,9 @@ it, which `docs/code-map.md` names.
 Snapshots are **replaced wholesale, never mutated**, `useSyncExternalStore` comparing by
 identity. Ten fields, each answering a different question: `view` (null *is* the main menu),
 `account` (tagged: `guest` / `nameNeeded` / `signedIn`), `stats` (read by `loadStats`, dropped
-whenever the signed-in account changes, so one account never reads another's), `errors`
-(toasts stacked in arrival order, each leaving only by `dismissError`, docs/adr/0027),
+whenever the signed-in account changes, so one account never reads another's), `toasts`
+(stacked in arrival order, a refusal in red or the news of a kick in green, each leaving only by
+`dismissToast`, docs/adr/0027),
 `notice`, `connected`, `resuming`, `selection` (surviving the views that arrive underneath
 it), and the two
 **one-shots**, `flight` and `announcement`. **No credential is on it**: the Google ID token a

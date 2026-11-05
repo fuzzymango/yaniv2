@@ -108,7 +108,16 @@ export async function runSession(
    * There is deliberately nothing to handle a room ending under a player who is sitting
    * in it: nobody can close a room out from under anybody any more (docs/adr/0012). A
    * room ends when its last seat leaves, and that seat is the one doing the leaving.
+   *
+   * A seat can go from under them, though: the host may free one in the lobby
+   * (docs/adr/0028). The server sends this after that seat's last position and nothing
+   * behind it, so forgetting the room here cannot be undone by a late broadcast. The
+   * session loop notices the next time it looks (`roomGone`).
    */
+  socket.on("kicked", () => {
+    forgetRoom();
+    io.output("  The host removed you from the room. [enter] for the menu");
+  });
 
   /**
    * Every broadcast is rendered the moment it lands. That is the point of the harness:
@@ -143,6 +152,9 @@ export async function runSession(
   const forgetRoom = () => {
     current = null;
   };
+
+  /** Whether a seated player has been kicked: a position was seen, and it has been forgotten. */
+  const roomGone = () => current === null;
 
   /**
    * Get a seat: a room of our own, or the one whose code we were given. The code is
@@ -258,12 +270,14 @@ export async function runSession(
           : "  > ";
 
       /*
-       * Nothing races the player's line any more. A room ends when its last seat leaves
-       * (docs/adr/0012), so there is no longer a way for one to go away underneath
-       * somebody who is sitting in it — the only exit from this loop is the player's own.
+       * The one thing that races the player's line is a kick, and it cannot take this
+       * prompt back: prompts are serial, so a second one from the menu would queue behind
+       * it. It is left up instead, and whatever it answers was typed at a lobby that has
+       * gone, so it is dropped rather than read as a menu command or sent to the server.
        */
       const line = await io.ask(prompt);
       if (line === null) return;
+      if (roomGone()) break;
 
       /**
        * Read the line against the newest position, not the one that prompted for it.
@@ -294,6 +308,10 @@ export async function runSession(
         else if (command.kind === "menu") socket.emit("exitToMenu", ack);
         else socket.emit("startNextRound", ack);
       });
+
+      // Kicked with that in flight: a refusal for a seat that has gone is no news, and
+      // going round again would wait on a position no room will ever send.
+      if (roomGone()) break;
 
       /**
        * A refused action is news, not a crash. The server published nothing, so the

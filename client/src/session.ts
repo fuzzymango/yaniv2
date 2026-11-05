@@ -156,14 +156,17 @@ export type AccountStanding =
 const GUEST: AccountStanding = { status: "guest" };
 
 /**
- * One refusal on the screen. The id is the session's own count, never the error's code —
- * the same refusal twice is two toasts — and it is fixed for the toast's life, so ✕ names
- * the one it was drawn on whatever has arrived since.
+ * One message on the screen: something the player was refused, or news of something done to
+ * them (docs/adr/0027). The id is the session's own count, never the error's code — the same
+ * refusal twice is two toasts — and it is fixed for the toast's life, so ✕ names the one it
+ * was drawn on whatever has arrived since.
+ *
+ * Tagged by `tone`, which is also what a screen colours it by, so a news toast cannot be
+ * handed around with a `GameError` it never had.
  */
-export interface Toast {
-  readonly id: number;
-  readonly error: GameError;
-}
+export type Toast =
+  | { readonly id: number; readonly tone: "error"; readonly error: GameError }
+  | { readonly id: number; readonly tone: "news"; readonly message: string };
 
 /**
  * What a screen renders from. Immutable and replaced wholesale on every change, because
@@ -201,19 +204,20 @@ export interface SessionSnapshot {
    */
   readonly stats: Stats | null;
   /**
-   * Every rejection worth showing the player and not yet dismissed, oldest first (spec
-   * #245). A refused action costs them nothing, so these are news rather than a state to
-   * recover from — and news stays up until it has been read, which only the player can say:
-   * trying again, entering or leaving a room and backing out of a sign-in leave every one of
-   * them where it was, and `dismissError` is the only way one goes. Appended, never
-   * replaced, so a toast already on the screen never moves when another arrives below it;
-   * the same refusal twice is two toasts, and there is no cap.
+   * Every rejection worth showing the player and not yet dismissed, plus the news of being
+   * kicked, oldest first (spec #245). A refused action costs them nothing, so these are news
+   * rather than a state to recover from — and news stays up until it has been read, which
+   * only the player can say: trying again, entering or leaving a room and backing out of a
+   * sign-in leave every one of them where it was, and `dismissToast` is the only way one goes.
+   * Appended, never replaced, so a toast already on the screen never moves when another
+   * arrives below it; the same refusal twice is two toasts, and there is no cap.
    */
-  readonly errors: readonly Toast[];
+  readonly toasts: readonly Toast[];
   /**
    * News that is not a refusal of anything the player did — a seat that could not be
-   * claimed back, or a sign-in that has lapsed. Separate from `errors` because there is no
-   * action to blame and nothing to retry: it arrives while they are sitting still.
+   * claimed back, or a sign-in that has lapsed. Separate from `toasts` because there is no
+   * action to blame and nothing to retry: it arrives while they are sitting still. Being
+   * kicked is the one piece of such news that is a toast instead (docs/adr/0027).
    */
   readonly notice: string | null;
   /**
@@ -333,9 +337,9 @@ export interface Session {
   loadStats: () => void;
   /**
    * The ✕ on one toast: that one taken down, with nothing sent and nothing else touched. The
-   * only way an error leaves the screen. An id not up — already dismissed — changes nothing.
+   * only way a toast leaves the screen. An id not up — already dismissed — changes nothing.
    */
-  dismissError: (id: number) => void;
+  dismissToast: (id: number) => void;
   /**
    * Sign out, from the profile over the main menu: both credentials forgotten, Google told
    * not to sign straight back in, and a guest from here on. The profile asks first (#230);
@@ -376,10 +380,16 @@ export interface Session {
    */
   startGame: () => void;
   /**
+   * Free another player's seat in the lobby (docs/adr/0028). Host only and lobby only, and
+   * the server is what says so, as it is for `startGame`. Settled on the ack, the roster
+   * arriving behind it. A seat already gone says nothing (`SILENT_KICK`).
+   */
+  kickPlayer: (playerId: string) => void;
+  /**
    * Leave the room without dropping the connection, and go back to the main menu. The
-   * only way out of a room there is: nobody can end anybody else's game (docs/adr/0012),
-   * so this costs the rest of the table nothing and the caller's own seat is all it is
-   * about, whoever the caller is.
+   * only way a player takes themselves out of a room: nobody can end anybody else's game
+   * (docs/adr/0012), so this costs the rest of the table nothing and the caller's own seat
+   * is all it is about, whoever the caller is.
    *
    * Answered by the ack alone: the server stops publishing to a connection it has turned
    * out of a room, so nothing is coming behind it.
@@ -468,6 +478,9 @@ const UNUSABLE_NAME: GameError = {
  */
 const UNAVAILABLE = "That game is no longer available.";
 
+/** What a kicked player is told, in a green toast rather than a `notice` (docs/adr/0028). */
+const KICKED = "Host removed you from the room.";
+
 /**
  * `UNUSABLE_NAME`'s sibling, for the confirm-name step and a rename: the same rule, asked
  * about a name that is the account's rather than a room's.
@@ -506,7 +519,8 @@ const SESSION_LAPSED = "You've been signed out. Sign in again to pick up where y
  *
  * `SILENT_MOVE` is every move's — a turn, a call and a slapdown alike, since any of them
  * can cross the position that made it pointless. `SILENT_DEAL` is the next round's and the
- * replay's, refused only where somebody else dealt first.
+ * replay's, refused only where somebody else dealt first. `SILENT_KICK` is a kick's, refused
+ * that way only where the target left first, and the roster already shows them gone.
  */
 const SILENT_MOVE: ReadonlySet<GameErrorCode> = new Set<GameErrorCode>([
   "NOT_YOUR_TURN",
@@ -515,6 +529,7 @@ const SILENT_MOVE: ReadonlySet<GameErrorCode> = new Set<GameErrorCode>([
   "CARD_NOT_PICKUP_ELIGIBLE",
 ]);
 const SILENT_DEAL: ReadonlySet<GameErrorCode> = new Set<GameErrorCode>(["WRONG_PHASE"]);
+const SILENT_KICK: ReadonlySet<GameErrorCode> = new Set<GameErrorCode>(["PLAYER_NOT_FOUND"]);
 
 /** What an action that reports every refusal passes for its silent set. */
 const REPORT_ALL: ReadonlySet<GameErrorCode> = new Set();
@@ -535,7 +550,7 @@ export function createSession(
     view: null,
     account: GUEST,
     stats: null,
-    errors: [],
+    toasts: [],
     notice: null,
     busy: false,
     connected: true,
@@ -546,13 +561,13 @@ export function createSession(
   };
   const listeners = new Set<() => void>();
 
-  /** The last toast's id; every refusal reported takes the next. */
+  /** The last toast's id; every toast put up takes the next. */
   let toastsMade = 0;
 
   /** The toasts with this refusal added below them: what a publication reporting it carries. */
   const reported = (error: GameError): readonly Toast[] => [
-    ...snapshot.errors,
-    { id: ++toastsMade, error },
+    ...snapshot.toasts,
+    { id: ++toastsMade, tone: "error", error },
   ];
 
   /**
@@ -655,9 +670,9 @@ export function createSession(
   };
 
   /**
-   * Not seated any more. Exactly two things reach here: the player giving the seat up, and
-   * a claim the server refuses. A dropped connection is pointedly not one of them — that is
-   * the case the seat is kept *for*.
+   * Not seated any more. Exactly four things reach here: the player giving the seat up, a
+   * claim the server refuses, the host kicking them, and signing out. A dropped connection is
+   * pointedly not one of them — that is the case the seat is kept *for*.
    */
   const forget = (): void => {
     seat = null;
@@ -667,22 +682,28 @@ export function createSession(
   /**
    * There is no table any more: back to the main menu, told why if there is anything worth
    * telling. The one way out of a room that the player did not ask for, and every way in
-   * to it ends here — a seat that could not be claimed back, and a connection that came
-   * back holding nothing to claim with.
+   * to it ends here — a seat that could not be claimed back, a connection that came back
+   * holding nothing to claim with, and a kick.
    *
    * A turn in flight is one nobody will answer now, and a selection is a tap or two made in
    * front of a table that is no longer there. Neither goes to the next room.
    *
    * `reconnected` rides along rather than being published beside this, because a screen
    * that saw `connected` come back a moment before the view went would draw the dead table
-   * as a live one.
+   * as a live one. `toasts` rides along for the same reason: a kicked player's menu is never
+   * drawn without the reason for it.
    */
-  const leaveTable = (notice: string | null, reconnected = false): void => {
+  const leaveTable = (
+    notice: string | null,
+    reconnected = false,
+    toasts: readonly Toast[] = snapshot.toasts,
+  ): void => {
     forget();
     committedAt = null;
     publish({
       connected: reconnected || snapshot.connected,
       view: null,
+      toasts,
       notice,
       busy: false,
       resuming: false,
@@ -818,6 +839,19 @@ export function createSession(
     });
   };
 
+  /**
+   * The host has freed this seat (docs/adr/0028). The server has already released the
+   * connection, so there is no ack or position coming behind this, and the account binding is
+   * untouched. Whatever this player had in flight is released with the table and refused to
+   * a menu that drops it, as `refuse` says.
+   */
+  socket.on("kicked", () => {
+    leaveTable(null, false, [
+      ...snapshot.toasts,
+      { id: ++toastsMade, tone: "news", message: KICKED },
+    ]);
+  });
+
   /*
    * There is deliberately no handler for a room ending under a player sitting in it,
    * because nothing ends one that way any more (docs/adr/0012): a room ends when its last
@@ -930,7 +964,7 @@ export function createSession(
    * would let a second copy of that action go out behind the first.
    */
   socket.on("errorMessage", (error) => {
-    if (snapshot.view !== null) publish({ errors: reported(error) });
+    if (snapshot.view !== null) publish({ toasts: reported(error) });
   });
 
   /*
@@ -958,7 +992,7 @@ export function createSession(
         ? snapshot.account.account.displayName
         : normalizeDisplayName(playerName);
     if (name === null) {
-      publish({ errors: reported(UNUSABLE_NAME) });
+      publish({ toasts: reported(UNUSABLE_NAME) });
       return null;
     }
 
@@ -976,7 +1010,7 @@ export function createSession(
    * lobby before it acks.
    */
   const settle = (error: GameError | null): void =>
-    publish(error === null ? { busy: false } : { errors: reported(error), busy: false });
+    publish(error === null ? { busy: false } : { toasts: reported(error), busy: false });
 
   /**
    * How a refusal lands, wherever it comes from.
@@ -988,7 +1022,7 @@ export function createSession(
    * must never cost.
    *
    * A code in `silent` lets go of the lock and says nothing either: the action it answers
-   * is one whose refusal the table already shows (`SILENT_MOVE`, `SILENT_DEAL`).
+   * is one whose refusal the screen already shows (`SILENT_MOVE`, `SILENT_DEAL`, `SILENT_KICK`).
    */
   const refuse = (error: GameError, silent: ReadonlySet<GameErrorCode>): void => {
     if (snapshot.view === null || silent.has(error.code)) publish({ busy: false });
@@ -1098,7 +1132,7 @@ export function createSession(
    */
   const accountName = (displayName: string): string | null => {
     const name = normalizeDisplayName(displayName);
-    if (name === null) publish({ errors: reported(UNUSABLE_ACCOUNT_NAME) });
+    if (name === null) publish({ toasts: reported(UNUSABLE_ACCOUNT_NAME) });
     return name;
   };
 
@@ -1165,9 +1199,9 @@ export function createSession(
       );
     },
 
-    dismissError: (id) => {
-      const errors = snapshot.errors.filter((toast) => toast.id !== id);
-      if (errors.length !== snapshot.errors.length) publish({ errors });
+    dismissToast: (id) => {
+      const toasts = snapshot.toasts.filter((toast) => toast.id !== id);
+      if (toasts.length !== snapshot.toasts.length) publish({ toasts });
     },
 
     cancelSignIn: () => {
@@ -1191,7 +1225,7 @@ export function createSession(
     setCustomCall: (call, text) => {
       if (snapshot.busy || snapshot.account.status !== "signedIn") return;
       if (!normalizeCustomCall(text).accepted) {
-        publish({ errors: reported(UNUSABLE_CALL) });
+        publish({ toasts: reported(UNUSABLE_CALL) });
         return;
       }
       accountEvent(() => socket.emit("setCustomCall", call, text, accountChanged));
@@ -1282,6 +1316,10 @@ export function createSession(
       act((ack) => socket.emit("updateSettings", settings, ack)),
 
     startGame: () => act((ack) => socket.emit("startGame", ack)),
+
+    // Ack-settled, like the lobby's other two: a refused kick is broadcast to nobody.
+    kickPlayer: (playerId) =>
+      act((ack) => socket.emit("kickPlayer", playerId, ack), { silent: SILENT_KICK }),
 
     // The view goes with the seat: there is no room to render any more, and a null view
     // *is* the main menu.

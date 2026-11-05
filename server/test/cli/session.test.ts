@@ -787,6 +787,135 @@ describe("runSession", () => {
   });
 
   /**
+   * The host freeing the seat of somebody sitting at a prompt (docs/adr/0028). The harness has
+   * no kick command, so the host here is a bare socket; the kicked player is a real session.
+   */
+  describe("being kicked from a lobby", () => {
+    /** A room held by a bare socket, its latest view read off the wire. */
+    async function hostedRoom(server: Harness) {
+      const socket = await server.connect();
+      let view: PlayerGameView | null = null;
+      socket.on("gameStateUpdate", (next: PlayerGameView) => {
+        view = next;
+      });
+      const roomCode = await new Promise<string>((resolve) =>
+        socket.emit("createRoom", "Ada", (result: { value: { roomCode: string } }) =>
+          resolve(result.value.roomCode),
+        ),
+      );
+      return {
+        socket,
+        roomCode,
+        /** The id of a seat named `name`, once the host has been shown it. */
+        seatOf: async (name: string) => {
+          const seat = () =>
+            (view as PlayerGameView | null)?.opponents.find((o) => o.name === name);
+          await waitUntil(`${name} to be seated`, () => seat() !== undefined);
+          return seat()!.id;
+        },
+      };
+    }
+
+    /** Wait for a session to end, so one wedged at a kick fails rather than hanging the suite. */
+    async function ended(session: Promise<void>): Promise<void> {
+      let done = false;
+      const finished = session.then(() => {
+        done = true;
+      });
+      await waitUntil("the session to end", () => done);
+      await finished;
+    }
+
+    const told = (screen: string[]) => /host removed you/i.test(plain(screen.join("\n")));
+    const atMenu = (screen: string[]) => screen.some((frame) => /join <code>/.test(plain(frame)));
+    const roomsEntered = (screen: string[]) =>
+      screen.filter((frame) => /you are Grace/.test(plain(frame))).length;
+
+    it("tells the player and puts them back at the main menu, free to join again", async () => {
+      const server = await startServer(7);
+      const screen: string[] = [];
+      let prompts = 0;
+
+      try {
+        const host = await hostedRoom(server);
+        const session = runSession(
+          await server.connect(),
+          {
+            ask: async () => {
+              prompts += 1;
+              if (prompts === 1) {
+                const seat = await host.seatOf("Grace");
+                host.socket.emit("kickPlayer", seat, () => {});
+                await waitUntil("Grace to be told", () => told(screen));
+                // The enter the prompt asks for, answering a lobby that has gone. Read as a
+                // blank line at that lobby, it would wait on a position that never comes.
+                return "";
+              }
+              if (prompts === 2) {
+                assert.ok(atMenu(screen), "the prompt after the kick is the main menu's");
+                return `join ${host.roomCode}`;
+              }
+              await waitUntil("Grace to be seated again", () => roomsEntered(screen) === 2);
+              return "quit";
+            },
+            output: (text) => screen.push(text),
+          },
+          { playerName: "Grace", entry: { kind: "join", roomCode: host.roomCode } },
+        );
+
+        await ended(session);
+      } finally {
+        await server.close();
+      }
+
+      assert.equal(roomsEntered(screen), 2, "a kicked player may rejoin: there is no ban list");
+      assert.doesNotMatch(plain(screen.join("\n")), /✗/, "nothing Grace did was refused");
+    });
+
+    /**
+     * The line reaches the server after the seat has gone. Whichever of the two it gets to first,
+     * the player ends up at the menu and not waiting on a position from a room that has forgotten
+     * them.
+     */
+    it("reaches the main menu with an action of the player's still in flight", async () => {
+      const server = await startServer(7);
+      const screen: string[] = [];
+      let prompts = 0;
+      let created = false;
+
+      try {
+        const host = await hostedRoom(server);
+        const seat = () => host.seatOf("Grace");
+        const session = runSession(
+          await server.connect(),
+          {
+            ask: async () => {
+              prompts += 1;
+              if (prompts === 1) {
+                host.socket.emit("kickPlayer", await seat(), () => {});
+                return "start";
+              }
+              await waitUntil("Grace to be told", () => told(screen));
+              if (!atMenu(screen)) return "";
+              if (created) return "quit";
+              created = true;
+              return "create";
+            },
+            output: (text) => screen.push(text),
+          },
+          { playerName: "Grace", entry: { kind: "join", roomCode: host.roomCode } },
+        );
+
+        await ended(session);
+      } finally {
+        await server.close();
+      }
+
+      assert.equal(roomsEntered(screen), 2, "and from there Grace can make a room of her own");
+    });
+  });
+
+  /**
    * The finished-match screen: another match, and either player's way out of it.
    *
    * Every test here plays a real match to its end first — there is no shortcut, since
