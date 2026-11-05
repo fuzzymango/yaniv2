@@ -847,9 +847,9 @@ describe("runSession", () => {
                 const seat = await host.seatOf("Grace");
                 host.socket.emit("kickPlayer", seat, () => {});
                 await waitUntil("Grace to be told", () => told(screen));
-                // Typed at a lobby that has gone: it must not be sent, and `start` from a
-                // guest would come back refused on this screen if it were.
-                return "start";
+                // The enter the prompt asks for, answering a lobby that has gone. Read as a
+                // blank line at that lobby, it would wait on a position that never comes.
+                return "";
               }
               if (prompts === 2) {
                 assert.ok(atMenu(screen), "the prompt after the kick is the main menu's");

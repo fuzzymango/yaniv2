@@ -21,7 +21,11 @@ Requested in #252, specified in #254.
 - **Nothing is kept of the seat, so nothing is banned.** The player may join the same code again
   and gets a new seat, with a new id and token. A signed-in player is not handed the old seat back,
   because it no longer exists to be claimed.
-- **One tap, no confirm.** What it costs is undone by typing the code again.
+- **One tap, no confirm.** What it costs is undone by typing the code again. A ✕ ignores taps for
+  400ms after any tap and after the rows move (`KICK_HOLD_MS`): the rows below close up once the
+  ack arrives, and a tap meant for one player would otherwise remove the next. An ignored tap
+  still counts, so a burst of taps removes one player. The hold lives in `Lobby` because it is
+  about where a finger is, not about the session.
 - **`Rooms.kick` is `leave`'s sibling**, on ADR-0025's grounds: stored, observers told, `accepted`
   called, published, reconsidered. It answers the kicked seat's id and name rather than a
   `Departure`, because the host is still seated and it can never end the room.

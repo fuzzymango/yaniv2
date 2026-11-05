@@ -147,8 +147,8 @@ given none still resumes across a live reconnect and starts over on a reload. Th
 The credential is written down at the two ways in and nowhere else, the ack of a seating
 event being the only place a token is sent; `joinRoom`'s names the seat but not the room, so
 the room is completed from what was sent — upper-cased as the server matched it. It is
-forgotten in exactly three cases: the player's own `exitToMenu`, a claim the server refuses, and
-being kicked.
+forgotten in exactly four cases: the player's own `exitToMenu`, a claim the server refuses, being
+kicked, and signing out.
 **A dropped connection is pointedly not one of them.**
 
 A claim goes out on session creation (a stored seat, i.e. a cold boot) and on every

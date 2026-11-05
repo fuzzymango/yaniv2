@@ -207,10 +207,10 @@ export interface SessionSnapshot {
    * Every rejection worth showing the player and not yet dismissed, plus the news of being
    * kicked, oldest first (spec #245). A refused action costs them nothing, so these are news
    * rather than a state to recover from — and news stays up until it has been read, which
-   * only the player can say: trying again, entering or leaving a room and backing out of a sign-in leave every one of
-   * them where it was, and `dismissToast` is the only way one goes. Appended, never
-   * replaced, so a toast already on the screen never moves when another arrives below it;
-   * the same refusal twice is two toasts, and there is no cap.
+   * only the player can say: trying again, entering or leaving a room and backing out of a
+   * sign-in leave every one of them where it was, and `dismissToast` is the only way one goes.
+   * Appended, never replaced, so a toast already on the screen never moves when another
+   * arrives below it; the same refusal twice is two toasts, and there is no cap.
    */
   readonly toasts: readonly Toast[];
   /**
@@ -670,9 +670,9 @@ export function createSession(
   };
 
   /**
-   * Not seated any more. Exactly three things reach here: the player giving the seat up, a
-   * claim the server refuses, and the host kicking them. A dropped connection is pointedly
-   * not one of them — that is the case the seat is kept *for*.
+   * Not seated any more. Exactly four things reach here: the player giving the seat up, a
+   * claim the server refuses, the host kicking them, and signing out. A dropped connection is
+   * pointedly not one of them — that is the case the seat is kept *for*.
    */
   const forget = (): void => {
     seat = null;

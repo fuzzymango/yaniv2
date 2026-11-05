@@ -17,6 +17,7 @@
  * seat, which arrives here as an ordinary roster update with the marker on somebody else.
  */
 
+import { useEffect, useRef } from "react";
 import type { PlayerGameView, RoomSettings } from "@yaniv/shared";
 import { effectiveBotCount } from "@yaniv/shared";
 import { SettingsEditor } from "./SettingsEditor.tsx";
@@ -25,6 +26,15 @@ import { SettingsValues } from "../settings/SettingsValues.tsx";
 import { WayOut } from "../shared/WayOut.tsx";
 import { bySeat } from "../seating.ts";
 import { STATUS_LABEL, seatStatus } from "../status.ts";
+
+/**
+ * How long a ✕ ignores taps, counted from the last tap and from the last time the rows moved
+ * (docs/adr/0028). `busy` lets go on the ack and the rows below close up, so a tap meant for one
+ * player would land on the next player's ✕. A tap that is ignored still counts, or a third tap
+ * of a burst would get through. It outlasts a double tap's gap and is short enough for a
+ * deliberate second kick.
+ */
+const KICK_HOLD_MS = 400;
 
 interface LobbyProps {
   view: PlayerGameView;
@@ -46,6 +56,17 @@ export function Lobby({
   const isHost = view.hostId === view.you.id;
 
   const seats = [view.you, ...view.opponents].sort(bySeat(view));
+
+  const heldUntil = useRef(0);
+  const hold = () => {
+    heldUntil.current = performance.now() + KICK_HOLD_MS;
+  };
+  useEffect(hold, [seats.length]);
+  const kick = (playerId: string) => {
+    const held = performance.now() < heldUntil.current;
+    hold();
+    if (!held) onKick(playerId);
+  };
 
   /*
    * Everyone in a lobby is a person: bots are seated by `startGame` and not before, so
@@ -106,7 +127,7 @@ export function Lobby({
                     className="seat__remove"
                     type="button"
                     aria-label={`Remove ${seat.name}`}
-                    onClick={() => onKick(seat.id)}
+                    onClick={() => kick(seat.id)}
                     disabled={busy}
                   >
                     ✕
