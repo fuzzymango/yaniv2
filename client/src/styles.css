@@ -571,10 +571,33 @@ body {
   cursor: default;
 }
 
+/*
+ * Start and Leave side by side, as the finished match's pair is (`.final__actions`), and for
+ * the same reason: two answers to one question. Here it is also the height: a phone's lobby
+ * has to fit its four settings and a full table without scrolling (issue #263), and one row
+ * costs half of what two stacked rows did. Never wraps, unlike that pair: one-word labels fit
+ * half of the narrowest phone, and a second row would give back the height this one saved.
+ */
+/*
+ * Exact halves, whatever the words, so neither reads as the lesser offer. A grid rather than
+ * the flex halves that pair uses, because a flex share counts a button's padding and a hint
+ * has none, so a guest's two halves came out unequal.
+ */
 .lobby__actions {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+/*
+ * Shorter than `--tap`: this row is the last thing on the screen, so a thumb reaches it
+ * without aiming, but it is still at least the 44px a touch target needs. A guest's hint is
+ * the same height as the button beside it. Where its words wrap at a narrow width, the row
+ * grows and both halves grow with it, rather than the hint spilling out.
+ */
+.lobby__actions > .button,
+.lobby__actions > .hint {
+  min-height: 3rem;
 }
 
 /*

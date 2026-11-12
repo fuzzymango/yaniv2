@@ -173,7 +173,7 @@ export function Lobby({
             onClick={onStart}
             disabled={busy}
           >
-            Start the match
+            Start
           </button>
         ) : (
           // Its own class rather than `notice`, which carries news that has just
