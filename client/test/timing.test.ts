@@ -12,10 +12,10 @@ import {
 } from "../src/timing.ts";
 
 /*
- * Nothing here checks a duration's number, or one duration against another: each is tuned by
- * eye and is a judgement, not a fact (issue #241). What is asserted is the staging built on
- * them, and where a duration would collide with something outside the animation — the server's
- * auto-deal delay.
+ * Nothing here checks a duration's number, or one animation's durations against each other: each
+ * is tuned by eye and is a judgement, not a fact (issue #241). What is asserted is the staging
+ * built on them, and where a duration would collide with something outside the animation — the
+ * server's auto-deal delay, and a deal landing before an Assaf has.
  */
 describe("the call announcement", () => {
   it("stages the pair: the call, then the answer to it a beat later", () => {

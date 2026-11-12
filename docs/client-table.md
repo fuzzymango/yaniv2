@@ -338,14 +338,14 @@ decisions, none of them about the rules of anything:
   finishes is the server's think time, not a client-side beat (issue #135, which retired the
   one there was). A network that bunches two broadcasts can cut a flight short — cosmetic,
   accepted, and only on a connection that has already stuttered.
-- **A slapdown is the same journey, played harder** (issue #95). One card, at twice the
-  speed, on an accelerating curve where a discard decelerates, landing with a pop past its own
+- **A slapdown is the same journey, played harder** (issue #95). One card, sharper than a
+  discard, on an accelerating curve where a discard decelerates, landing with a pop past its own
   size and a jolt across the whole table. Nothing in it is a second animation: the pop is a
   keyframe on the ghost already flying, and the jolt is a class the flight's own settling puts
   on the element every control is already inside — a transform, so hit-testing goes with it
   and a tap during the jolt lands where it looks like it lands.
-- **Every duration is a plain number of its own** (`timing.ts`, issue #241): `SLAP_MS` about
-  half of `FLIGHT_MS` and the jolt shorter than the slap, by judgement rather than by
+- **Every duration is a plain number of its own** (`timing.ts`, issue #241): `SLAP_MS` quicker
+  than `FLIGHT_MS` and the jolt shorter than the slap, by judgement rather than by
   derivation. They were once a chain, each a fraction of the flight, so the table retuned from
   one number — and so none of them could be tuned without moving the rest. A slapdown being
   *sharper than a discard* is now the comment on its constant, kept true by eye in play.
@@ -460,16 +460,17 @@ about this table in particular:
 **And the deal waits until the round has been seen** (issues #204, #205). "Deal next round"
 takes the Yaniv call's slot, so a second tap on Yaniv!, or a thumb already on its way there,
 would deal the round away before anybody had read it. The button is drawn disabled —
-exactly as it is while `busy` — for `DEAL_HOLD_MS` (two seconds) from when it first appears
-for a scored round, then goes live on its own, with no countdown. A number of its own, derived
-from no animation and bounded by both neighbours: longer than an Assafed round's banners take
-to *arrive* (0.75s), so nobody deals before an Assaf has landed, and shorter than the server's
-auto-deal delay. It falls while the banners are still held — a clean call is gone at 2.35s, an
-Assafed round at 2.8s (#241) — so a deal as soon as it goes live cuts them off, unmounting
-them; accepted, the banners being inert to a tap and never holding up play. Keyed on the scorecard's length, so a republication of the same round
-restarts nothing and every new scored round, a reload and a resumed seat each get a hold of
-their own — which is why it does not ask `bannerAt`, silent where there was no position
-before. Component state and one timer in `Table.tsx`, the jolt's shape; the session core
+exactly as it is while `busy` — for `DEAL_HOLD_MS` from when it first appears for a scored
+round, then goes live on its own, with no countdown. A number of its own, derived from no
+animation and bounded by both neighbours: longer than an Assafed round's banners take to
+*arrive*, so nobody deals before an Assaf has landed, and shorter than the server's auto-deal
+delay. Nothing holds it past the banners' exit (#241), so a deal as soon as it goes live may cut
+them off, unmounting them; accepted, the banners being inert to a tap and never holding up
+play. (Not only a deal: the announcement is a one-shot, so *any* publication while it is up —
+a toast, another seat dropping or coming back — ends it early too.) Keyed on the scorecard's
+length, so a republication of the same round restarts nothing and every new scored round, a
+reload and a resumed seat each get a hold of their own — which is why it does not ask
+`bannerAt`, silent where there was no position before. Component state and one timer in `Table.tsx`, the jolt's shape; the session core
 gets no clock, and `busy` keeps its one meaning. It is presentation and **not a rule**: the
 server deals at any moment of `roundEnd`, so a CLI player, another browser past its own
 hold, or the auto-deal can deal inside this one.

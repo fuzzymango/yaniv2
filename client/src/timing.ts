@@ -5,8 +5,8 @@
  * used to be chains, each a fraction of one root, so a table could be retuned from one number —
  * and so no one of them could be tuned without moving the rest: holding the banners a second
  * longer would have stretched the beat before an Assaf and made each entrance sluggish. Each is
- * judged by eye, on its own, and the reason for its value is the comment on it. Docs/adr/0018
- * records why the chains were released.
+ * judged by eye, on its own, and the reason for its value is the comment on it. Why the chains
+ * were released is recorded in docs/adr/0018.
  *
  *   FLIGHT_MS           how long a card takes to cross the table
  *   SLAP_MS             the same journey, made in anger
@@ -20,9 +20,9 @@
  *   DEAL_HOLD_MS        how long a scored round is on screen before it can be dealt away
  *
  * What a test asserts here is the staging built on them and where a duration would collide with
- * something outside the animation — the server's auto-deal delay — never a number. Pure
- * arithmetic and nothing else — no element, no clock, no preference — which is why it lives here
- * rather than beside the animation that runs it.
+ * something outside the animation — the server's auto-deal delay, and a deal landing before an
+ * Assaf has — never a number. Pure arithmetic and nothing else — no element, no clock, no
+ * preference — which is why it lives here rather than beside the animation that runs it.
  */
 
 /**
@@ -44,9 +44,9 @@ export const FLIGHT_MS = 300;
  * card thrown down rather than played (docs/rules.md §9), and how fast it crosses is most of
  * what says so.
  *
- * About half the flight, because the difference has to be legible without being a different
- * animation — a card that arrived at a quarter of the time would read as a glitch, and one at
- * three quarters as the same discard.
+ * Sharper by enough that the difference is legible, and not so much that it reads as a different
+ * animation — too quick and the card reads as a glitch, too close to the flight and as the same
+ * discard.
  */
 export const SLAP_MS = 150;
 
@@ -58,8 +58,8 @@ export const SHAKE_MS = 100;
 
 /**
  * How long the call banners are held once every one of them has arrived — not the
- * announcement's whole length, which adds the beat before an Assaf and the exit. A lone call is
- * gone at 2.35s and an Assafed round at 2.8s.
+ * announcement's whole length, which adds the beat before an Assaf and the exit
+ * (`announceLeaveAt(count) + ANNOUNCE_EXIT_MS`).
  *
  * Long because a round's biggest moment was over before a player who glanced away had seen who
  * called, and a custom call may be a phrase that takes longer to read than `YANIV` (issue #241).
@@ -114,11 +114,11 @@ export const announceLeaveAt = (count: number): number =>
  * the round away before anybody has seen it.
  *
  * Bounded below by both banners' arrival — an Assafed round's second banner fully in,
- * `announceEnterAt(1) + ANNOUNCE_ENTER_MS`, 0.75s — so nobody deals before an Assaf has landed;
- * and above by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), so a human is never
- * held longer than a bots-only table waits for its watcher. Where it sits between them is a
- * judgement, and it falls while the banners are still up (issue #241): a player who deals as
- * soon as they can cuts them off, which unmounts them. An accepted trade — the banners take no
- * tap, and the deal is never held back for them.
+ * `announceEnterAt(1) + ANNOUNCE_ENTER_MS` — so nobody deals before an Assaf has landed; and
+ * above by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), so a human is never held
+ * longer than a bots-only table waits for its watcher. Where it sits between them is a
+ * judgement, and nothing holds it past the banners' exit (issue #241): a player who deals as
+ * soon as they can may cut them off, which unmounts them. An accepted trade — the banners take
+ * no tap, and the deal is never held back for them.
  */
 export const DEAL_HOLD_MS = 2000;
