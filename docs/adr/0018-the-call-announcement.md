@@ -106,12 +106,18 @@ the same coupling. The durations are tuned by eye, so each is now judged on its 
 reason for its value as the comment on it; the accepted costs are that no one number speeds up a
 whole table any more, and nothing but play stops an accidentally slow slapdown. `ANNOUNCE_MS` is
 renamed `ANNOUNCE_HOLD_MS`, being the hold once every banner has arrived and not the
-announcement's length. The values are unchanged — hold 900ms, beat 450ms, entrance 300ms, exit
-450ms, so an Assafed round still totals 1.8s and a clean call 1.35s — and so is the staging: a
-banner arrives at its index times the beat, and all leave at the last arrival plus the hold. The
-deal hold (`DEAL_HOLD_MS`, 2s) keeps its lower limit of outlasting an Assafed round's banners.
-The timing suite no longer asserts any derivation or ordering between durations — only the
-staging, the announcement finishing well inside the auto-deal delay, and the deal hold's limits.
+announcement's length. The hold is then raised by exactly a second, to 1900ms, for every call
+standard or custom; the beat (450ms), the entrance (300ms) and the exit (450ms) are unchanged,
+so a clean call is gone at 2.35s and an Assafed round at 2.8s, ASSAF still arriving at 0.45s.
+The staging is unchanged too: a banner arrives at its index times the beat, and all leave at the
+last arrival plus the hold. The deal hold (`DEAL_HOLD_MS`) stays at 2s, which now falls while
+the banners are up, so its lower limit is no longer outlasting an Assafed round's banners but
+outlasting their *arrival* — the second banner fully in, 0.75s — so nobody deals before an Assaf
+has landed. A player who deals as soon as they can cuts the banners off, which unmounts them
+(below); that is accepted, and raising the deal hold to 3s to wait for them was considered and
+declined. It is still the browser presenting a round and not a rule. The timing suite no longer
+asserts any derivation or ordering between durations — only the staging, the announcement
+finishing well inside the auto-deal delay, and the deal hold's two limits.
 
 ## The sequence is CSS, with no JavaScript timer
 

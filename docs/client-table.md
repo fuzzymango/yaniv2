@@ -462,8 +462,11 @@ takes the Yaniv call's slot, so a second tap on Yaniv!, or a thumb already on it
 would deal the round away before anybody had read it. The button is drawn disabled —
 exactly as it is while `busy` — for `DEAL_HOLD_MS` (two seconds) from when it first appears
 for a scored round, then goes live on its own, with no countdown. A number of its own, derived
-from no animation and bounded by both neighbours: longer than an Assafed round's banners take to leave, shorter than the server's
-auto-deal delay. Keyed on the scorecard's length, so a republication of the same round
+from no animation and bounded by both neighbours: longer than an Assafed round's banners take
+to *arrive* (0.75s), so nobody deals before an Assaf has landed, and shorter than the server's
+auto-deal delay. It falls while the banners are still held — a clean call is gone at 2.35s, an
+Assafed round at 2.8s (#241) — so a deal as soon as it goes live cuts them off, unmounting
+them; accepted, the banners being inert to a tap and never holding up play. Keyed on the scorecard's length, so a republication of the same round
 restarts nothing and every new scored round, a reload and a resumed seat each get a hold of
 their own — which is why it does not ask `bannerAt`, silent where there was no position
 before. Component state and one timer in `Table.tsx`, the jolt's shape; the session core

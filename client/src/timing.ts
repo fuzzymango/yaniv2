@@ -58,13 +58,18 @@ export const SHAKE_MS = 100;
 
 /**
  * How long the call banners are held once every one of them has arrived — not the
- * announcement's whole length, which adds the beat before an Assaf and the exit.
+ * announcement's whole length, which adds the beat before an Assaf and the exit. A lone call is
+ * gone at 2.35s and an Assafed round at 2.8s.
+ *
+ * Long because a round's biggest moment was over before a player who glanced away had seen who
+ * called, and a custom call may be a phrase that takes longer to read than `YANIV` (issue #241).
+ * The same for every call, standard or custom, lone or answered.
  *
  * Bounded by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), inside which the whole
  * sequence has to finish comfortably — a table only bots are playing deals itself on, and a
  * watcher must see the round they are watching.
  */
-export const ANNOUNCE_HOLD_MS = 900;
+export const ANNOUNCE_HOLD_MS = 1900;
 
 /**
  * How long `YANIV` is up alone before `ASSAF` joins it — long enough for the call to have fully
@@ -108,11 +113,12 @@ export const announceLeaveAt = (count: number): number =>
  * What it stops is a double tap on Yaniv!, or a thumb already on its way to that slot, dealing
  * the round away before anybody has seen it.
  *
- * Bounded below by the longest call announcement — an Assafed round's banners fully gone,
- * `announceLeaveAt(2) + ANNOUNCE_EXIT_MS` — so nobody deals over the call that ended the
- * round; and above by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), so a human
- * is never held longer than a bots-only table waits for its watcher. Where it sits between
- * them is a judgement: the banners are gone by about 1.8s, which leaves time for the revealed
- * hands and the scores.
+ * Bounded below by both banners' arrival — an Assafed round's second banner fully in,
+ * `announceEnterAt(1) + ANNOUNCE_ENTER_MS`, 0.75s — so nobody deals before an Assaf has landed;
+ * and above by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), so a human is never
+ * held longer than a bots-only table waits for its watcher. Where it sits between them is a
+ * judgement, and it falls while the banners are still up (issue #241): a player who deals as
+ * soon as they can cuts them off, which unmounts them. An accepted trade — the banners take no
+ * tap, and the deal is never held back for them.
  */
 export const DEAL_HOLD_MS = 2000;

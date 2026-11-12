@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { AUTO_DEAL_MS } from "@yaniv/server/src/config.ts";
 import {
+  ANNOUNCE_ENTER_MS,
   ANNOUNCE_EXIT_MS,
   ANNOUNCE_HOLD_MS,
   ANNOUNCE_LEAD_MS,
@@ -46,14 +47,16 @@ describe("the call announcement", () => {
 
 /*
  * How long the deal is held back once a round is scored (issue #205), asserted only against its
- * two neighbours — the announcement it must not cut off and the auto-deal it must not outlast.
+ * two neighbours — the banners it must let arrive and the auto-deal it must not outlast. It may
+ * cut the banners off once they are up (issue #241): a deal unmounts them, and that is accepted.
  */
 describe("the deal hold", () => {
-  it("outlasts the longest call announcement", () => {
-    // Nobody can deal over the call that ended the round: an Assafed round's banners are
-    // both gone before the button goes live.
-    const assafed = announceLeaveAt(2) + ANNOUNCE_EXIT_MS;
-    assert.ok(assafed < DEAL_HOLD_MS);
+  it("outlasts both banners' arrival", () => {
+    // Nobody can deal before an Assaf has landed: the second banner of an Assafed round has
+    // fully arrived before the button goes live. The hold past that is not asserted — a deal
+    // may cut the banners short.
+    const answered = announceEnterAt(1) + ANNOUNCE_ENTER_MS;
+    assert.ok(answered < DEAL_HOLD_MS);
   });
 
   it("is shorter than the server's auto-deal delay", () => {
