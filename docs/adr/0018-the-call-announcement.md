@@ -98,6 +98,21 @@ ratio will otherwise be noticed and "fixed".
 This is the decision in this change most likely to be undone by accident, which is why it is
 written down here as well as on the constant.
 
+*Amended by #241:* both chains are released — the flight's and this one — and every duration in
+`timing.ts` is now a plain number derived from no other. Holding the banners a second longer was
+impossible to ask for: raising this root would have added 1.5 to 2 seconds rather than one,
+nearly doubled the beat before ASSAF, and made each entrance sluggish, and the flight's chain had
+the same coupling. The durations are tuned by eye, so each is now judged on its own, with the
+reason for its value as the comment on it; the accepted costs are that no one number speeds up a
+whole table any more, and nothing but play stops an accidentally slow slapdown. `ANNOUNCE_MS` is
+renamed `ANNOUNCE_HOLD_MS`, being the hold once every banner has arrived and not the
+announcement's length. The values are unchanged — hold 900ms, beat 450ms, entrance 300ms, exit
+450ms, so an Assafed round still totals 1.8s and a clean call 1.35s — and so is the staging: a
+banner arrives at its index times the beat, and all leave at the last arrival plus the hold. The
+deal hold (`DEAL_HOLD_MS`, 2s) keeps its lower limit of outlasting an Assafed round's banners.
+The timing suite no longer asserts any derivation or ordering between durations — only the
+staging, the announcement finishing well inside the auto-deal delay, and the deal hold's limits.
+
 ## The sequence is CSS, with no JavaScript timer
 
 The whole timeline is declarative — two elements at fixed offsets, no branching after the
@@ -225,7 +240,8 @@ that must **not** announce — a republish, a departure-caused match end, a seat
 The session suite drives a real socket server and asserts the field arrives where a screen
 would read it, that a whole match announces exactly its scored rounds in order, and that the
 final call is announced at `gameEnd`. The timing suite asserts the derivations and that the
-two chains are independent.
+two chains are independent. *(Amended by #241: no derivation is left to assert; it asserts the
+staging and the bounds against the auto-deal delay.)*
 
 Collapsing the new seam into the session suite was considered and rejected: it would mean
 driving a real server to a *specific* Assafed round with a known caller to assert ordering,

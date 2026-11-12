@@ -422,9 +422,8 @@ export function Table({
         the one every control here is already inside, so a tap during it lands exactly where
         it looks like it lands, and the jolt costs nobody a move.
 
-        How long it lasts comes down from the timing chain (`timing.ts`) rather than being a
-        number in the stylesheet: the shake is the last link of it, and a keyframe tuned to a
-        flight it no longer matches is exactly what deriving the lot was for. The stylesheet
+        How long it lasts comes down from `timing.ts` (`SHAKE_MS`) rather than being a number
+        in the stylesheet, so every duration on the table is tuned in one file. The stylesheet
         keeps what it is better at — how far the table moves, and in which directions.
       */}
       <main

@@ -565,10 +565,11 @@ docs/adr/0018): `YANIV` in yellow, `ASSAF` in red a beat later, both faded out t
 each seat's custom call for that kind (#238), resolved in `announcement.ts` off the arriving
 roster, upper-cased in the viewer's locale, shrunk then wrapped to #234's steps, and **still
 coloured by the kind**, so a red banner is an Assaf whatever it says. A one-shot
-like the flight, keyed on the scorecard growing so no republish replays it, on a second timing root
-deliberately not the flight's, in the two colours the scorecard now speaks. **The deal that
-replaces the call is held disabled for three seconds** (`DEAL_HOLD_MS`, #205), a third timing root
-keyed on the scorecard's length — the browser presenting a round, not a rule. Every decision behind
+like the flight, keyed on the scorecard growing so no republish replays it, in the two colours
+the scorecard now speaks. **The deal that replaces the call is held disabled for two seconds**
+(`DEAL_HOLD_MS`, #205), keyed on the scorecard's length — the browser presenting a round, not a
+rule. **Every animation duration in `timing.ts` is a plain number derived from no other** (#241),
+so each is tuned by eye on its own; the chains they once formed were released (ADR-0018). Every decision behind
 the geometry, the flight, the banner, the bar and the dim is in **`docs/client-table.md`** and the
 ADRs; the code is `fan.ts`, `score.ts`, `seating.ts`, `table/`.
 

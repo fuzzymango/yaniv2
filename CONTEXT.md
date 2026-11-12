@@ -211,10 +211,9 @@ Every move at the table flies, whoever took it (issues #72, #73, #74);
 A **slapdown flies as its own thing** (issue #95), and how it flies is most of what says it is
 not a turn: the one card crosses in `SLAP_MS` rather than `FLIGHT_MS`, on an accelerating curve
 where a discard decelerates, lands with a brief **pop** past its own size, and **jolts the
-whole table** behind it. Those durations are a **chain, not a set of numbers**
-(`client/src/timing.ts`): the slap is a fraction of the flight and the jolt a fraction of the
-slap, so the table is retuned by editing one value and cannot end up half fast and half slow.
-The chain is derived from nothing outside itself: what keeps a flight from being replaced
+whole table** behind it. Those durations are **plain numbers, each tuned on its own**
+(`client/src/timing.ts`, issue #241): the slap is sharper than the flight and the jolt shorter
+than the slap by judgement, not by derivation. What keeps a flight from being replaced
 before it finishes is the **bot think time** the server spaces moves out by, which is several
 times a flight and is a fact about the game rather than about the animation (issue #135). A
 network that bunches two broadcasts can cut a flight short — cosmetic, accepted, and only on a
@@ -251,10 +250,11 @@ a departure carries the previous round's result behind it with nobody having cal
 The scorecard grows by one row per scored round and by nothing else. See
 [ADR-0018](docs/adr/0018-the-call-announcement.md).
 
-Its durations are a **second chain** in `client/src/timing.ts`, rooted at `ANNOUNCE_MS` and
-deliberately *not* derived from the flight's root: the flight chain is the parts of one move,
-and how long a call is held has nothing to do with how fast a card crosses a table. This one's
-honest bound is the server's **auto-deal** delay, as the flight's is **bot think time**.
+Its durations are plain numbers in `client/src/timing.ts` — the **hold** (`ANNOUNCE_HOLD_MS`,
+once every banner has arrived), the beat before the answer, the entrance and the exit — each
+tuned on its own and none derived from the flight's: how long a call is held has nothing to do
+with how fast a card crosses a table. Their honest bound is the server's **auto-deal** delay,
+as the flight's is **bot think time**.
 
 Under reduced motion it keeps the banner and the beat and drops only the movement — unlike
 the flight, which is skipped outright. A flight is redundant with a position that can be read
