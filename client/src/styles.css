@@ -1065,8 +1065,8 @@ body {
 /*
  * The table knocked by a slapdown (issue #95): everything on the felt jolted a couple of
  * pixels and set straight again, for as long as the layer that put the class on leaves it on
- * (`--jolt-ms`, off the timing chain in `timing.ts` — the stylesheet says how far it moves
- * and nothing about how long, so the whole chain is still tuned from one number).
+ * (`--jolt-ms`, `SHAKE_MS` in `timing.ts` — the stylesheet says how far it moves and nothing
+ * about how long, so every duration on the table is still tuned in that one file).
  *
  * A transform and nothing else, on the element every control here is already inside. Both
  * halves matter: a transform carries hit-testing with it, so a tap during the jolt lands on

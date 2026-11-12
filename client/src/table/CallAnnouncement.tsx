@@ -28,8 +28,8 @@
  * banner, in which order and saying what, is `announcement.ts`'s and is asserted there — this
  * maps one `PlacedBanner` onto capitals, a size, a colour and two delays, and decides
  * nothing about the round: its one lookup is the size step, which is styling. The durations come down from `timing.ts` as custom properties
- * rather than being written into the stylesheet, so the chain stays in the one place a test
- * can assert it.
+ * rather than being written into the stylesheet, so they and the staging over them stay in the
+ * one place a test can assert it.
  *
  * **Long words shrink, then wrap** (#234's measured numbers): a size stepped down by the
  * length of what is drawn, to half the shout at the smallest, and wrapping from there. The

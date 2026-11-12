@@ -1,4 +1,4 @@
-# The call announcement: a one-shot banner over the seat, on a timing chain of its own
+# The call announcement: a one-shot banner over the seat, on timings of its own
 
 A Yaniv call is the most consequential moment in a round — a player stakes the round on
 holding the lowest hand and either takes it or is Assafed for 30 — and the table barely
@@ -64,7 +64,11 @@ The match-end panel renders over the top as it renders over everything else, and
 phase, and gating a screen on an animation timer is the effect-chasing-the-phase pattern this
 client has deliberately avoided.
 
-## A second timing root, and why it is not derived from the flight
+## A second timing root, and why it is not derived from the flight (released by #241, below)
+
+*The chains this section describes are gone: every duration is now a plain number of its own.
+What still holds is its reason — the announcement's timings owe nothing to the flight's. The
+amendment at the end of the section says why the chains went.*
 
 `client/src/timing.ts` states a doctrine in prose: one chain, every link a fraction of the one
 above it, so the table is retuned from one number and a second constant tuned to look right
@@ -97,6 +101,29 @@ ratio will otherwise be noticed and "fixed".
 
 This is the decision in this change most likely to be undone by accident, which is why it is
 written down here as well as on the constant.
+
+*Amended by #241:* both chains are released — the flight's and this one — and every duration in
+`timing.ts` is now a plain number derived from no other. Holding the banners a second longer was
+impossible to ask for: raising this root would have added 1.5 to 2 seconds rather than one,
+nearly doubled the beat before ASSAF, and made each entrance sluggish, and the flight's chain had
+the same coupling. The durations are tuned by eye, so each is now judged on its own, with the
+reason for its value as the comment on it; the accepted costs are that no one number speeds up a
+whole table any more, and nothing but play stops an accidentally slow slapdown. `ANNOUNCE_MS` is
+renamed `ANNOUNCE_HOLD_MS`, being the hold once every banner has arrived and not the
+announcement's length. The hold is then raised by exactly a second, to 1900ms, for every call
+standard or custom; the beat (450ms), the entrance (300ms) and the exit (450ms) are unchanged,
+so a clean call is gone at 2.35s and an Assafed round at 2.8s, ASSAF still arriving at 0.45s.
+The staging is unchanged too: a banner arrives at its index times the beat, and all leave at the
+last arrival plus the hold. The deal hold (`DEAL_HOLD_MS`) stays at 2s, which now falls while
+the banners are up, so its lower limit is no longer outlasting an Assafed round's banners but
+outlasting their *arrival* — the second banner fully in, 0.75s — so nobody deals before an Assaf
+has landed. A player who deals as soon as they can cuts the banners off, which unmounts them
+(below) — as does any other publication arriving while they are up, a toast or another seat
+dropping or coming back, the announcement being a one-shot, and the longer hold widens that
+window from 1.8s to 2.8s; that is accepted, and raising the deal hold to 3s to wait for them
+was considered and declined. It is still the browser presenting a round and not a rule. The timing suite no longer
+asserts any derivation or ordering between durations — only the staging, the announcement
+finishing well inside the auto-deal delay, and the deal hold's two limits.
 
 ## The sequence is CSS, with no JavaScript timer
 
@@ -225,7 +252,9 @@ that must **not** announce — a republish, a departure-caused match end, a seat
 The session suite drives a real socket server and asserts the field arrives where a screen
 would read it, that a whole match announces exactly its scored rounds in order, and that the
 final call is announced at `gameEnd`. The timing suite asserts the derivations and that the
-two chains are independent.
+two chains are independent. *(Amended by #241: no derivation is left to assert; it asserts the
+staging, the bounds against the auto-deal delay, and the deal hold outlasting both banners'
+arrival.)*
 
 Collapsing the new seam into the session suite was considered and rejected: it would mean
 driving a real server to a *specific* Assafed round with a known caller to assert ordering,

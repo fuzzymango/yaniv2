@@ -1,43 +1,37 @@
 /**
- * How long the moving parts of the table last, as chains rather than a handful of numbers.
+ * How long the moving parts of the table last.
  *
- * Every duration below a root is a fraction of the one above it (issue #95), so a whole
- * chain is retuned by editing one value: slow a flight down and the slapdown slows with it,
- * and the jolt behind it with that. A second constant tuned to look right beside the first
- * would be right only until somebody changed the first.
- *
- * **There are three roots, and that they are several is deliberate** (issues #156, #205). A
- * chain is the parts of one thing, and a card crossing the table and a call being announced
- * are not one thing — the reasoning is on `ANNOUNCE_MS` below and in docs/adr/0018, and it is
- * the change here most likely to be undone by somebody tidying. The third, the deal hold, is a
- * chain of one: a pause on a control rather than an animation.
- *
- * The chains and what each link answers for:
+ * **Every duration here is a plain number, derived from none of the others** (issue #241). They
+ * used to be chains, each a fraction of one root, so a table could be retuned from one number —
+ * and so no one of them could be tuned without moving the rest: holding the banners a second
+ * longer would have stretched the beat before an Assaf and made each entrance sluggish. Each is
+ * judged by eye, on its own, and the reason for its value is the comment on it. Why the chains
+ * were released is recorded in docs/adr/0018.
  *
  *   FLIGHT_MS           how long a card takes to cross the table
  *   SLAP_MS             the same journey, made in anger
  *   SHAKE_MS            how long the table is still ringing from it
  *
- *   ANNOUNCE_MS         how long a call's banners are held once they are all up
+ *   ANNOUNCE_HOLD_MS    how long a call's banners are held once they are all up
  *   ANNOUNCE_LEAD_MS    how long YANIV is up alone before ASSAF answers it
  *   ANNOUNCE_ENTER_MS   a banner arriving
  *   ANNOUNCE_EXIT_MS    the pair leaving together
  *
  *   DEAL_HOLD_MS        how long a scored round is on screen before it can be dealt away
  *
- * Pure arithmetic and nothing else — no element, no clock, no preference — so the derivations
- * are asserted by a test with no DOM near it, which is the whole reason they live here rather
- * than beside the animation that runs them.
+ * What a test asserts here is the staging built on them and where a duration would collide with
+ * something outside the animation — the server's auto-deal delay, and a deal landing before an
+ * Assaf has — never a number. Pure arithmetic and nothing else — no element, no clock, no
+ * preference — which is why it lives here rather than beside the animation that runs it.
  */
 
 /**
  * How long a card is in the air.
  *
- * The top of the flight chain and derived from nothing: what keeps a flight from being replaced
- * before it finishes is the server's bot think time, which is several times this and is a
- * fact about the game rather than about the animation. A network that bunches two
- * broadcasts can cut a flight short — cosmetic, accepted, and only on a connection that has
- * already stuttered.
+ * What keeps a flight from being replaced before it finishes is the server's bot think time,
+ * which is several times this and is a fact about the game rather than about the animation. A
+ * network that bunches two broadcasts can cut a flight short — cosmetic, accepted, and only on a
+ * connection that has already stuttered.
  *
  * Long enough to be seen and short enough that a player who already knows what they played
  * never waits on it. They never wait on it in any case: the turn is sent, acked and drawn
@@ -46,65 +40,53 @@
 export const FLIGHT_MS = 300;
 
 /**
- * The same distance, half the time: a slapdown is a card thrown down rather than played
- * (docs/rules.md §9), and how fast it crosses is most of what says so.
+ * A slapdown crossing the same distance as a flight, sharper than a discard: a slapdown is a
+ * card thrown down rather than played (docs/rules.md §9), and how fast it crosses is most of
+ * what says so.
  *
- * Half is the ratio because the difference has to be legible without being a different
- * animation — a card that arrived at a quarter of the time would read as a glitch, and one at
- * three quarters as the same discard. What it is a half *of* is the point: the sharpness is a
- * fact about a slapdown relative to a turn, not a speed of its own.
+ * Sharper by enough that the difference is legible, and not so much that it reads as a different
+ * animation — too quick and the card reads as a glitch, too close to the flight and as the same
+ * discard.
  */
-export const SLAP_MS = FLIGHT_MS / 2;
+export const SLAP_MS = 150;
 
 /**
- * How long the table jolts for once the card lands — two thirds of the flight that caused it,
- * so the jolt is over before a player's eye has left the pile.
- *
- * Derived from the slap and not the flight, because it is the *slap's* aftershock: a slapdown
- * made quicker should ring for less time, not the same time.
+ * How long the table jolts for once a slapdown lands — shorter than the slap that caused it, so
+ * the jolt is over before a player's eye has left the pile.
  */
-export const SHAKE_MS = (SLAP_MS * 2) / 3;
+export const SHAKE_MS = 100;
 
 /**
- * How long the pair of call banners is held once both are up — **a second root, derived
- * from nothing above it, and deliberately not from `FLIGHT_MS`** (issue #156).
+ * How long the call banners are held once every one of them has arrived — not the
+ * announcement's whole length, which adds the beat before an Assaf and the exit
+ * (`announceLeaveAt(count) + ANNOUNCE_EXIT_MS`).
  *
- * That is a departure from the one-chain doctrine at the top of this file, and it is a
- * decision rather than an oversight: every link of the chain above is a part of *one move*,
- * so a slapdown's aftershock genuinely should shorten when the slapdown does. A call
- * announcement has no such relationship to how fast a card crosses a table. Hung off the
- * flight, speeding the cards up would quietly drain the tension out of an Assaf — correct
- * by the letter of the doctrine and wrong by its reason. Please do not tidy the two roots
- * into one; see docs/adr/0018.
+ * Long because a round's biggest moment was over before a player who glanced away had seen who
+ * called, and a custom call may be a phrase that takes longer to read than `YANIV` (issue #241).
+ * The same for every call, standard or custom, lone or answered.
  *
- * Each root is bounded by the thing that actually constrains it. The flight's bound is the
- * server's bot think time; this one's is the server's auto-deal delay (`AUTO_DEAL_MS`, ten
- * seconds), inside which the whole sequence has to finish comfortably — a table only bots
- * are playing deals itself on, and a watcher must see the round they are watching.
- *
- * `ANNOUNCE_MS` is three times `FLIGHT_MS` **by coincidence and not by relationship**. The
- * ratio is stated here because it will otherwise be noticed and "fixed".
+ * Bounded by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), inside which the whole
+ * sequence has to finish comfortably — a table only bots are playing deals itself on, and a
+ * watcher must see the round they are watching.
  */
-export const ANNOUNCE_MS = 900;
+export const ANNOUNCE_HOLD_MS = 1900;
 
 /**
- * How long `YANIV` is up alone before `ASSAF` joins it — half the hold, so the reversal
- * lands as an answer to the call rather than as a second simultaneous claim.
- *
- * A fraction of the hold rather than a number of its own, on the same principle the flight
- * chain is built on: a longer announcement should have a longer beat inside it.
+ * How long `YANIV` is up alone before `ASSAF` joins it — long enough for the call to have fully
+ * arrived and been read, short enough that the reversal lands as an answer to the call rather
+ * than as a second simultaneous claim.
  */
-export const ANNOUNCE_LEAD_MS = ANNOUNCE_MS / 2;
+export const ANNOUNCE_LEAD_MS = 450;
 
-/** A banner arriving. A third of the hold: a snap, and over before it is read. */
-export const ANNOUNCE_ENTER_MS = ANNOUNCE_MS / 3;
+/** A banner arriving: a snap, and over before it is read. */
+export const ANNOUNCE_ENTER_MS = 300;
 
 /**
  * The pair leaving together — longer than the entrance on purpose. A banner should arrive
  * with a snap and leave without one, and the asymmetry is what makes the round read as
  * closed rather than as cut off.
  */
-export const ANNOUNCE_EXIT_MS = ANNOUNCE_MS / 2;
+export const ANNOUNCE_EXIT_MS = 450;
 
 /**
  * When one banner of an announcement arrives, and when every banner of it leaves.
@@ -120,25 +102,23 @@ export const ANNOUNCE_EXIT_MS = ANNOUNCE_MS / 2;
 export const announceEnterAt = (index: number): number => index * ANNOUNCE_LEAD_MS;
 
 export const announceLeaveAt = (count: number): number =>
-  (count - 1) * ANNOUNCE_LEAD_MS + ANNOUNCE_MS;
+  (count - 1) * ANNOUNCE_LEAD_MS + ANNOUNCE_HOLD_MS;
 
 /**
- * How long "Deal next round" is held disabled once it first appears for a scored round —
- * **a third root, derived from neither chain above** (issue #205).
+ * How long "Deal next round" is held disabled once it first appears for a scored round
+ * (issue #205).
  *
  * The browser choosing how long to present a round, **not a rule**: the server accepts a deal
  * at any moment of `roundEnd`, and a CLI player or the auto-deal may deal inside this hold.
  * What it stops is a double tap on Yaniv!, or a thumb already on its way to that slot, dealing
  * the round away before anybody has seen it.
  *
- * Bounded below by the longest call announcement — an Assafed round's banners fully gone,
- * `announceLeaveAt(2) + ANNOUNCE_EXIT_MS` — so nobody deals over the call that ended the
- * round; and above by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), so a human
- * is never held longer than a bots-only table waits for its watcher. Where it sits between
- * them is a judgement: the banners are gone by about 1.35s, which leaves a second and a half
- * for the revealed hands and the scores.
- *
- * Not derived from `ANNOUNCE_MS`, though it is bounded by it: a shorter announcement is no
- * reason to give a player less time to read the hands. 
+ * Bounded below by both banners' arrival — an Assafed round's second banner fully in,
+ * `announceEnterAt(1) + ANNOUNCE_ENTER_MS` — so nobody deals before an Assaf has landed; and
+ * above by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), so a human is never held
+ * longer than a bots-only table waits for its watcher. Where it sits between them is a
+ * judgement, and nothing holds it past the banners' exit (issue #241): a player who deals as
+ * soon as they can may cut them off, which unmounts them. An accepted trade — the banners take
+ * no tap, and the deal is never held back for them.
  */
 export const DEAL_HOLD_MS = 2000;

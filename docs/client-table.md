@@ -333,22 +333,22 @@ decisions, none of them about the rules of anything:
   landing nothing waits at**: the fan there stands for a count the position has already
   settled, so there is no card at the end of that journey to be drawn twice — and a back too
   few would misstate the count its own label states in words.
-- **`FLIGHT_MS` is the top of the chain and derived from nothing.** 300ms, against the
+- **`FLIGHT_MS` is bounded by bot think time, not by the client.** 300ms, against the
   seconds a bot pauses before its move: what keeps a flight from being replaced before it
   finishes is the server's think time, not a client-side beat (issue #135, which retired the
   one there was). A network that bunches two broadcasts can cut a flight short — cosmetic,
   accepted, and only on a connection that has already stuttered.
-- **A slapdown is the same journey, played harder** (issue #95). One card, at twice the
-  speed, on an accelerating curve where a discard decelerates, landing with a pop past its own
+- **A slapdown is the same journey, played harder** (issue #95). One card, sharper than a
+  discard, on an accelerating curve where a discard decelerates, landing with a pop past its own
   size and a jolt across the whole table. Nothing in it is a second animation: the pop is a
   keyframe on the ghost already flying, and the jolt is a class the flight's own settling puts
   on the element every control is already inside — a transform, so hit-testing goes with it
   and a tap during the jolt lands where it looks like it lands.
-- **The durations below it are one chain** (`timing.ts`): `SLAP_MS` a fraction of `FLIGHT_MS`,
-  and the jolt a fraction of `SLAP_MS`. A slapdown is *sharper than a discard*,
-  which is a ratio and not a speed — tuned as a number of its own it would be right until the
-  next time the flight changed. The chain is plain arithmetic in a module of its own precisely
-  so a test with no DOM near it can assert the derivations hold.
+- **Every duration is a plain number of its own** (`timing.ts`, issue #241): `SLAP_MS` quicker
+  than `FLIGHT_MS` and the jolt shorter than the slap, by judgement rather than by
+  derivation. They were once a chain, each a fraction of the flight, so the table retuned from
+  one number — and so none of them could be tuned without moving the rest. A slapdown being
+  *sharper than a discard* is now the comment on its constant, kept true by eye in play.
 - **The jolt is the table's, not the pile's.** What a slapdown is worth showing is the room
   reacting to it; a pile that wobbled on its own would be a card doing something the position
   does not say it did. The known cost is that a transformed table is briefly the containing
@@ -448,8 +448,9 @@ about this table in particular:
 - **An Assafed round is staged, and both banners leave together.** The call, a beat, then the
   answer to it, so the round reads in the order it happened rather than as two simultaneous
   claims; then both held and both faded out at once, so the two seats the round turned on can
-  be seen side by side before either goes. The beat is the second timing chain's, and the
-  reason that chain is not the flight's is the part of ADR-0018 most worth reading.
+  be seen side by side before either goes. The beat (`ANNOUNCE_LEAD_MS`) and the hold
+  (`ANNOUNCE_HOLD_MS`) are numbers of their own, as the entrance and the exit are — ADR-0018
+  says why they are not the flight's, and why they are no longer one another's.
 - **The seat's badge row gives up the two marks this now carries.** `yaniv` and `assaf` are
   gone from it; `milestone` and `out` stay, being the two facts nothing else on the table
   records, with `out` the loudest of them. What carries the round once the banner has faded is
@@ -459,14 +460,17 @@ about this table in particular:
 **And the deal waits until the round has been seen** (issues #204, #205). "Deal next round"
 takes the Yaniv call's slot, so a second tap on Yaniv!, or a thumb already on its way there,
 would deal the round away before anybody had read it. The button is drawn disabled —
-exactly as it is while `busy` — for `DEAL_HOLD_MS` (three seconds) from when it first appears
-for a scored round, then goes live on its own, with no countdown. That is a **third timing
-root**, derived from neither the flight's chain nor the announcement's and bounded by both
-neighbours: longer than an Assafed round's banners take to leave, shorter than the server's
-auto-deal delay. Keyed on the scorecard's length, so a republication of the same round
-restarts nothing and every new scored round, a reload and a resumed seat each get a hold of
-their own — which is why it does not ask `bannerAt`, silent where there was no position
-before. Component state and one timer in `Table.tsx`, the jolt's shape; the session core
+exactly as it is while `busy` — for `DEAL_HOLD_MS` from when it first appears for a scored
+round, then goes live on its own, with no countdown. A number of its own, derived from no
+animation and bounded by both neighbours: longer than an Assafed round's banners take to
+*arrive*, so nobody deals before an Assaf has landed, and shorter than the server's auto-deal
+delay. Nothing holds it past the banners' exit (#241), so a deal as soon as it goes live may cut
+them off, unmounting them; accepted, the banners being inert to a tap and never holding up
+play. (Not only a deal: the announcement is a one-shot, so *any* publication while it is up —
+a toast, another seat dropping or coming back — ends it early too.) Keyed on the scorecard's
+length, so a republication of the same round restarts nothing and every new scored round, a
+reload and a resumed seat each get a hold of their own — which is why it does not ask
+`bannerAt`, silent where there was no position before. Component state and one timer in `Table.tsx`, the jolt's shape; the session core
 gets no clock, and `busy` keeps its one meaning. It is presentation and **not a rule**: the
 server deals at any moment of `roundEnd`, so a CLI player, another browser past its own
 hold, or the auto-deal can deal inside this one.
