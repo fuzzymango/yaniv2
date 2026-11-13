@@ -496,13 +496,28 @@ body {
   overflow-y: auto;
 }
 
+/*
+ * One column of seats wherever one fits, and two across only where it does not (issue #263):
+ * the roster takes the height the settings leave it and fills it top to bottom, so a second
+ * column starts only once the first is full. That follows the room on the screen, not the
+ * seat count — four seats that fit stacked stay stacked on a tall phone.
+ *
+ * Never a third: the floor is half the seats' rows (`--seat-rows`, ⌈n/2⌉, from render), and
+ * below it the roster stops shrinking and `.lobby__body` scrolls instead, as it always has.
+ */
 .seats {
   margin: 0;
   padding: 0;
   list-style: none;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  flex: 1 0 0;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(auto-fill, var(--tap-compact));
+  grid-auto-columns: minmax(0, 1fr);
   gap: 0.375rem;
+  min-height: calc(
+    var(--seat-rows) * var(--tap-compact) + (var(--seat-rows) - 1) * 0.375rem
+  );
 }
 
 .seat {
@@ -515,8 +530,38 @@ body {
   background: var(--surface);
 }
 
+/*
+ * A two-across row at a narrow phone has about 140px, which the name and its chips cannot
+ * share on one line. The name keeps the line, and the chips give way: they wrap under it as
+ * one group, rather than squeezing the name to a letter. Two short lines fit the row's
+ * height, and a row with room for one line looks as it always has.
+ */
+.seat__who {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.125rem 0.5rem;
+  /* As `.lobby__body`: without it the row could not shrink, and so neither could the name. */
+  min-width: 0;
+}
+
+.seat__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.125rem 0.5rem;
+}
+
+/* A row with nothing to say about its player keeps the name's line to itself. */
+.seat__chips:empty {
+  display: none;
+}
+
 .seat__name {
-  /* Names are bounded server-side but not narrow; the marks keep their place. */
+  /*
+   * Names are bounded server-side but not narrow: one longer than its line is ellipsised,
+   * once the chips have already moved off that line.
+   */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -659,6 +704,15 @@ body {
 
   .lobby__body {
     flex: 0 1 auto;
+  }
+
+  /* And the seats are one column in seat order, with nothing to make room for. */
+  .seats {
+    flex: none;
+    grid-auto-flow: row;
+    grid-template-rows: none;
+    grid-auto-rows: var(--tap-compact);
+    min-height: 0;
   }
 }
 
