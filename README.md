@@ -12,10 +12,18 @@ the server's: `socket.io`, `postgres` for player accounts (`docs/adr/0019`), and
 | `server/` | The game engine: deck, rules, pure state transitions, per-player serialization, and the room registry — plus the profile store accounts are remembered in, `sql/` behind it, and `auth/` (Google sign-in and sessions). |
 | `client/` | The React browser client: the session core, screen components, and Socket.io connection. |
 
-`docs/rules.md` is the source of truth for gameplay and `docs/code-map.md` names every file in
-the four source trees; the rest of `docs/` is indexed from `CLAUDE.md`.
-`docs/backend-archetechture.md` is the original design sketch — where the two disagree, the code
-and `rules.md` are current.
+## Docs
+
+- `docs/rules.md` — the rules of the game, and the source of truth for gameplay.
+- `docs/architecture.md` — why the code is shaped the way it is, and what is deferred on purpose.
+- `docs/code-map.md` — every file in the four source trees, one line each.
+- `docs/adr/` — architecture decision records, one decision each, numbered.
+- `CONTEXT.md` — the domain vocabulary.
+- `docs/client-table.md` — the browser's table: seating, flights, the scorecard, the call banner.
+- `docs/client-session.md` — the browser's session core and the wire behind the table.
+- `docs/backend-archetechture.md` — the original design sketch, stale in places; where it
+  disagrees, the code and `rules.md` are current.
+- `CLAUDE.md` — the briefing an AI agent reads before changing code.
 
 ## Running
 
@@ -246,19 +254,9 @@ npm run demo --workspace=@yaniv/server -- --seed 42 --players 4
 
 ## Design notes
 
-- **Pure transitions.** `startGame`, `takeTurn`, `callYaniv`, and `startNextRound` take a
-  state and return a new one. Nothing mutates in place.
-- **A turn is atomic.** Discarding and drawing are one indivisible action, so there is no
-  state where a player has discarded but not yet drawn.
-- **Rounds are nested.** Round-scoped data lives in `GameState.round`; starting a round
-  replaces that object wholesale, so no field can survive from the previous round.
-- **Seeded randomness.** Every function needing randomness takes an `Rng` argument. Tests
-  seed it and replay exact deals; a reported bug can be reproduced from its seed.
-- **Errors are values.** Rule violations come back as `Result` failures carrying a
-  `GameErrorCode`. Anything that *throws* is a genuine defect.
-- **Serialization is the security boundary.** `GameState` holds every hand and the draw
-  pile order, and must never be sent to a client. `serializeStateForPlayer` builds a
-  per-viewer view; tests assert no hidden card id appears in the serialized payload.
+Why the code is shaped the way it is — pure transitions, the atomic turn, injected randomness,
+errors as values, serialization as the security boundary and the rest — is in
+`docs/architecture.md`.
 
 ## Deploying
 

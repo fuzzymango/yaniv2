@@ -17,7 +17,7 @@ them anyway).
 Every rule function that used to read one of these constants ambiently now takes the
 room's value as an explicit argument instead — `canCallYaniv(hand, threshold)`, `deal`
 given `handSize`, the bust check given `maxScore`. This follows the same principle
-already established for `Rng` ("Randomness is injected, never ambient" in `CLAUDE.md`):
+already established for `Rng` ("Randomness is injected, never ambient" in `docs/architecture.md`):
 a value that can now legitimately differ per room can no longer be a module-level import.
 `shared/src/config.ts`'s constants survive only as the default values a freshly created
 room's `RoomSettings` is seeded with.

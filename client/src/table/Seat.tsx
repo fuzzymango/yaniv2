@@ -3,7 +3,7 @@
  * are.
  *
  * **Five exported components in one file, and the invariant is one box per seat.** The rule
- * elsewhere in this client is one exported component per file (CLAUDE.md, `client/src/`);
+ * elsewhere in this client is one exported component per file (`CLAUDE.md`, "Code Style");
  * these five are the documented exception, because a seat's size is one fact and splitting
  * them would make it several. `CardFan` and `CascadeReveal` are two shapes of the *same* box
  * and take it from the same `seatFootprint` call, which is what lets a round being scored
@@ -27,8 +27,8 @@
  *
  * Presentational, like `PlayingCard`: nothing here decides anything, and the cards are
  * face down because an opponent's hand is not on the wire in the first place (see
- * "Serialization is the security boundary" in CLAUDE.md) — not because this chose to hide
- * it. The one element drawn to be measured rather than looked at is the fan's own flight box
+ * "Serialization is the security boundary" in `docs/architecture.md`) — not because this chose
+ * to hide it. The one element drawn to be measured rather than looked at is the fan's own flight box
  * (`seatBox`, issue #74): a hand nobody can see has no card in it to fly to or from, so the
  * seat stands in for the lot, and even that is a place the layout already puts a card at.
  *

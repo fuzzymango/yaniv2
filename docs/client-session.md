@@ -3,7 +3,7 @@
 How `client/src/session.ts` behaves: the snapshot it publishes, what locks and releases
 `busy`, how an account and a seat are claimed back and what a dropped socket does. `docs/client-table.md`
 is its sibling — that one is the felt, this one is the wire behind it. Referenced from
-`CLAUDE.md`, which keeps only the shape.
+`docs/architecture.md`, which keeps only the shape.
 
 ## The snapshot, and the hook over it
 

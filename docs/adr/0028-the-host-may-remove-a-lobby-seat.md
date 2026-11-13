@@ -54,7 +54,7 @@ never ends a room, and the role still retires at the first deal.
   gone kicks again or starts the match.
 - **Kicking mid-match** — rejected. It would need the role 0012 retired, or a vote, and a seat in a
   match has a hand and a score in play. What an absent seat does mid-round is its own open question,
-  listed out of scope in `CLAUDE.md`.
+  listed under "Deferred on purpose" in `docs/architecture.md`.
 - **A confirm step** — rejected: there is little to protect, and the lobby's other host controls
   have none.
 - **`removePlayer` as the wire name** — rejected: that is the transition every exit goes through, so

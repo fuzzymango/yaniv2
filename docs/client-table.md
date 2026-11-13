@@ -3,7 +3,7 @@
 How the browser client arranges a table on a phone: opponents round the felt during play, the
 same seats read back once the round is scored, and the same again under the standings once the
 match is. Extracted from `CLAUDE.md` when it
-reached its length cap; the decisions are unchanged, and `CLAUDE.md` points here.
+reached its length cap; the decisions are unchanged, and `docs/architecture.md` points here.
 
 ## The table is seated, and part of every seat is off the screen
 
