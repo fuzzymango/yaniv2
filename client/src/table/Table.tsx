@@ -38,12 +38,13 @@
  * Nothing about the *game* is stateful here. The selection lives in the session core,
  * because it has to survive views arriving underneath it. The state on this screen is the
  * flight (`useCardFlight`), which is a picture of a move already played and decides nothing
- * — see `CardsInFlight.tsx` — and the deal hold, which is how long a scored round is
- * presented before its button goes live (issue #205) and decides nothing about the game.
+ * — see `CardsInFlight.tsx` — the deal hold, which is how long a scored round is presented
+ * before its button goes live (issue #205), and the milestone count, a total draining from
+ * the multiple of 50 it landed on (spec #280). None of them decides anything about the game.
  */
 
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import type {
   OpponentView,
   PlayerGameView,
@@ -61,14 +62,16 @@ import { Scorecard } from "./Scorecard.tsx";
 import type { Announcement } from "../announcement.ts";
 import { bannerAt } from "../announcement.ts";
 import { CallAnnouncement } from "./CallAnnouncement.tsx";
+import type { Countdown } from "../milestone.ts";
+import { countFrame } from "../milestone.ts";
 import type { CardFlight } from "../flight.ts";
 import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
-import { roundOutcome, scoreLabel } from "../score.ts";
+import { roundOutcome } from "../score.ts";
 import type { Zone } from "../seating.ts";
 import { ZONES, byRelativeSeat, seatZones } from "../seating.ts";
 import { seatStatus } from "../status.ts";
-import { DEAL_HOLD_MS, SHAKE_MS } from "../timing.ts";
+import { DEAL_HOLD_MS, MILESTONE_COUNT_MS, SHAKE_MS } from "../timing.ts";
 import type { DrawSource } from "../turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "../turn.ts";
 
@@ -89,6 +92,12 @@ interface TableProps {
    * already happened and decides nothing.
    */
   announcement: Announcement;
+  /**
+   * The milestone count this position arrived with, when this viewer watched the round scored
+   * (spec #280). A one-shot off the session snapshot like the two above — but only its *start*:
+   * the table latches it and outlives the publication that brought it, see `counting` below.
+   */
+  countdown: Countdown;
   onToggleCard: (cardId: string) => void;
   /** The tap that plays the turn — a draw target, because the draw *is* the commit. */
   onCommitTurn: (source: DrawSource) => void;
@@ -120,11 +129,18 @@ interface TableProps {
 function ScoredDetail({
   player,
   wentOut,
+  elapsedMs,
 }: {
   player: PlayerRoundResultView;
   /** Whether this round is the one that took them out of the match — the `OUT` tag. */
   wentOut: boolean;
+  /**
+   * How far into its milestone count this seat is, where it is counting (spec #280); absent
+   * for every seat that is not, which reads exactly as a count long since landed.
+   */
+  elapsedMs?: number | undefined;
 }) {
+  const frame = countFrame(player, wentOut, elapsedMs ?? Infinity);
   return (
     <>
       {/*
@@ -140,13 +156,18 @@ function ScoredDetail({
         Assaf. The banner over the seat says both, far louder, at the moment they are worth
         saying; the line above the felt names both players in a sentence once it has faded;
         and the scorecard is the durable per-seat record of who called what. A third, quieter
-        copy in this row was repeating all of them. What is left are the two facts nothing
-        else on the table records at all.
+        copy in this row was repeating all of them.
+
+        A grey `MILESTONE` chip sat here too, and no longer does (spec #280): the score beside
+        it now says so itself, landing on the multiple of 50 and draining from it, and the
+        scorecard's blue cell is the record. `OUT` is the one mark left — and on a seat that
+        hit a milestone it waits for the count to land, `countFrame` deciding when.
       */}
-      {player.milestoneReduction > 0 && <span className="seat__mark">milestone</span>}
-      {wentOut && <span className="seat__mark seat__mark--out">out</span>}
-      <span className="player__score">
-        {scoreLabel(player.scoreAfter, player.delta, player.milestoneReduction)}
+      {frame.outShown && <span className="seat__mark seat__mark--out">out</span>}
+      <span
+        className={`player__score ${frame.stage === "counting" ? "player__score--counting" : ""}`}
+      >
+        {frame.label}
       </span>
     </>
   );
@@ -158,6 +179,7 @@ export function Table({
   busy,
   flight,
   announcement,
+  countdown,
   onToggleCard,
   onCommitTurn,
   onCallYaniv,
@@ -284,6 +306,58 @@ export function Table({
     return () => window.clearTimeout(timer);
   }, [dealHeld, roundsScored]);
 
+  /**
+   * The milestone count on the screen, if there is one (spec #280): the round it counts, the
+   * seats counting in it, and when it started.
+   *
+   * **Latched, not read off the snapshot.** The session hands over a count's *start* as a
+   * one-shot, cleared by the next publication of anything — which is right for the banners,
+   * whose sequence a peer reconnecting may cut off at no cost, and wrong for a total halfway
+   * through draining, which would snap to its landing. So the count is held here and is live
+   * while the round it was latched for is the one on the screen, scored: keyed on the
+   * scorecard's length as the deal hold is, a republication of the same round neither restarts
+   * nor cuts it off, while a deal (a new phase), a match-ending departure (`App` mounts the
+   * table afresh for `gameEnd`) and a dropped socket (it unmounts) all end it.
+   *
+   * Latched in a layout effect so it is in place before the frame that brought it is painted:
+   * a passive one would paint one frame of the landed line first — `OUT` included, on a seat
+   * whose count is about to withhold it.
+   */
+  const [latch, setLatch] = useState<{
+    readonly count: NonNullable<Countdown>;
+    readonly startedAt: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    if (countdown !== null) setLatch({ count: countdown, startedAt: performance.now() });
+  }, [countdown]);
+  const counting =
+    latch !== null && result !== null && latch.count.round === roundsScored ? latch : null;
+
+  /**
+   * The one clock every counting seat is read by: a frame loop while a count is live, stopping
+   * once it has landed and cancelled by its cleanup, so no frame callback outlives the count or
+   * the table. One loop for the table rather than one per seat — six seats can count at once.
+   *
+   * Holds the frame's own timestamp rather than an elapsed time: a count latched after the last
+   * one landed reads its start off the new latch, and the old stamp is before it — the count's
+   * first moment, never its last.
+   */
+  const [frameAt, setFrameAt] = useState(0);
+  useEffect(() => {
+    if (counting === null) return;
+    let frame = requestAnimationFrame(function tick(now) {
+      setFrameAt(now);
+      if (now - counting.startedAt < MILESTONE_COUNT_MS) frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [counting]);
+
+  /** How far into the count a seat is, or undefined where it is not counting. */
+  const countedAt = (playerId: string): number | undefined =>
+    counting?.count.seats.some((seat) => seat.playerId === playerId)
+      ? frameAt - counting.startedAt
+      : undefined;
+
   const zones = seatZones([...view.opponents].sort(byRelativeSeat(view)));
 
   const seated = [view.you, ...view.opponents];
@@ -320,6 +394,15 @@ export function Table({
    */
   const isOut = (player: SelfView | OpponentView): boolean =>
     player.outInRound !== null && !wentOut(player);
+
+  /**
+   * Whether the seat wears that news *yet* — the red ring on its namecard, beside the `OUT`
+   * mark `ScoredDetail` draws off the same answer. On a seat counting a milestone both wait
+   * for the landing (spec #280, amended on review #281): shown from the first frame, the ring
+   * would give away what the count is holding back. Everywhere else, `wentOut` as it was.
+   */
+  const outShown = (player: SelfView | OpponentView, row: PlayerRoundResultView): boolean =>
+    countFrame(row, wentOut(player), countedAt(player.id) ?? Infinity).outShown;
 
   /**
    * One opponent in their zone, in whichever of the two shapes the phase calls for — the
@@ -360,7 +443,7 @@ export function Table({
         zone={zone}
         name={opponent.name}
         isOut={isOut(opponent)}
-        wentOut={wentOut(opponent)}
+        wentOut={outShown(opponent, row)}
         // The same slot the live seat carries (issue #146): who is there is as true of a
         // round being scored as of one being played, and a seat that says "away" while the
         // table waits on the deal is saying exactly what is worth knowing.
@@ -368,7 +451,13 @@ export function Table({
         // The call over their seat, where there is one: position is what says who called
         // (issue #156), so it goes in the seat's own box rather than anywhere central.
         banner={announcedAt(opponent.id)}
-        detail={<ScoredDetail player={row} wentOut={wentOut(opponent)} />}
+        detail={
+          <ScoredDetail
+            player={row}
+            wentOut={wentOut(opponent)}
+            elapsedMs={countedAt(opponent.id)}
+          />
+        }
         key={opponent.id}
       >
         <CascadeReveal cards={row.hand} zone={zone} />
@@ -379,6 +468,7 @@ export function Table({
   /** The viewer's own row of the round, for the footer under their revealed hand. */
   const yourRound = scored(view.you.id);
   const youWentOut = wentOut(view.you);
+  const yourOutShown = yourRound !== null && outShown(view.you, yourRound);
 
   /**
    * The cards to lay out where this player's hand goes, or `null` when there are none and
@@ -710,7 +800,7 @@ export function Table({
         */}
         <footer
           className={`you ${live && yourTurn ? "you--turn" : ""} ${
-            youWentOut ? "you--went-out" : ""
+            yourOutShown ? "you--went-out" : ""
           }`}
         >
           {/*
@@ -723,7 +813,11 @@ export function Table({
           <Scorecard view={view} />
           <span className="player__name">{view.you.name}</span>
           {result !== null && yourRound !== null ? (
-            <ScoredDetail player={yourRound} wentOut={youWentOut} />
+            <ScoredDetail
+              player={yourRound}
+              wentOut={youWentOut}
+              elapsedMs={countedAt(view.you.id)}
+            />
           ) : (
             <>
               {/*

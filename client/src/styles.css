@@ -15,6 +15,8 @@
   --danger: #fca5a5;
   --news: #86efac;
   --surface: rgb(0 0 0 / 25%);
+  /* A total a milestone cut (docs/rules.md §7): the scorecard's cell and a count draining. */
+  --milestone: #93c5fd;
 
   /*
    * The call banner's two colors, scoped to themselves rather than aliasing `--accent`/
@@ -1811,6 +1813,18 @@ body {
 }
 
 /*
+ * A total draining from the multiple of 50 it landed on (spec #280): in the scorecard's
+ * milestone blue, and glowing, so a seat counting reads from across the table. Landing is the
+ * class coming off in one frame — the number back in ink, on the sentence every seat reads.
+ */
+.player__score--counting {
+  color: var(--milestone);
+  text-shadow:
+    0 0 0.35em var(--milestone),
+    0 0 0.8em rgb(147 197 253 / 60%);
+}
+
+/*
  * The way into the match's ledger, in the viewer's own bar and to the left of their name
  * (docs/adr/0017). Smaller than the topbar's icons and dimmer than the row it sits in: it
  * is there to be found rather than noticed, and the numbers beside it are what the bar is
@@ -1942,7 +1956,7 @@ body {
 }
 
 .scorecard__cell--milestone {
-  color: #93c5fd;
+  color: var(--milestone);
   font-weight: 700;
 }
 

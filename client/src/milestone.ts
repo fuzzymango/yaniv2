@@ -1,18 +1,22 @@
 /**
- * Whether a scored round has a milestone count to play, and whose seats it counts at.
+ * Whether a scored round has a milestone count to play, whose seats it counts at, and what
+ * each of their lines says at a moment of it.
  *
  * The pure half of the **milestone countdown** (spec #280), and `announcement.ts`'s sibling:
  * two positions in — the one on the screen and the one that has just arrived — and either a
  * description of what to count or nothing at all. A seat whose total a round left exactly on
  * a multiple of 50 is shown landing there and then draining by 50 (docs/rules.md §7); this
- * says which seats and between which two numbers. It says nothing about pixels, elements or
- * frames — the table latches the count and runs its clock.
+ * says which seats and between which two numbers, and — given how far into the count a frame
+ * is — what the line says and whether the news of going out may show yet. It says nothing about
+ * pixels, elements or clocks: the table latches the count and runs the one clock it is read by.
  *
  * Total in the same way as its sibling: every pair of positions has an answer, and "nothing
- * to count" is one of them.
+ * to count" is one of them; every elapsed time has a frame, before the count and after it.
  */
 
-import type { PlayerGameView } from "@yaniv/shared";
+import type { PlayerGameView, PlayerRoundResultView } from "@yaniv/shared";
+import { scoreLabel } from "./score.ts";
+import { MILESTONE_COUNT_MS } from "./timing.ts";
 
 /** One seat's count: where its total landed and where the milestone leaves it. */
 export interface MilestoneCount {
@@ -68,3 +72,60 @@ export function countdownFrom(shown: PlayerGameView | null, arriving: PlayerGame
   const [first, ...rest] = seats;
   return first === undefined ? null : { round: arriving.scorecard.length, seats: [first, ...rest] };
 }
+
+/** What one seat's scored line says at a moment of its count. */
+export interface CountFrame {
+  /** Still draining, or done — the moment the line goes back to the sentence every seat reads. */
+  readonly stage: "counting" | "landed";
+  /** The total the line ends on at this moment. */
+  readonly total: number;
+  /** `${before} + ${delta} = ${total} pts` while counting; `scoreLabel(...)` once landed. */
+  readonly label: string;
+  /** Whether the seat may wear the news that this round took it out: `OUT` and the red ring. */
+  readonly outShown: boolean;
+}
+
+/**
+ * One seat's line, `elapsedMs` into its count.
+ *
+ * **While counting** the sentence is the round unfolded — where they stood, the round's raw
+ * points, and the total those took them to — and the total drains **linearly** to where the
+ * milestone left it (variant A, #279: a total read as falling steadily, not as a number being
+ * swapped). The two fixed numbers are exactly `scoreLabel`'s `scoreBefore` and the wire's
+ * `delta`, so the unfolded sentence and the folded one are the same arithmetic.
+ *
+ * **Once landed** it is `scoreLabel`'s sentence, unchanged — one frame from the count to the line
+ * every other scored seat reads, never a third wording.
+ *
+ * **Going out waits for the landing** (spec #280, amended on plan review #281): on a seat that
+ * hit a milestone and went out in the same round, `OUT` and the red ring tell the end of the
+ * count before it is over — and the count is the news. A seat that went out with nothing to
+ * count shows both at once, as it always has; so does any line no milestone touched, which is
+ * landed from the start, so a seat that is not counting can never be drawn as one.
+ *
+ * Total over any elapsed time: before 0 (a frame stamped a hair before the table latched the
+ * count) it reads as the count's first moment, and from `MILESTONE_COUNT_MS` on as its last.
+ */
+export function countFrame(player: PlayerRoundResultView, wentOut: boolean, elapsedMs: number): CountFrame {
+  const { scoreAfter, delta, milestoneReduction } = player;
+  const landed = milestoneReduction === 0 || elapsedMs >= MILESTONE_COUNT_MS;
+  if (landed) {
+    return {
+      stage: "landed",
+      total: scoreAfter,
+      label: scoreLabel(scoreAfter, delta, milestoneReduction),
+      outShown: wentOut,
+    };
+  }
+
+  const landedOn = scoreAfter + milestoneReduction;
+  const total = landedOn - Math.round(milestoneReduction * clamp01(elapsedMs / MILESTONE_COUNT_MS));
+  return {
+    stage: "counting",
+    total,
+    label: `${landedOn - delta} + ${delta} = ${total} pts`,
+    outShown: false,
+  };
+}
+
+const clamp01 = (t: number): number => Math.min(1, Math.max(0, t));

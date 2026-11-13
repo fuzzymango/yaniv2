@@ -1,5 +1,6 @@
 /**
- * Whether a scored round has a milestone count to play, and whose seats it counts at.
+ * Whether a scored round has a milestone count to play, whose seats it counts at, and what
+ * each of their lines says at any moment of it.
  *
  * Pure fixtures in, a count or nothing out — `announcement.test.ts`'s shape, and on purpose
  * its trigger: the count starts on exactly the publications the banners do (spec #280).
@@ -13,8 +14,16 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { PlayerGameView, PlayerRoundScore, RoundResultView, RoundScore } from "@yaniv/shared";
-import { countdownFrom } from "../src/milestone.ts";
+import type {
+  PlayerGameView,
+  PlayerRoundResultView,
+  PlayerRoundScore,
+  RoundResultView,
+  RoundScore,
+} from "@yaniv/shared";
+import { countFrame, countdownFrom } from "../src/milestone.ts";
+import { scoreLabel } from "../src/score.ts";
+import { MILESTONE_COUNT_MS } from "../src/timing.ts";
 import { cards, viewOf } from "./helpers.ts";
 
 /** One seat's line in a scorecard row: where the round left it, and what a milestone took off. */
@@ -146,6 +155,125 @@ describe("countdownFrom", () => {
       // Content and trigger come off the one row. The reveal fixture carries a milestone
       // for p2; the row scored here does not, so there is nothing to count.
       assert.equal(countdownFrom(playing(), scored([plain(1)])), null);
+    });
+  });
+});
+
+/**
+ * One seat's revealed line: stood on `before`, caught holding `delta`, and a milestone taking
+ * 50 back where the total landed on one. `wentOut` is the caller's to say, as `Table` does.
+ */
+const revealed = (before: number, delta: number): PlayerRoundResultView => {
+  const landed = before + delta;
+  const milestoneReduction = delta > 0 && landed % 50 === 0 ? 50 : 0;
+  return {
+    playerId: "p2",
+    name: "Grace",
+    hand: cards("spades-9"),
+    handValue: delta,
+    delta,
+    milestoneReduction,
+    scoreAfter: landed - milestoneReduction,
+  };
+};
+
+/** Every whole millisecond of a count, and a little either side of it. */
+const throughTheCount = Array.from({ length: MILESTONE_COUNT_MS + 201 }, (_, i) => i - 100);
+
+describe("countFrame", () => {
+  // The spec's own example: on 20, caught holding 30, so 50 and back to 0.
+  const ada = revealed(20, 30);
+
+  describe("the label", () => {
+    it("is unfolded at the start: where they stood, the round's raw points, the multiple landed on", () => {
+      assert.deepEqual(countFrame(ada, false, 0), {
+        stage: "counting",
+        total: 50,
+        label: "20 + 30 = 50 pts",
+        outShown: false,
+      });
+    });
+
+    it("is unfolded and unmoved before the start — a frame stamped a moment before the latch", () => {
+      // A frame's timestamp is when the frame began, which can be a hair before the table
+      // latched the count; it reads as the count's first moment, never as a value past it.
+      assert.equal(countFrame(ada, false, -16).label, "20 + 30 = 50 pts");
+      assert.equal(countFrame(ada, false, -Infinity).total, 50);
+    });
+
+    it("drains halfway at half the count, with the fixed part of the sentence unchanged", () => {
+      assert.equal(countFrame(ada, false, MILESTONE_COUNT_MS / 2).label, "20 + 30 = 25 pts");
+    });
+
+    it("drains a total of integers, never rising, from the multiple to where the round left it", () => {
+      const totals = throughTheCount.map((ms) => countFrame(ada, false, ms).total);
+      for (const total of totals) assert.ok(Number.isInteger(total), `${total} is a whole number`);
+      for (let i = 1; i < totals.length; i += 1) {
+        assert.ok(totals[i]! <= totals[i - 1]!, `${totals[i]} after ${totals[i - 1]}`);
+      }
+      assert.equal(totals[0], 50);
+      assert.equal(totals[totals.length - 1], 0);
+    });
+
+    it("is exactly where the round left them at the count's length and beyond", () => {
+      for (const ms of [MILESTONE_COUNT_MS, MILESTONE_COUNT_MS + 1, 60_000, Infinity]) {
+        assert.equal(countFrame(ada, false, ms).total, ada.scoreAfter);
+        assert.equal(countFrame(ada, false, ms).stage, "landed");
+      }
+      assert.equal(countFrame(ada, false, MILESTONE_COUNT_MS - 1).stage, "counting");
+    });
+
+    it("lands on the folded sentence every other scored line reads", () => {
+      // The landing is one frame from the count to today's label, not a third wording.
+      for (const player of [ada, revealed(195, 55), revealed(70, 30)]) {
+        assert.equal(
+          countFrame(player, false, MILESTONE_COUNT_MS).label,
+          scoreLabel(player.scoreAfter, player.delta, player.milestoneReduction),
+        );
+      }
+    });
+
+    it("drains a total landed on a later multiple to the one below it", () => {
+      const mid = revealed(195, 55); // 250, back to 200
+      assert.equal(countFrame(mid, false, 0).label, "195 + 55 = 250 pts");
+      assert.equal(countFrame(mid, false, MILESTONE_COUNT_MS).label, "195 + 5 = 200 pts");
+    });
+
+    it("has nothing to count on a line no milestone touched", () => {
+      // Total over every line, so a seat that is not counting cannot be drawn as one.
+      const plainLine = revealed(10, 7);
+      assert.deepEqual(countFrame(plainLine, false, 0), {
+        stage: "landed",
+        total: 17,
+        label: scoreLabel(17, 7, 0),
+        outShown: false,
+      });
+    });
+  });
+
+  describe("going out", () => {
+    // On 195, caught holding 55: landed on 250, the milestone takes it to 200, still past 100.
+    const outOnMilestone = revealed(195, 55);
+
+    it("is withheld for the whole count from a seat the round took out", () => {
+      for (const ms of throughTheCount.filter((ms) => ms < MILESTONE_COUNT_MS)) {
+        assert.equal(countFrame(outOnMilestone, true, ms).outShown, false, `at ${ms}ms`);
+      }
+    });
+
+    it("is shown the moment the count lands, and from then on", () => {
+      assert.equal(countFrame(outOnMilestone, true, MILESTONE_COUNT_MS).outShown, true);
+      assert.equal(countFrame(outOnMilestone, true, Infinity).outShown, true);
+    });
+
+    it("is shown at once on a seat that went out with no milestone to count", () => {
+      assert.equal(countFrame(revealed(90, 27), true, 0).outShown, true);
+    });
+
+    it("is never shown on a seat the milestone saved", () => {
+      // On 120, caught holding 30: 150 back to 100, which is not past the limit.
+      const saved = revealed(120, 30);
+      for (const ms of throughTheCount) assert.equal(countFrame(saved, false, ms).outShown, false);
     });
   });
 });

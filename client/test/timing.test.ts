@@ -7,6 +7,7 @@ import {
   ANNOUNCE_HOLD_MS,
   ANNOUNCE_LEAD_MS,
   DEAL_HOLD_MS,
+  MILESTONE_COUNT_MS,
   announceEnterAt,
   announceLeaveAt,
 } from "../src/timing.ts";
@@ -63,5 +64,18 @@ describe("the deal hold", () => {
     // A human in the browser is never held longer than a bots-only table waits for its
     // spectator (ADR-0014).
     assert.ok(DEAL_HOLD_MS < AUTO_DEAL_MS);
+  });
+});
+
+/*
+ * How long a milestone seat's total takes to drain from the multiple of 50 it landed on (spec
+ * #280). Asserted against the one thing outside the animation it could collide with: a table
+ * only bots are playing deals itself on, and a watcher has to have seen the count land first.
+ * Against the deal hold it is asserted nothing — a deal may cut a count short, as it may the
+ * banners, and the count holds nothing up.
+ */
+describe("the milestone count", () => {
+  it("lands well inside the server's auto-deal delay", () => {
+    assert.ok(MILESTONE_COUNT_MS < AUTO_DEAL_MS / 2);
   });
 });

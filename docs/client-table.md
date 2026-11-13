@@ -66,19 +66,21 @@ the page, and nobody has to be re-found. What changes is what changed:
   any milestone reduction is folded in, and where it left them, with the operator carrying the
   sign so nothing reads as `+ -12`. One function for every seat and for the viewer's own
   footer, which drops its hand value: the cards are face up by then, and adding them up is
-  what they are for.
+  what they are for. **A seat a milestone cut is watched getting there**, once, by a viewer
+  who saw the round scored: the round unfolded, `195 + 55 = 250 pts`, the total draining in
+  blue to 200, then that same `scoreLabel` sentence in one frame (spec #280, below).
 - **The turn line says how the round ended**, in place. A heading above the seats would push
   every one of them down the page at the one moment they must not move.
 - **The Yaniv call becomes the deal** — offered to any viewer still in the match, or the line
   saying what is being waited for, in the slot the call was in (docs/adr/0012).
 - **Anybody the round took out of the match is tagged `OUT`** (issue #142), on their label
-  beside the marks saying how the score was arrived at, with the same ring round it that
-  whose-turn-it-is wears — in the colour the news actually is, and the two can never be on
+  beside the score, with the same ring round it that whose-turn-it-is wears — in the colour the news actually is, and the two can never be on
   together. It is *all* that is added: no prose, and the eliminated player's hand and round
   score are still shown, so a round that ended somebody's match and one that did not are the
   same screen in two states. Whose round it was is the seat's own `outInRound` against the
   round being drawn, not the viewer's `roundNumber` — the record is what the rest of the
-  screen is reading.
+  screen is reading. On a seat whose milestone is still counting, both the tag and the ring
+  wait for it to land (`countFrame`'s `outShown`, below).
 
 Seats are placed by the live roster sorted by `byRelativeSeat` in **both** phases, and the
 round's own record is looked up by id against whoever is already in a zone. Two placements
@@ -452,10 +454,12 @@ about this table in particular:
   (`ANNOUNCE_HOLD_MS`) are numbers of their own, as the entrance and the exit are — ADR-0018
   says why they are not the flight's, and why they are no longer one another's.
 - **The seat's badge row gives up the two marks this now carries.** `yaniv` and `assaf` are
-  gone from it; `milestone` and `out` stay, being the two facts nothing else on the table
-  records, with `out` the loudest of them. What carries the round once the banner has faded is
-  the line above the felt, which names both players in a sentence, and the scorecard — which
-  now speaks the same two colours, yellow for the call and red for the Assaf.
+  gone from it. What carries the round once the banner has faded is the line above the felt,
+  which names both players in a sentence, and the scorecard — which now speaks the same two
+  colours, yellow for the call and red for the Assaf. The grey `milestone` chip has since gone
+  too (spec #280): the score beside it now says so itself, by counting (below), and the
+  scorecard's blue cell is the record. `out` is the one mark left — and on a seat still
+  counting a milestone it waits, with the red ring, for the count to land.
 
 **And the deal waits until the round has been seen** (issues #204, #205). "Deal next round"
 takes the Yaniv call's slot, so a second tap on Yaniv!, or a thumb already on its way there,
@@ -474,3 +478,35 @@ reload and a resumed seat each get a hold of their own — which is why it does 
 gets no clock, and `busy` keeps its one meaning. It is presentation and **not a rule**: the
 server deals at any moment of `roundEnd`, so a CLI player, another browser past its own
 hold, or the auto-deal can deal inside this one.
+
+## And a total a milestone cut is watched landing, then draining
+
+A round that leaves a seat exactly on a multiple of 50 takes 50 off it (docs/rules.md §7),
+and the folded label (`195 + 5 = 200 pts`) — plus a grey chip — was the whole of it: the
+rule's one moment of luck, read as arithmetic. The **milestone countdown** (#275, prototyped in
+#279, specified by #280) shows the total landing on the multiple and falling away from it:
+`20 + 30 = 50 pts`, in milestone blue with a glow, drained **linearly** to `20 + 30 = 0 pts` over
+`MILESTONE_COUNT_MS` (2000ms), then in one frame the folded `20 - 20 = 0 pts` back in ink. Every
+milestone seat counts at once, the viewer's own footer included, and a spectator sees the seats
+still playing count. What a line says at any moment is `countFrame` in `milestone.ts`, tested;
+when it starts is the session's one-shot (`countdownFrom`, `docs/client-session.md`).
+
+- **It outlives a republication, where the banners do not.** The session hands over the count's
+  *start* as a one-shot, cleared by the next publication of anything — a peer dropping, a seat
+  coming back. A banner cut off by that loses a little of a sequence that has already said its
+  word; a total cut off halfway through draining snaps to a number the viewer never saw it
+  reach, which reads as a glitch. So `Table.tsx` latches the count in component state, keyed on
+  the scorecard's length as the deal hold is, and it is live while that round is on the screen,
+  scored. A deal leaves the scored phase; a departure that ends the match mounts the table
+  afresh for `gameEnd` (`App.tsx`); a dropped socket unmounts it — each ends the count, and none
+  replays it. One frame loop for the whole table drives every counting seat, stopping once the
+  count lands and cancelled by its cleanup, so no frame callback outlives the table.
+- **It starts with the call, not after it.** The count begins on the scored position's arrival,
+  the same instant the first banner starts to arrive — so on an Assafed caller who hit a
+  milestone it runs under the banner. Waiting for the banners would put it after the deal hold,
+  where a prompt deal would cut it off before it began; starting together, the total has landed
+  as the hold lifts, and the count holds nothing up.
+- **Going out waits for it.** On a seat that hit a milestone and still went out, `OUT` and the
+  red ring are withheld until the count lands (amended on review, #281): shown from the first
+  frame, either would give away how the count ends. A seat that went out with no milestone
+  shows both at once, as it always has, and one the milestone saved gets nothing extra.

@@ -54,6 +54,7 @@ function Screen({ session, snapshot }: { session: Session; snapshot: SessionSnap
     selection,
     flight,
     announcement,
+    countdown,
   } = snapshot;
 
   /*
@@ -141,6 +142,7 @@ function Screen({ session, snapshot }: { session: Session; snapshot: SessionSnap
         busy={busy}
         flight={flight}
         announcement={announcement}
+        countdown={countdown}
         onToggleCard={session.toggleCard}
         onCommitTurn={session.commitTurn}
         onCallYaniv={session.callYaniv}

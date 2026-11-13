@@ -19,6 +19,8 @@
  *
  *   DEAL_HOLD_MS        how long a scored round is on screen before it can be dealt away
  *
+ *   MILESTONE_COUNT_MS  a milestone seat's total draining from the multiple of 50
+ *
  * What a test asserts here is the staging built on them and where a duration would collide with
  * something outside the animation — the server's auto-deal delay, and a deal landing before an
  * Assaf has — never a number. Pure arithmetic and nothing else — no element, no clock, no
@@ -122,3 +124,19 @@ export const announceLeaveAt = (count: number): number =>
  * no tap, and the deal is never held back for them.
  */
 export const DEAL_HOLD_MS = 2000;
+
+/**
+ * How long a milestone seat's total takes to drain from the multiple of 50 it landed on to the
+ * score the round recorded (docs/rules.md §7, spec #280).
+ *
+ * Two seconds because that is what the prototype was judged on (#279): long enough that the
+ * total reads as *falling* — the integers ticking through, from across a six-seat table on a
+ * phone — rather than as one number swapped for another, and short enough that it is over while
+ * the call's banners are still up, so the table is not still settling when it is dealt. That it
+ * equals `DEAL_HOLD_MS` is a coincidence, not a derivation: the count holds nothing up, and a
+ * prompt deal ends it wherever it has got to.
+ *
+ * Bounded by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), like the banners: a
+ * watcher of a table only bots are playing has to see the count land.
+ */
+export const MILESTONE_COUNT_MS = 2000;
