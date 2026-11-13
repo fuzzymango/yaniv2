@@ -3837,4 +3837,126 @@ describe("malformed requests", () => {
       "nothing but the well-formed join was published",
     );
   });
+
+  /**
+   * One of every shape a field of the wrong type can take. `undefined` reaches the server
+   * as `null` where it stands alone and as a missing field inside an object; the last is
+   * an object no template string can turn into text, which is what an error message built
+   * from a payload throws on.
+   */
+  const WRONG_TYPES: readonly (readonly [string, unknown])[] = [
+    ["undefined", undefined],
+    ["null", null],
+    ["a number", 42],
+    ["an object", {}],
+    ["an array", ["ABCD"]],
+    ["an object with no usable toString", { toString: 1 }],
+  ];
+
+  it("refuses a name of the wrong type, seating nobody", async () => {
+    const client = await server.connect();
+    for (const [what, name] of WRONG_TYPES) {
+      assert.equal(expectError(await ask(client, "createRoom", name)).code, "INVALID_NAME", what);
+    }
+    expectOk(await ask(client, "createRoom", "Ada"));
+  });
+
+  it("refuses a join with a room code or a name of the wrong type, publishing nothing", async () => {
+    const host = await server.connect();
+    const watcher = watch(host);
+    const { roomCode } = expectOk(
+      await ask<{ roomCode: string; playerId: string }>(host, "createRoom", "Ada"),
+    );
+    await watcher.until((v) => v.phase === "lobby", "the lobby");
+    watcher.reset();
+
+    const client = await server.connect();
+    for (const [what, wrong] of WRONG_TYPES) {
+      assert.equal(
+        expectError(await ask(client, "joinRoom", wrong, "Bob")).code,
+        "ROOM_NOT_FOUND",
+        `a room code that is ${what}`,
+      );
+      assert.equal(
+        expectError(await ask(client, "joinRoom", roomCode, wrong)).code,
+        "INVALID_NAME",
+        `a name that is ${what}`,
+      );
+    }
+    assert.deepEqual(watcher.seen, [], "a refused join publishes nothing");
+
+    expectOk(await ask(client, "joinRoom", roomCode, "Bob"));
+  });
+
+  it("answers a resume request of the wrong shape as any failed claim", async () => {
+    const holder = await server.connect();
+    const seat = expectOk(
+      await ask<{ roomCode: string; playerId: string; resumeToken: string }>(
+        holder,
+        "createRoom",
+        "Ada",
+      ),
+    );
+    const request: ResumeRequest = seat;
+    const client = await server.connect();
+
+    for (const [what, wrong] of WRONG_TYPES) {
+      const requests: [string, unknown][] = [
+        ["the request", wrong],
+        ["the room code", { ...request, roomCode: wrong }],
+        ["the player id", { ...request, playerId: wrong }],
+        ["the token", { ...request, resumeToken: wrong }],
+      ];
+      for (const [field, malformed] of requests) {
+        assert.equal(
+          expectError(await ask(client, "resumeSeat", malformed)).code,
+          "INVALID_RESUME_TOKEN",
+          `${field} as ${what}`,
+        );
+      }
+    }
+
+    expectOk(await ask(client, "resumeSeat", request));
+  });
+
+  it("refuses a turn of the wrong shape, leaving it the player's to take", async () => {
+    const table = await startServer(29, MAX_PLAYERS - 1, { thinkTimeMs: 0 }, SHORT_MATCH);
+    try {
+      const client = await table.connect();
+      const watcher = watch(client);
+      expectOk(await ask(client, "createRoom", "Ada"));
+      expectOk(await ask(client, "startGame"));
+      const view = await watcher.until((v) => v.phase === "playing", "the deal");
+      assert.equal(view.currentTurnPlayerId, view.you.id, "the host takes the first turn");
+      watcher.reset();
+
+      const cardId = playingSelf(view).hand[0]!.id;
+      const turn = { discardCardIds: [cardId], draw: { source: "deck" } };
+      for (const [what, wrong] of WRONG_TYPES) {
+        const turns: [string, unknown][] = [
+          ["the turn", wrong],
+          ["the draw", { ...turn, draw: wrong }],
+          ["the draw's source", { ...turn, draw: { source: wrong } }],
+          ["the card drawn", { ...turn, draw: { source: "discard", cardId: wrong } }],
+          ["a card discarded", { ...turn, discardCardIds: [wrong] }],
+          // An array is the one shape the discard's own field should be.
+          ...(Array.isArray(wrong)
+            ? []
+            : [["the discard", { ...turn, discardCardIds: wrong }] as [string, unknown]]),
+        ];
+        for (const [field, malformed] of turns) {
+          assert.equal(
+            expectError(await ask(client, "takeTurn", malformed)).code,
+            "INVALID_SET",
+            `${field} as ${what}`,
+          );
+        }
+      }
+      assert.deepEqual(watcher.seen, [], "a refused turn publishes nothing");
+
+      expectOk(await ask(client, "takeTurn", turn));
+    } finally {
+      await table.close();
+    }
+  });
 });

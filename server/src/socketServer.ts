@@ -20,6 +20,7 @@ import type {
   Ack,
   ClientToServerEvents,
   PlayerGameView,
+  ResumeRequest,
   ServerToClientEvents,
 } from "@yaniv/shared";
 import { GOOGLE_CLIENT_ID } from "@yaniv/shared";
@@ -113,6 +114,18 @@ type YanivSocket = Socket<
   Record<string, never>,
   SocketData
 >;
+
+/**
+ * Whether a payload is a `ResumeRequest` at all: an object of three strings. Its wire type
+ * is a claim by whoever sent it, and a seat is bound under these values (issue #271).
+ */
+function isResumeRequest(value: unknown): value is ResumeRequest {
+  if (typeof value !== "object" || value === null) return false;
+  const { roomCode, playerId, resumeToken } = value as Record<string, unknown>;
+  return (
+    typeof roomCode === "string" && typeof playerId === "string" && typeof resumeToken === "string"
+  );
+}
 
 /**
  * What a server may be built with rather than told at runtime: the clock its bots think
@@ -431,8 +444,11 @@ export function createSocketServer(
      * with none. **A signed-in player is never asked for a name** — whatever the payload
      * claims is ignored — because identity is one answer and not one per table
      * (docs/adr/0019), and the seat label is then always a reliable "who is that".
+     *
+     * The typed name goes on as it arrived, string or not: the display-name rule is what
+     * refuses it (issue #271).
      */
-    function seatedAs(typedName: string): Occupant {
+    function seatedAs(typedName: unknown): Occupant {
       const account = socket.data.account;
       return account
         ? {
@@ -454,7 +470,7 @@ export function createSocketServer(
       return { accountId: socket.data.account?.accountId ?? null, resumeToken };
     }
 
-    socket.on("createRoom", async (playerName, ack) => {
+    socket.on("createRoom", async (playerName: unknown, ack) => {
       if (socket.data.seat) {
         ack(alreadySeated());
         return;
@@ -491,9 +507,15 @@ export function createSocketServer(
       ack({ ok: true, value: { roomCode, playerId, resumeToken } });
     });
 
-    socket.on("joinRoom", async (roomCode, playerName, ack) => {
+    socket.on("joinRoom", async (roomCode: unknown, playerName: unknown, ack) => {
       if (socket.data.seat) {
         ack(alreadySeated());
+        return;
+      }
+      // A code is what a seat and a socket.io room are bound under, so it has to be text
+      // before anything is asked of it. Anything else names no room (issue #271).
+      if (typeof roomCode !== "string") {
+        ack(err("ROOM_NOT_FOUND", "No room with that code"));
         return;
       }
 
@@ -544,9 +566,15 @@ export function createSocketServer(
      * still comes first — the returning client is answered by the event it sent, the way
      * every other action here is, and the broadcast reaches it as one more position.
      */
-    socket.on("resumeSeat", async (request, ack) => {
+    socket.on("resumeSeat", async (request: unknown, ack) => {
       if (socket.data.seat) {
         ack(alreadySeated());
+        return;
+      }
+      // A request that is not three strings names no seat, and is answered as any claim
+      // that fails, so its shape tells nobody anything about a room (issue #271).
+      if (!isResumeRequest(request)) {
+        ack(err("INVALID_RESUME_TOKEN", "That seat cannot be resumed"));
         return;
       }
 
@@ -628,7 +656,8 @@ export function createSocketServer(
       );
     });
 
-    socket.on("takeTurn", (action, ack) => {
+    // The action goes on untrusted, as the settings do: `takeTurn` checks its shape.
+    socket.on("takeTurn", (action: unknown, ack) => {
       act(ack, (seat, state, rng) =>
         takeTurn(state, seat.playerId, action, rng),
       );

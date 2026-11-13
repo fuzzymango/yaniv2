@@ -31,7 +31,8 @@ const RESUME_TOKEN_BYTES = 32;
  * with.
  *
  * `name` is whatever the caller settled on — for an account, its own display name, which the
- * transport knows and this does not. `createRoom` and `joinRoom` put it through the
+ * transport knows and this does not; for a guest, whatever came off the wire, which is why
+ * it is `unknown` (issue #271). `createRoom` and `joinRoom` put it through the
  * display-name rule; a bot's, the server's own, is not asked about.
  *
  * `accountId` is who took the seat, `null` for a guest, and **required** rather than
@@ -41,7 +42,7 @@ const RESUME_TOKEN_BYTES = 32;
  * call site that forgot them would announce every signed-in player with the default.
  */
 export interface Occupant {
-  name: string;
+  name: unknown;
   accountId: string | null;
   customYanivCall: string | null;
   customAssafCall: string | null;
@@ -150,7 +151,7 @@ export class RoomManager {
    * by now, and a bot's is the server's own.
    */
   private newSeat(
-    { name, accountId, customYanivCall, customAssafCall }: Occupant,
+    { name, accountId, customYanivCall, customAssafCall }: Occupant & { name: string },
     isBot: boolean,
   ): Player {
     return {

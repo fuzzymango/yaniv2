@@ -422,6 +422,22 @@ function nextPlayerId(round: RoundState): string {
   return round.turnOrder[(index + 1) % round.turnOrder.length]!;
 }
 
+/**
+ * Whether a payload is the shape of a `TurnAction`: card ids that are all strings, and a
+ * draw from the deck or of a card named by a string id. Only the shape — whether the cards
+ * are held, form a set or may be taken is `takeTurn`'s, answered with its own codes.
+ */
+function isTurnAction(value: unknown): value is TurnAction {
+  if (typeof value !== "object" || value === null) return false;
+  const { discardCardIds, draw } = value as Record<string, unknown>;
+  if (!Array.isArray(discardCardIds) || !discardCardIds.every((id) => typeof id === "string")) {
+    return false;
+  }
+  if (typeof draw !== "object" || draw === null) return false;
+  const { source, cardId } = draw as Record<string, unknown>;
+  return source === "deck" || (source === "discard" && typeof cardId === "string");
+}
+
 /** Resolve requested card ids against a hand, rejecting unknown or repeated ids. */
 function collectFromHand(
   hand: readonly Card[],
@@ -455,11 +471,16 @@ function collectFromHand(
  * Sequencing note: the pickup comes from the set that was on the table when this turn
  * began — the *previous* player's discard. Whatever is left of it becomes buried, and
  * this player's discard becomes the new `lastDiscard`. docs/rules.md §5.
+ *
+ * `action` is `unknown` for `updateSettings`' reason (issue #271): off the wire, its type
+ * is a claim by whoever sent it, and `isTurnAction` is what makes a `TurnAction` of it.
+ * Asked after whose turn it is, so only the player whose turn it is learns anything from
+ * the answer — `INVALID_SET`, there being no shape of a discard a malformed one is.
  */
 export function takeTurn(
   state: GameState,
   playerId: string,
-  action: TurnAction,
+  action: unknown,
   rng: Rng,
 ): ActionResult {
   if (state.phase !== "playing") {
@@ -471,6 +492,9 @@ export function takeTurn(
   const round = state.round;
   if (round.currentTurnPlayerId !== playerId) {
     return err("NOT_YOUR_TURN", "It is not your turn");
+  }
+  if (!isTurnAction(action)) {
+    return err("INVALID_SET", "A turn is a list of card ids to discard and one draw");
   }
 
   const hand = round.hands[playerId] ?? [];
