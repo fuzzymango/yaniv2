@@ -832,13 +832,18 @@ body {
  * way. A guest's four lines of text stay together, read at a glance, with the room left
  * over above Leave: spread through a tall box they stopped reading as one list.
  */
-.lobby .settings:has(.setting) {
+.lobby .settings--editor {
   flex: 1 0 auto;
 }
 
+/*
+ * Spread by auto margins rather than by growing each setting: the score's setting is a
+ * `<label>`, and a label grown into the spare height would make all of it a tap that focuses
+ * the field and puts up a phone's keyboard. Margins split the space the same way and keep
+ * each setting the size of what is in it.
+ */
 .lobby .setting {
-  flex: 1 0 auto;
-  justify-content: center;
+  margin-block: auto;
   gap: 0.25rem;
 }
 

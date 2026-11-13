@@ -164,7 +164,7 @@ export function SettingsEditor({
   };
 
   return (
-    <SettingsPanel>
+    <SettingsPanel editable>
       <Choices<HandSize>
         label="Hand size"
         options={HAND_SIZES}

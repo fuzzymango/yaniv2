@@ -634,7 +634,7 @@ export function Table({
           </button>
         ) : (
           // Its own class rather than `notice`, which carries news that has just arrived.
-          // This is a standing fact about the screen, the same way it is in the lobby.
+          // This is a standing fact about the screen.
           <p className="hint">Waiting for the next round.</p>
         )}
 
