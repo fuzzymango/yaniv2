@@ -12,10 +12,18 @@ the server's: `socket.io`, `postgres` for player accounts (`docs/adr/0019`), and
 | `server/` | The game engine: deck, rules, pure state transitions, per-player serialization, and the room registry — plus the profile store accounts are remembered in, `sql/` behind it, and `auth/` (Google sign-in and sessions). |
 | `client/` | The React browser client: the session core, screen components, and Socket.io connection. |
 
-`docs/rules.md` is the source of truth for gameplay and `docs/code-map.md` names every file in
-the four source trees; the rest of `docs/` is indexed from `CLAUDE.md`.
-`docs/backend-archetechture.md` is the original design sketch — where the two disagree, the code
-and `rules.md` are current.
+## Docs
+
+- `docs/rules.md` — the rules of the game, and the source of truth for gameplay.
+- `docs/architecture.md` — why the code is shaped the way it is, and what is deferred on purpose.
+- `docs/code-map.md` — every file in the four source trees, one line each.
+- `docs/adr/` — architecture decision records, one decision each, numbered.
+- `CONTEXT.md` — the domain vocabulary.
+- `docs/client-table.md` — the browser's table: seating, flights, the scorecard, the call banner.
+- `docs/client-session.md` — the browser's session core and the wire behind the table.
+- `docs/backend-archetechture.md` — the original design sketch, stale in places; where it
+  disagrees, the code and `rules.md` are current.
+- `CLAUDE.md` — the briefing an AI agent reads before changing code.
 
 ## Running
 

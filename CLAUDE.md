@@ -39,8 +39,8 @@ terminal first. Every command and flag is in `README.md`.
 - **Client components:** a file *exports* one component (private helper components beside it are
   fine), in a folder named for its screen — `main-menu/`, `lobby/`, `table/`, `game-end/`,
   `connection/`, `settings/`, `shared/`. Entrypoints, pure modules and `styles.css` sit flat at
-  the `client/src` root. No barrel `index.ts`. `table/Seat.tsx` is the one two-export file, and its
-  header says why.
+  the `client/src` root. No barrel `index.ts`. `table/Seat.tsx` is the one file exporting several
+  components, and its header says why.
 - **Tests:** `node:test`, one suite per module in the workspace's `test/`; each workspace's `test`
   script names an explicit glob. The socket layer is tested over real `socket.io-client`
   connections; what a room does over time is tested through `Rooms` over the recording port

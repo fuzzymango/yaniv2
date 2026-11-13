@@ -399,7 +399,7 @@ export interface Session {
   toggleCard: (cardId: string) => void;
   /**
    * Play the selection, drawing from where the player tapped. One action, because the
-   * engine has no state between discarding and drawing (see "Turn model" in CLAUDE.md).
+   * engine has no state between discarding and drawing (see "Turn model" in `docs/architecture.md`).
    *
    * A tap the rules do not permit sends nothing and says nothing: the interface should
    * not have offered it, and a player who taps a dead target has asked for nothing and
