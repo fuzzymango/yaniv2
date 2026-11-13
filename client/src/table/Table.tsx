@@ -118,6 +118,10 @@ interface TableProps {
   onExit: () => void;
 }
 
+/** Whether the viewer has asked for reduced motion — read in code, as `CardsInFlight.tsx` does. */
+const wantsStillness = (): boolean =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 /**
  * What a scored round says about one player, beside their own cards: whether they did
  * anything, and where the round leaves them.
@@ -130,6 +134,7 @@ function ScoredDetail({
   player,
   wentOut,
   elapsedMs,
+  still = false,
 }: {
   player: PlayerRoundResultView;
   /** Whether this round is the one that took them out of the match — the `OUT` tag. */
@@ -139,6 +144,12 @@ function ScoredDetail({
    * for every seat that is not, which reads exactly as a count long since landed.
    */
   elapsedMs?: number | undefined;
+  /**
+   * Whether the viewer asked for reduced motion when the count began: the total still drains,
+   * and does not throb. Asked of the table rather than of a stylesheet, the scale being set
+   * from code on every frame where no media query can reach it.
+   */
+  still?: boolean | undefined;
 }) {
   const frame = countFrame(player, wentOut, elapsedMs ?? Infinity);
   return (
@@ -167,7 +178,18 @@ function ScoredDetail({
       <span
         className={`player__score ${frame.stage === "counting" ? "player__score--counting" : ""}`}
       >
-        {frame.label}
+        {frame.lead}
+        {/*
+          The total in a box of its own, so it throbs and the sentence around it holds still
+          (spec #280). A transform, so the size it beats to never moves a neighbour.
+        */}
+        <span
+          className="player__total"
+          style={still || frame.scale === 1 ? undefined : { transform: `scale(${frame.scale})` }}
+        >
+          {frame.total}
+        </span>{" "}
+        pts
       </span>
     </>
   );
@@ -322,13 +344,21 @@ export function Table({
    * Latched in a layout effect so it is in place before the frame that brought it is painted:
    * a passive one would paint one frame of the landed line first — `OUT` included, on a seat
    * whose count is about to withhold it.
+   *
+   * The reduced-motion preference is asked once, here, as `CardsInFlight.tsx` asks it of a
+   * flight: the throb is a scale set from code, which no stylesheet media query can switch off,
+   * and a count is short enough that a preference changed halfway through it can wait for the
+   * next one.
    */
   const [latch, setLatch] = useState<{
     readonly count: NonNullable<Countdown>;
     readonly startedAt: number;
+    readonly still: boolean;
   } | null>(null);
   useLayoutEffect(() => {
-    if (countdown !== null) setLatch({ count: countdown, startedAt: performance.now() });
+    if (countdown !== null) {
+      setLatch({ count: countdown, startedAt: performance.now(), still: wantsStillness() });
+    }
   }, [countdown]);
   const counting =
     latch !== null && result !== null && latch.count.round === roundsScored ? latch : null;
@@ -456,6 +486,7 @@ export function Table({
             player={row}
             wentOut={wentOut(opponent)}
             elapsedMs={countedAt(opponent.id)}
+            still={counting?.still}
           />
         }
         key={opponent.id}
@@ -817,6 +848,7 @@ export function Table({
               player={yourRound}
               wentOut={youWentOut}
               elapsedMs={countedAt(view.you.id)}
+              still={counting?.still}
             />
           ) : (
             <>

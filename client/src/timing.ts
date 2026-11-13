@@ -20,6 +20,7 @@
  *   DEAL_HOLD_MS        how long a scored round is on screen before it can be dealt away
  *
  *   MILESTONE_COUNT_MS  a milestone seat's total draining from the multiple of 50
+ *   MILESTONE_PULSE_MS  one throb of that total while it drains
  *
  * What a test asserts here is the staging built on them and where a duration would collide with
  * something outside the animation — the server's auto-deal delay, and a deal landing before an
@@ -140,3 +141,16 @@ export const DEAL_HOLD_MS = 2000;
  * watcher of a table only bots are playing has to see the count land.
  */
 export const MILESTONE_COUNT_MS = 2000;
+
+/**
+ * One throb of a draining total — a scale of 1 to 1.1 and back (`pulseScale` in
+ * `milestone.ts`, spec #280) — so a steady 4Hz.
+ *
+ * What the prototype was judged on (#279, variant A): quick enough to read as the number
+ * *beating* rather than breathing, which is what says something is still happening to it, and
+ * slow enough that a phone's frame rate draws every throb as a rise and a fall rather than as a
+ * flicker. That a count is a whole number of them, so the last one ends at rest as the total
+ * lands, is the two values as they stand and not a derivation: a count that landed mid-throb
+ * would only snap a tenth of a size back.
+ */
+export const MILESTONE_PULSE_MS = 250;

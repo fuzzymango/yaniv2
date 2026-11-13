@@ -510,3 +510,11 @@ when it starts is the session's one-shot (`countdownFrom`, `docs/client-session.
   red ring are withheld until the count lands (amended on review, #281): shown from the first
   frame, either would give away how the count ends. A seat that went out with no milestone
   shows both at once, as it always has, and one the milestone saved gets nothing extra.
+- **The total throbs while it drains** (#284): a scale of 1 to 1.1 and back every
+  `MILESTONE_PULSE_MS` (250ms, a steady 4Hz), on a raised cosine (`pulseScale`), read off the
+  same clock as the count — the beat that says the number is still being acted on. Only the
+  total throbs: `countFrame` hands the table the sentence before it (`lead`) so the number sits
+  in a box of its own, and a transform, so nothing beside it moves. It rests at exactly 1 once
+  landed. Under reduced motion there is no throb and everything else is unchanged — the drain,
+  the flip and `OUT` waiting — the preference read once as the count is latched, as a flight
+  reads it, a scale set from code being out of a stylesheet's reach.

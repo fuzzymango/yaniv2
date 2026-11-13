@@ -7,8 +7,9 @@
  * description of what to count or nothing at all. A seat whose total a round left exactly on
  * a multiple of 50 is shown landing there and then draining by 50 (docs/rules.md §7); this
  * says which seats and between which two numbers, and — given how far into the count a frame
- * is — what the line says and whether the news of going out may show yet. It says nothing about
- * pixels, elements or clocks: the table latches the count and runs the one clock it is read by.
+ * is — what the line says, how large its total is drawn and whether the news of going out may
+ * show yet. It says nothing about pixels, elements or clocks: the table latches the count and
+ * runs the one clock it is read by.
  *
  * Total in the same way as its sibling: every pair of positions has an answer, and "nothing
  * to count" is one of them; every elapsed time has a frame, before the count and after it.
@@ -16,7 +17,7 @@
 
 import type { PlayerGameView, PlayerRoundResultView } from "@yaniv/shared";
 import { scoreLabel } from "./score.ts";
-import { MILESTONE_COUNT_MS } from "./timing.ts";
+import { MILESTONE_COUNT_MS, MILESTONE_PULSE_MS } from "./timing.ts";
 
 /** One seat's count: where its total landed and where the milestone leaves it. */
 export interface MilestoneCount {
@@ -81,6 +82,17 @@ export interface CountFrame {
   readonly total: number;
   /** `${before} + ${delta} = ${total} pts` while counting; `scoreLabel(...)` once landed. */
   readonly label: string;
+  /**
+   * The label up to its total — `${lead}${total} pts` is `label`, at every moment — so the table
+   * can draw the total in a box of its own and throb it without the sentence around it.
+   */
+  readonly lead: string;
+  /**
+   * How large the total is drawn: `pulseScale` while counting, and at rest — exactly 1 — once
+   * landed, so the line every seat reads is never drawn mid-throb. Whether to draw it at all is
+   * the table's, which asks the reduced-motion preference (spec #280).
+   */
+  readonly scale: number;
   /** Whether the seat may wear the news that this round took it out: `OUT` and the red ring. */
   readonly outShown: boolean;
 }
@@ -103,6 +115,8 @@ export interface CountFrame {
  * count shows both at once, as it always has; so does any line no milestone touched, which is
  * landed from the start, so a seat that is not counting can never be drawn as one.
  *
+ * **The total throbs while it drains** (`pulseScale`), and rests the moment it lands.
+ *
  * Total over any elapsed time: before 0 (a frame stamped a hair before the table latched the
  * count) it reads as the count's first moment, and from `MILESTONE_COUNT_MS` on as its last.
  */
@@ -110,22 +124,40 @@ export function countFrame(player: PlayerRoundResultView, wentOut: boolean, elap
   const { scoreAfter, delta, milestoneReduction } = player;
   const landed = milestoneReduction === 0 || elapsedMs >= MILESTONE_COUNT_MS;
   if (landed) {
+    const label = scoreLabel(scoreAfter, delta, milestoneReduction);
     return {
       stage: "landed",
       total: scoreAfter,
-      label: scoreLabel(scoreAfter, delta, milestoneReduction),
+      label,
+      lead: label.slice(0, label.lastIndexOf(" = ") + " = ".length),
+      scale: 1,
       outShown: wentOut,
     };
   }
 
   const landedOn = scoreAfter + milestoneReduction;
   const total = landedOn - Math.round(milestoneReduction * clamp01(elapsedMs / MILESTONE_COUNT_MS));
+  const lead = `${landedOn - delta} + ${delta} = `;
   return {
     stage: "counting",
     total,
-    label: `${landedOn - delta} + ${delta} = ${total} pts`,
+    label: `${lead}${total} pts`,
+    lead,
+    scale: elapsedMs < 0 ? 1 : pulseScale(elapsedMs),
     outShown: false,
   };
+}
+
+/**
+ * How large a draining total is drawn, `elapsedMs` into its count: 1 at the start of every
+ * throb, 1.1 half of one in, and back, every `MILESTONE_PULSE_MS` — a steady 4Hz (spec #280).
+ *
+ * A raised cosine rather than a triangle, so the number eases into and out of each extreme
+ * instead of bouncing off it — variant A's curve exactly (#279). Periodic and nothing else: it
+ * knows nothing of where the count ends, which is `countFrame`'s to say.
+ */
+export function pulseScale(elapsedMs: number): number {
+  return 1 + 0.1 * (0.5 - 0.5 * Math.cos((2 * Math.PI * elapsedMs) / MILESTONE_PULSE_MS));
 }
 
 const clamp01 = (t: number): number => Math.min(1, Math.max(0, t));

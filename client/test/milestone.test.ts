@@ -21,9 +21,9 @@ import type {
   RoundResultView,
   RoundScore,
 } from "@yaniv/shared";
-import { countFrame, countdownFrom } from "../src/milestone.ts";
+import { countFrame, countdownFrom, pulseScale } from "../src/milestone.ts";
 import { scoreLabel } from "../src/score.ts";
-import { MILESTONE_COUNT_MS } from "../src/timing.ts";
+import { MILESTONE_COUNT_MS, MILESTONE_PULSE_MS } from "../src/timing.ts";
 import { cards, viewOf } from "./helpers.ts";
 
 /** One seat's line in a scorecard row: where the round left it, and what a milestone took off. */
@@ -190,6 +190,8 @@ describe("countFrame", () => {
         stage: "counting",
         total: 50,
         label: "20 + 30 = 50 pts",
+        lead: "20 + 30 = ",
+        scale: 1,
         outShown: false,
       });
     });
@@ -246,8 +248,46 @@ describe("countFrame", () => {
         stage: "landed",
         total: 17,
         label: scoreLabel(17, 7, 0),
+        lead: "10 + 7 = ",
+        scale: 1,
         outShown: false,
       });
+    });
+  });
+
+  describe("the parts the total is drawn apart from", () => {
+    it("are the label, split before its total, at every moment and on every line", () => {
+      // The table draws the total in a box of its own so it can throb alone; the sentence
+      // around it must still read as the label does, counting or landed.
+      for (const player of [ada, revealed(195, 55), revealed(10, 7), revealed(40, 25)]) {
+        for (const ms of throughTheCount) {
+          const frame = countFrame(player, false, ms);
+          assert.equal(`${frame.lead}${frame.total} pts`, frame.label, `at ${ms}ms`);
+        }
+      }
+    });
+  });
+
+  describe("the throb", () => {
+    it("is the pulse at every moment of the count", () => {
+      for (const ms of throughTheCount.filter((ms) => ms >= 0 && ms < MILESTONE_COUNT_MS)) {
+        assert.equal(countFrame(ada, false, ms).scale, pulseScale(ms), `at ${ms}ms`);
+      }
+    });
+
+    it("is at rest once landed", () => {
+      for (const ms of [MILESTONE_COUNT_MS, MILESTONE_COUNT_MS + MILESTONE_PULSE_MS / 2, Infinity]) {
+        assert.equal(countFrame(ada, false, ms).scale, 1, `at ${ms}ms`);
+      }
+    });
+
+    it("is at rest before the count, never a size the count would not reach first", () => {
+      // A frame stamped before the latch reads as the count's first moment, which is at rest.
+      assert.equal(countFrame(ada, false, -MILESTONE_PULSE_MS / 2).scale, 1);
+    });
+
+    it("never moves a line no milestone touched", () => {
+      for (const ms of throughTheCount) assert.equal(countFrame(revealed(10, 7), false, ms).scale, 1);
     });
   });
 
@@ -275,5 +315,32 @@ describe("countFrame", () => {
       const saved = revealed(120, 30);
       for (const ms of throughTheCount) assert.equal(countFrame(saved, false, ms).outShown, false);
     });
+  });
+});
+
+describe("pulseScale", () => {
+  it("is at rest at the start of a throb", () => {
+    assert.equal(pulseScale(0), 1);
+  });
+
+  it("is at its largest, 1.1, half a throb in", () => {
+    assert.equal(pulseScale(MILESTONE_PULSE_MS / 2), 1.1);
+  });
+
+  it("rises and falls between those two and nowhere else", () => {
+    for (let ms = 0; ms <= MILESTONE_PULSE_MS; ms += 1) {
+      const scale = pulseScale(ms);
+      assert.ok(scale >= 1 && scale <= 1.1, `${scale} at ${ms}ms`);
+    }
+  });
+
+  it("repeats every throb, steadily", () => {
+    // A steady 4Hz (spec #280): the same size at the same point of every period.
+    for (let ms = 0; ms < MILESTONE_COUNT_MS; ms += 7) {
+      for (const periods of [1, 2, 5]) {
+        const later = pulseScale(ms + periods * MILESTONE_PULSE_MS);
+        assert.ok(Math.abs(later - pulseScale(ms)) < 1e-9, `${ms}ms and ${periods} throbs on`);
+      }
+    }
   });
 });

@@ -1825,6 +1825,22 @@ body {
 }
 
 /*
+ * The total on its own, so it can throb while the sentence around it holds still (spec #280):
+ * a box a transform applies to, scaled from the table's clock rather than by a keyframe, which
+ * is why reduced motion is answered in `Table.tsx` and not here. Grown from a little below its
+ * middle, as variant A was (#279), so it swells up out of the line rather than down into the
+ * next one. Promoted to its own layer only while it is counting, not on every scored seat.
+ */
+.player__total {
+  display: inline-block;
+  transform-origin: 50% 60%;
+}
+
+.player__score--counting .player__total {
+  will-change: transform;
+}
+
+/*
  * The way into the match's ledger, in the viewer's own bar and to the left of their name
  * (docs/adr/0017). Smaller than the topbar's icons and dimmer than the row it sits in: it
  * is there to be found rather than noticed, and the numbers beside it are what the bar is
