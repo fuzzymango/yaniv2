@@ -43,7 +43,7 @@
  */
 
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import type {
   OpponentView,
   PlayerGameView,
@@ -61,6 +61,8 @@ import { Scorecard } from "./Scorecard.tsx";
 import type { Announcement } from "../announcement.ts";
 import { bannerAt } from "../announcement.ts";
 import { CallAnnouncement } from "./CallAnnouncement.tsx";
+// PROTOTYPE (#279) — throwaway, on prototype/milestone-countdown only.
+import { MilestoneCountdown, MilestonePrototypeContext } from "./MilestoneCountdown.prototype.tsx";
 import type { CardFlight } from "../flight.ts";
 import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
@@ -125,6 +127,10 @@ function ScoredDetail({
   /** Whether this round is the one that took them out of the match — the `OUT` tag. */
   wentOut: boolean;
 }) {
+  // PROTOTYPE (#279): a milestone seat counts down when the prototype page provides a variant.
+  if (useContext(MilestonePrototypeContext) !== null && player.milestoneReduction > 0) {
+    return <MilestoneCountdown player={player} wentOut={wentOut} />;
+  }
   return (
     <>
       {/*

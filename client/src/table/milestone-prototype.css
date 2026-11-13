@@ -1,0 +1,377 @@
+/* PROTOTYPE — throwaway (issue #279). The milestone countdown's variants. */
+
+:root {
+  --milestone: #93c5fd; /* the scorecard's milestone blue */
+  --milestone-hot: #e0f2fe; /* its "shiny" peak */
+}
+
+/* A burst sits on the namecard — a seat's label, or the footer for the viewer — not the seat. */
+.you,
+.table-seat__label {
+  position: relative;
+}
+
+/* ---------------------------------------------------------------- the number */
+
+.msp-num-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.msp-num {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  transform-origin: 50% 60%;
+  will-change: transform;
+  transition: color 600ms ease, text-shadow 600ms ease;
+}
+
+.msp-num--counting {
+  color: var(--milestone);
+  text-shadow: 0 0 0.5em rgb(147 197 253 / 70%);
+  animation: msp-shine 450ms ease-out both;
+}
+
+/* The count landing: the number keeps the blue a breath longer, then goes back to ink. */
+.msp-num--landed {
+  color: var(--ink);
+  text-shadow: none;
+}
+
+@keyframes msp-shine {
+  from {
+    color: #fff;
+    text-shadow: 0 0 0.9em #fff, 0 0 1.6em var(--milestone);
+  }
+}
+
+/* The delta flipping from "+ 30" to "- 20" on the landing beat. */
+.msp-flip {
+  display: inline-block;
+  animation: msp-flip 260ms cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+@keyframes msp-flip {
+  from {
+    transform: rotateX(90deg);
+    opacity: 0;
+  }
+}
+
+/* OUT arriving with the landing rather than before it. */
+.msp-out-in {
+  animation: msp-out-in 300ms cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+@keyframes msp-out-in {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+
+/* The seat's red ring is part of "went out" — withheld with the tag. */
+.table-seat:has(.msp-pending-out) .table-seat__label,
+.you:has(.msp-pending-out) {
+  box-shadow: none;
+}
+
+/* ---------------------------------------------------------------- the bursts */
+
+.msp-burst {
+  position: absolute;
+  inset: -0.2rem;
+  z-index: 30;
+  border-radius: 0.6rem;
+  pointer-events: none;
+}
+
+/* A — a ring traced round the seat once, white head, blue trail. */
+@property --msp-sweep {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+.msp-burst--ring {
+  padding: 3px;
+  background: conic-gradient(
+    from 200deg,
+    rgb(147 197 253 / 0%) 0%,
+    var(--milestone) calc(var(--msp-sweep) - 14%),
+    #fff calc(var(--msp-sweep) - 1%),
+    transparent var(--msp-sweep)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  filter: drop-shadow(0 0 6px var(--milestone));
+  animation:
+    msp-sweep 420ms cubic-bezier(0.3, 0, 0.2, 1) both,
+    msp-fade 220ms ease-in 420ms both;
+}
+
+@keyframes msp-sweep {
+  from {
+    --msp-sweep: 0%;
+  }
+  to {
+    --msp-sweep: 114%;
+  }
+}
+
+@keyframes msp-fade {
+  to {
+    opacity: 0;
+  }
+}
+
+/* A, as drawn now: the laser (`LaserRing`). The box hugs the namecard; the strokes inset by
+   half their width so the ring sits exactly on its edge. */
+.msp-laser {
+  inset: -3px;
+  width: calc(100% + 6px);
+  height: calc(100% + 6px);
+  overflow: visible;
+  border-radius: 0;
+}
+
+.msp-laser rect {
+  x: 1.5px;
+  y: 1.5px;
+  width: calc(100% - 3px);
+  height: calc(100% - 3px);
+  rx: calc(0.5rem + 1.5px);
+  fill: none;
+}
+
+.msp-laser__trail {
+  stroke-width: 3px;
+}
+
+.msp-laser__measure {
+  stroke: none;
+}
+
+.msp-laser__glow {
+  filter: drop-shadow(0 0 4px var(--milestone));
+}
+
+/* The head: hotter, wider and glowing harder than anything behind it. */
+.msp-laser__head {
+  stroke: #fff;
+  stroke-width: 4.5px;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px var(--milestone-hot))
+    drop-shadow(0 0 12px var(--milestone));
+}
+
+/* B — a glint across the whole seat, cards and all, over a quick blue wash. */
+.msp-burst--sheen {
+  overflow: hidden;
+  animation: msp-wash 560ms ease-out both;
+}
+
+.msp-burst--sheen::after {
+  content: "";
+  position: absolute;
+  inset: -20% auto -20% 0;
+  width: 45%;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgb(147 197 253 / 55%) 35%,
+    rgb(255 255 255 / 95%) 50%,
+    rgb(147 197 253 / 55%) 65%,
+    transparent 100%
+  );
+  mix-blend-mode: screen;
+  transform: translateX(-120%) skewX(-18deg);
+  animation: msp-glint 480ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes msp-wash {
+  0% {
+    background: rgb(147 197 253 / 0%);
+  }
+  20% {
+    background: rgb(147 197 253 / 28%);
+    box-shadow: 0 0 18px 2px rgb(147 197 253 / 60%);
+  }
+  100% {
+    background: rgb(147 197 253 / 0%);
+    box-shadow: 0 0 0 0 rgb(147 197 253 / 0%);
+  }
+}
+
+@keyframes msp-glint {
+  to {
+    transform: translateX(330%) skewX(-18deg);
+  }
+}
+
+/* C — a white-hot bloom that flares out from the seat and fades. */
+.msp-burst--flare {
+  inset: -1.5rem;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    rgb(255 255 255 / 95%) 0%,
+    rgb(224 242 254 / 85%) 18%,
+    rgb(147 197 253 / 65%) 42%,
+    rgb(59 130 246 / 0%) 100%
+  );
+  mix-blend-mode: screen;
+  animation: msp-flare 520ms cubic-bezier(0.15, 0.9, 0.3, 1) both;
+}
+
+@keyframes msp-flare {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  22% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+
+/* D — two rings rippling out from the score itself. */
+.msp-burst--shock {
+  inset: auto;
+  top: 50%;
+  left: 50%;
+  width: 2.2rem;
+  height: 2.2rem;
+  margin: -1.1rem 0 0 -1.1rem;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 0 12px var(--milestone), inset 0 0 12px var(--milestone);
+  animation: msp-shock 640ms cubic-bezier(0.1, 0.7, 0.3, 1) both;
+}
+
+.msp-burst--shock::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 3px solid var(--milestone);
+  animation: msp-shock 640ms cubic-bezier(0.1, 0.7, 0.3, 1) 140ms both;
+}
+
+@keyframes msp-shock {
+  0% {
+    opacity: 1;
+    transform: scale(0.2);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(4.5);
+  }
+}
+
+/* Reduced motion, every variant: a blue glow that rises and falls. No scale, no sweep. */
+.msp-burst--glow {
+  animation: msp-glow 700ms ease-in-out both;
+}
+
+@keyframes msp-glow {
+  0%,
+  100% {
+    background: rgb(147 197 253 / 0%);
+    box-shadow: 0 0 0 0 rgb(147 197 253 / 0%);
+  }
+  40% {
+    background: rgb(147 197 253 / 25%);
+    box-shadow: 0 0 22px 4px rgb(147 197 253 / 55%);
+  }
+}
+
+.msp-reduced .msp-flip,
+.msp-reduced .msp-out-in {
+  animation: none;
+}
+
+/* ---------------------------------------------------------------- the switcher */
+
+/* The table stops short of the bar, so the bar never sits over the viewer's own footer. */
+.table {
+  min-height: 0;
+  height: calc(100dvh - 4.4rem);
+}
+
+.msp-bar {
+  position: fixed;
+  bottom: 0.35rem;
+  left: 50%;
+  z-index: 1000;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 1rem);
+  padding: 0.3rem 0.6rem;
+  border-radius: 1rem;
+  background: #111827ee;
+  border: 1px solid #f472b6;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 50%);
+  color: #f9fafb;
+  font: 0.7rem/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.msp-bar--tab {
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+}
+
+.msp-bar__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.msp-bar__row--controls {
+  margin-top: 0.2rem;
+  gap: 0.3rem;
+}
+
+.msp-bar__label {
+  max-width: 60vw;
+  text-align: center;
+}
+
+.msp-bar__blurb {
+  margin: 0.25rem auto 0;
+  max-width: 34rem;
+  color: #cbd5e1;
+  text-align: center;
+  font-size: 0.72rem;
+}
+
+.msp-bar button,
+.msp-bar select {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #4b5563;
+  border-radius: 0.5rem;
+  background: #1f2937;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.msp-bar button[aria-pressed="true"] {
+  border-color: #f472b6;
+}
+
+.msp-bar__clock {
+  min-width: 9.5em;
+  color: #f472b6;
+  font-variant-numeric: tabular-nums;
+}

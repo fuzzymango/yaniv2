@@ -14,7 +14,8 @@
     "test": "npm run test --workspaces --if-present",
     "typecheck": "tsc --build --force",
     "dev": "npm run dev --workspace=@yaniv/client",
-    "build": "npm run build --workspace=@yaniv/client"
+    "build": "npm run build --workspace=@yaniv/client",
+    "prototype:milestone": "npm run prototype:milestone --workspace=@yaniv/client"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
