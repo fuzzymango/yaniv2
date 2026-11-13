@@ -1745,6 +1745,8 @@ body {
  * are on the screen at a full table, and none of them is what anybody is playing.
  */
 .table-seat__label {
+  /* The box a milestone count's ring is traced round (`MilestoneRing.tsx`), as is `.you`. */
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -1768,6 +1770,7 @@ body {
 }
 
 .you {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -1838,6 +1841,76 @@ body {
 
 .player__score--counting .player__total {
   will-change: transform;
+}
+
+/*
+ * The laser ring a milestone count begins with (`MilestoneRing.tsx`, spec #280), round the
+ * namecard it is drawn in. The SVG's box is the namecard's, out by half the trail's stroke on
+ * every side, and its rects are that box at `width="100%"`: a stroke runs centred on its path,
+ * so the ring sits just outside the namecard's edge rather than over the words in it.
+ *
+ * Over every card in the seat (they count up from 0, `Seat.tsx`) and under the call banner
+ * (20), so an Assafed caller's count is traced beneath the banner rather than across it. Under
+ * the scorecard's backdrop (`.modal`, 10) too: a seat is its own stacking context, but the
+ * footer is not, and the footer's ring would otherwise be traced over an open ledger. Inert to
+ * the pointer, like the banner, so nothing on the felt is ever covered by a tap target.
+ */
+.milestone-ring {
+  position: absolute;
+  top: -1.5px;
+  left: -1.5px;
+  z-index: 9;
+  width: calc(100% + 3px);
+  height: calc(100% + 3px);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.milestone-ring rect {
+  fill: none;
+}
+
+/* The trail: blue, glowing, its colour and fade per segment set from `ringFrame`. */
+.milestone-ring__trail {
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 4px var(--milestone));
+}
+
+/* The head: white-hot, wider than the trail and glowing harder than anything behind it. */
+.milestone-ring__head {
+  stroke: #fff;
+  stroke-width: 4.5px;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #e0f2fe)
+    drop-shadow(0 0 12px var(--milestone));
+}
+
+/*
+ * The ring's stand-in under reduced motion: the namecard lit blue and let go again — light and
+ * nothing else, no sweep and no scale. A keyframe rather than the table's clock, there being
+ * nothing to follow; its length is `MILESTONE_GLOW_MS`, handed in as `--milestone-glow`.
+ */
+.milestone-glow {
+  position: absolute;
+  inset: 0;
+  /* Where the ring would be, for the ring's reasons (above). */
+  z-index: 9;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: milestone-glow var(--milestone-glow) ease-in-out both;
+}
+
+@keyframes milestone-glow {
+  0%,
+  100% {
+    background: rgb(147 197 253 / 0%);
+    box-shadow: 0 0 0 0 rgb(147 197 253 / 0%);
+  }
+
+  40% {
+    background: rgb(147 197 253 / 25%);
+    box-shadow: 0 0 22px 4px rgb(147 197 253 / 55%);
+  }
 }
 
 /*

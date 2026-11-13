@@ -518,3 +518,21 @@ when it starts is the session's one-shot (`countdownFrom`, `docs/client-session.
   landed. Under reduced motion there is no throb and everything else is unchanged — the drain,
   the flip and `OUT` waiting — the preference read once as the count is latched, as a flight
   reads it, a scale set from code being out of a stylesheet's reach.
+- **A laser ring is traced round the namecard as it begins** (#285), and **it measures
+  nothing.** `MilestoneRing.tsx`, drawn by `ScoredDetail` inside the namecard's own box — an
+  opponent's label, the viewer's footer — sends a white-hot head once round it over
+  `MILESTONE_RING_MS` (420ms, eased in and out), a blue trail falling off behind it over 80% of
+  the lap, white for its first seventh; the whole ring then fades over `MILESTONE_RING_FADE_MS`
+  (180ms) and is unmounted, all of it read off the count's one clock (`ringFrame`, tested).
+  Every rect carries `pathLength="100"` and its dashes are unitless attributes in those units,
+  so the browser does the perimeter's arithmetic and `CardsInFlight.tsx` stays the one file
+  that reads a rect off the page. **The cost, accepted:** the head is a share of the perimeter,
+  not variant A's 8px — tuned to read as A's on a seat label, and proportionally longer on the
+  long footer. The geometry is attributes too (`width="100%"` on an SVG inset by half the
+  stroke), the spec's fallback taken up front, since not every engine applies CSS to SVG
+  geometry. It runs under a call banner and under the scorecard's backdrop (`z-index` 9: a
+  seat is its own stacking context, the footer is not). Under reduced motion it is a blue glow
+  rising and falling on the namecard instead — a keyframe of `MILESTONE_GLOW_MS` (700ms), no
+  sweep and no scale — chosen on the same latched preference as the throb. Both are
+  `aria-hidden`, and the draining number is not a live region: the line above the felt and the
+  scorecard carry the fact, as they do for the banners.

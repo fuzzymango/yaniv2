@@ -21,9 +21,14 @@ import type {
   RoundResultView,
   RoundScore,
 } from "@yaniv/shared";
-import { countFrame, countdownFrom, pulseScale } from "../src/milestone.ts";
+import { countFrame, countdownFrom, pulseScale, ringFrame } from "../src/milestone.ts";
 import { scoreLabel } from "../src/score.ts";
-import { MILESTONE_COUNT_MS, MILESTONE_PULSE_MS } from "../src/timing.ts";
+import {
+  MILESTONE_COUNT_MS,
+  MILESTONE_PULSE_MS,
+  MILESTONE_RING_FADE_MS,
+  MILESTONE_RING_MS,
+} from "../src/timing.ts";
 import { cards, viewOf } from "./helpers.ts";
 
 /** One seat's line in a scorecard row: where the round left it, and what a milestone took off. */
@@ -342,5 +347,100 @@ describe("pulseScale", () => {
         assert.ok(Math.abs(later - pulseScale(ms)) < 1e-9, `${ms}ms and ${periods} throbs on`);
       }
     }
+  });
+});
+
+/*
+ * The laser ring traced once round a counting seat's namecard (spec #280). Positions are
+ * percentages of the namecard's perimeter — the component hands them to rects carrying
+ * `pathLength="100"`, so the browser does the arithmetic and nothing is measured — and every
+ * number asserted here is the shape variant A was judged on (#279): a 28-segment trail falling
+ * off over 80% of the lap, white for its first seventh.
+ */
+describe("ringFrame", () => {
+  /** A frame that has to exist: the ring is on the screen until its lap and its fade are over. */
+  const at = (elapsedMs: number) => {
+    const frame = ringFrame(elapsedMs);
+    assert.ok(frame !== null, `a ring ${elapsedMs}ms into the count`);
+    return frame;
+  };
+
+  it("has traced nothing at the count's first moment, nor before it", () => {
+    for (const ms of [0, -16]) {
+      assert.equal(at(ms).head, null, `no head at ${ms}ms`);
+      assert.deepEqual(at(ms).trail, [], `no trail at ${ms}ms`);
+    }
+  });
+
+  it("carries its head round the namecard once, eased in and out", () => {
+    assert.ok(Math.abs(at(MILESTONE_RING_MS / 2).head!.to - 50) < 1e-9, "half the lap at half the time");
+    assert.equal(at(MILESTONE_RING_MS).head?.to, 100, "and the whole of it at the end");
+    assert.ok(at(MILESTONE_RING_MS / 10).head!.to < 10, "slow out of the start");
+    assert.ok(at((MILESTONE_RING_MS * 9) / 10).head!.to > 90, "and slow into the finish");
+    let before = 0;
+    for (let ms = 1; ms <= MILESTONE_RING_MS; ms += 1) {
+      const head = at(ms).head!.to;
+      assert.ok(head >= before, `the head never goes backwards (${ms}ms)`);
+      before = head;
+    }
+  });
+
+  it("draws the head as a short stroke ending where it is, never behind the start", () => {
+    const early = at(1).head!;
+    assert.equal(early.from, 0);
+    const mid = at(MILESTONE_RING_MS / 2).head!;
+    assert.ok(mid.from < mid.to && mid.to - mid.from <= 5, "a fixed share, a few percent of the lap");
+  });
+
+  it("trails the head with 28 segments over 80% of the lap, end to end", () => {
+    const { head, trail } = at(MILESTONE_RING_MS);
+    assert.equal(trail.length, 28);
+    assert.equal(trail[0]!.to, head!.to, "the trail starts at the head");
+    assert.ok(Math.abs(trail[trail.length - 1]!.from - (head!.to - 80)) < 1e-9, "and runs 80% back");
+    trail.slice(1).forEach((segment, i) => {
+      assert.ok(Math.abs(segment.to - trail[i]!.from) < 1e-9, `segment ${i + 1} meets the one before it`);
+    });
+  });
+
+  it("never draws the trail behind where the lap started", () => {
+    for (let ms = 1; ms < MILESTONE_RING_MS; ms += 10) {
+      const { head, trail } = at(ms);
+      assert.ok(trail.every((segment) => segment.from >= 0 && segment.from < segment.to), `${ms}ms`);
+      assert.ok(trail.length <= 28);
+      if (head!.to < 80) assert.equal(trail[trail.length - 1]!.from, 0, `cut at the start, ${ms}ms`);
+    }
+  });
+
+  it("falls off linearly to nothing along the trail", () => {
+    const { trail } = at(MILESTONE_RING_MS);
+    trail.slice(1).forEach((segment, i) => {
+      assert.ok(segment.opacity < trail[i]!.opacity, `segment ${i + 1} is fainter than the one before`);
+    });
+    assert.ok(trail[0]!.opacity > 0.95, "nearly whole at the head");
+    assert.ok(trail[trail.length - 1]!.opacity < 0.05, "nearly gone at the tail");
+    const steps = trail.slice(1).map((segment, i) => trail[i]!.opacity - segment.opacity);
+    assert.ok(steps.every((step) => Math.abs(step - steps[0]!) < 1e-9), "by the same step each time");
+  });
+
+  it("is white for the first seventh of the trail, cooling to milestone blue", () => {
+    const { trail } = at(MILESTONE_RING_MS);
+    assert.ok(trail[0]!.white > 0.85, "white-hot at the head");
+    trail.slice(1).forEach((segment, i) => {
+      assert.ok(segment.white <= trail[i]!.white, `segment ${i + 1} is no whiter than the one before`);
+    });
+    trail.forEach((segment, i) => {
+      if (i >= 28 / 7) assert.equal(segment.white, 0, `segment ${i} is blue`);
+      else assert.ok(segment.white > 0, `segment ${i} is still cooling`);
+    });
+  });
+
+  it("stays whole through the lap, then fades out over the fade and is gone", () => {
+    assert.equal(at(0).opacity, 1);
+    assert.equal(at(MILESTONE_RING_MS).opacity, 1);
+    assert.equal(at(MILESTONE_RING_MS + MILESTONE_RING_FADE_MS / 2).opacity, 0.5);
+    assert.equal(at(MILESTONE_RING_MS + MILESTONE_RING_FADE_MS / 2).head?.to, 100, "fading where it ended");
+    assert.equal(ringFrame(MILESTONE_RING_MS + MILESTONE_RING_FADE_MS), null);
+    assert.equal(ringFrame(MILESTONE_COUNT_MS), null);
+    assert.equal(ringFrame(Infinity), null, "nothing on a seat that is not counting");
   });
 });

@@ -8,6 +8,9 @@ import {
   ANNOUNCE_LEAD_MS,
   DEAL_HOLD_MS,
   MILESTONE_COUNT_MS,
+  MILESTONE_GLOW_MS,
+  MILESTONE_RING_FADE_MS,
+  MILESTONE_RING_MS,
   announceEnterAt,
   announceLeaveAt,
 } from "../src/timing.ts";
@@ -77,5 +80,16 @@ describe("the deal hold", () => {
 describe("the milestone count", () => {
   it("lands well inside the server's auto-deal delay", () => {
     assert.ok(MILESTONE_COUNT_MS < AUTO_DEAL_MS / 2);
+  });
+
+  it("has traced and faded its ring before it lands", () => {
+    // The ring is the count *beginning*: still on the namecard as the total lands, it would
+    // be cut off in the frame the line goes back to ink, which unmounts it.
+    assert.ok(MILESTONE_RING_MS + MILESTONE_RING_FADE_MS < MILESTONE_COUNT_MS);
+  });
+
+  it("has let its reduced-motion glow rise and fall before it lands", () => {
+    // The glow is the ring's stand-in, and is cut off by the landing in the same way.
+    assert.ok(MILESTONE_GLOW_MS < MILESTONE_COUNT_MS);
   });
 });

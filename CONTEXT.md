@@ -264,7 +264,8 @@ at leisure; the entire premise here is that the quieter treatment was not enough
 
 A total a milestone cut (docs/rules.md §7), shown **landing on the multiple of 50 and then
 draining from it**: the round unfolded, `20 + 30 = 50 pts`, the total falling in milestone blue
-to `0` over two seconds and throbbing at 4Hz as it goes, then the folded `20 - 20 = 0 pts` every scored seat reads (spec #280).
+to `0` over two seconds and throbbing at 4Hz as it goes — a blue laser ring traced once round
+the seat's namecard as it begins, a glow in its place under reduced motion — then the folded `20 - 20 = 0 pts` every scored seat reads (spec #280).
 The call announcement's sibling and on **its trigger exactly** — the scorecard growing from a
 position on the screen (`countdownFrom` in `client/src/milestone.ts`, published as
 `SessionSnapshot.countdown`) — so it too is an event and not a record: never replayed on a

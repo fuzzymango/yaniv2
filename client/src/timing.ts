@@ -21,6 +21,9 @@
  *
  *   MILESTONE_COUNT_MS  a milestone seat's total draining from the multiple of 50
  *   MILESTONE_PULSE_MS  one throb of that total while it drains
+ *   MILESTONE_RING_MS   the laser's one lap round the counting seat's namecard
+ *   MILESTONE_RING_FADE_MS  the ring fading once the lap is done
+ *   MILESTONE_GLOW_MS   the glow that stands in for the ring under reduced motion
  *
  * What a test asserts here is the staging built on them and where a duration would collide with
  * something outside the animation — the server's auto-deal delay, and a deal landing before an
@@ -154,3 +157,27 @@ export const MILESTONE_COUNT_MS = 2000;
  * would only snap a tenth of a size back.
  */
 export const MILESTONE_PULSE_MS = 250;
+
+/**
+ * The laser's one lap round a counting seat's namecard (`MilestoneRing.tsx`, spec #280), eased
+ * in and out, starting with the count.
+ *
+ * What the prototype was judged on (#279, variant A): quick enough to land as a burst — the
+ * count *beginning*, not a second thing to watch — and long enough that the head is seen to go
+ * round rather than the ring simply appearing. Over well before the total lands, as is its fade.
+ */
+export const MILESTONE_RING_MS = 420;
+
+/**
+ * The ring fading once its lap is done — short, so the lap reads as the event and the fade as
+ * it clearing away, and the namecard is plain again while the total is still draining.
+ */
+export const MILESTONE_RING_FADE_MS = 180;
+
+/**
+ * Under reduced motion, the blue glow that rises and falls on the namecard in the ring's place
+ * (spec #280): no sweep and no scale, only light. Longer than the ring's lap and fade together,
+ * because a glow has no head to follow and needs the time to be seen rising and falling at all;
+ * the prototype's 700ms. Over before the total lands, which unmounts it.
+ */
+export const MILESTONE_GLOW_MS = 700;

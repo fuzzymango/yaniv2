@@ -17,7 +17,12 @@
 
 import type { PlayerGameView, PlayerRoundResultView } from "@yaniv/shared";
 import { scoreLabel } from "./score.ts";
-import { MILESTONE_COUNT_MS, MILESTONE_PULSE_MS } from "./timing.ts";
+import {
+  MILESTONE_COUNT_MS,
+  MILESTONE_PULSE_MS,
+  MILESTONE_RING_FADE_MS,
+  MILESTONE_RING_MS,
+} from "./timing.ts";
 
 /** One seat's count: where its total landed and where the milestone leaves it. */
 export interface MilestoneCount {
@@ -159,5 +164,86 @@ export function countFrame(player: PlayerRoundResultView, wentOut: boolean, elap
 export function pulseScale(elapsedMs: number): number {
   return 1 + 0.1 * (0.5 - 0.5 * Math.cos((2 * Math.PI * elapsedMs) / MILESTONE_PULSE_MS));
 }
+
+/**
+ * A stretch of a namecard's perimeter, in percent of it from where the lap starts — the units of
+ * a rect drawn with `pathLength="100"`, so the browser turns them into lengths and nothing here,
+ * or in the component that draws them, has to measure the namecard.
+ */
+export interface RingStroke {
+  readonly from: number;
+  readonly to: number;
+}
+
+/** One segment of the trail behind the head: how much of it is left, and how white it still is. */
+export interface RingSegment extends RingStroke {
+  /** 1 at the head, falling off linearly to nothing at the tail's end. */
+  readonly opacity: number;
+  /** How far from milestone blue to white the stroke is mixed: 1 at the head, 0 a seventh back. */
+  readonly white: number;
+}
+
+/** The laser ring at one moment of the count: how visible it is, its head and the trail behind. */
+export interface RingFrame {
+  /** The whole ring's opacity: 1 through the lap, then fading. */
+  readonly opacity: number;
+  /** The white-hot head, or null before it has moved. */
+  readonly head: RingStroke | null;
+  /** The trail, head end first. Empty before the head has moved. */
+  readonly trail: readonly RingSegment[];
+}
+
+/** How many strokes the trail is drawn in: enough that its fade reads as smooth on a seat label. */
+const RING_SEGMENTS = 28;
+/** How much of the lap the trail reaches back over, falling off to nothing at its end. */
+const RING_TAIL = 80;
+/** How much of the trail, from the head back, is white cooling to blue. */
+const RING_WHITE = 1 / 7;
+/**
+ * The head's length. A share of the perimeter rather than a length in pixels, which is what
+ * measuring nothing costs (spec #280): tuned by eye to read as variant A's 8px head on an
+ * opponent's seat label, and accepted to be proportionally longer on the viewer's footer.
+ */
+const RING_HEAD = 2.5;
+
+/**
+ * The laser ring traced once round a counting seat's namecard, `elapsedMs` into the count, or
+ * null once its lap and its fade are both done — the moment it is unmounted (spec #280).
+ *
+ * The head goes round the perimeter once, eased in and out (`easeInOutSine`), so it leaves and
+ * arrives rather than being switched on and off at speed. Behind it the trail falls off
+ * linearly to nothing over `RING_TAIL` of the lap, cut where the lap began, its first seventh
+ * white and cooling to milestone blue — variant A exactly (#279). The ring is whole through the
+ * lap and then fades where it finished.
+ *
+ * Total over any elapsed time: before 0 it is the count's first moment, nothing yet traced, and
+ * at `Infinity` — a seat that is not counting — it is gone.
+ */
+export function ringFrame(elapsedMs: number): RingFrame | null {
+  const fadingFor = elapsedMs - MILESTONE_RING_MS;
+  if (fadingFor >= MILESTONE_RING_FADE_MS) return null;
+
+  const at = 100 * easeInOutSine(clamp01(elapsedMs / MILESTONE_RING_MS));
+  const trail: RingSegment[] = [];
+  for (let i = 0; i < RING_SEGMENTS; i += 1) {
+    const to = at - (i * RING_TAIL) / RING_SEGMENTS;
+    if (to <= 0) break;
+    const along = (i + 0.5) / RING_SEGMENTS; // 0 at the head, 1 at the tail's end
+    trail.push({
+      from: Math.max(0, at - ((i + 1) * RING_TAIL) / RING_SEGMENTS),
+      to,
+      opacity: 1 - along,
+      white: Math.max(0, 1 - along / RING_WHITE),
+    });
+  }
+
+  return {
+    opacity: fadingFor <= 0 ? 1 : 1 - fadingFor / MILESTONE_RING_FADE_MS,
+    head: at > 0 ? { from: Math.max(0, at - RING_HEAD), to: at } : null,
+    trail,
+  };
+}
+
+const easeInOutSine = (t: number): number => 0.5 - 0.5 * Math.cos(Math.PI * t);
 
 const clamp01 = (t: number): number => Math.min(1, Math.max(0, t));

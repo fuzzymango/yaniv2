@@ -62,6 +62,7 @@ import { Scorecard } from "./Scorecard.tsx";
 import type { Announcement } from "../announcement.ts";
 import { bannerAt } from "../announcement.ts";
 import { CallAnnouncement } from "./CallAnnouncement.tsx";
+import { MilestoneRing } from "./MilestoneRing.tsx";
 import type { Countdown } from "../milestone.ts";
 import { countFrame } from "../milestone.ts";
 import type { CardFlight } from "../flight.ts";
@@ -146,8 +147,9 @@ function ScoredDetail({
   elapsedMs?: number | undefined;
   /**
    * Whether the viewer asked for reduced motion when the count began: the total still drains,
-   * and does not throb. Asked of the table rather than of a stylesheet, the scale being set
-   * from code on every frame where no media query can reach it.
+   * and does not throb, and the namecard glows rather than being traced. Asked of the table
+   * rather than of a stylesheet, the scale and the ring being drawn from code on every frame
+   * where no media query can reach them.
    */
   still?: boolean | undefined;
 }) {
@@ -174,6 +176,15 @@ function ScoredDetail({
         scorecard's blue cell is the record. `OUT` is the one mark left — and on a seat that
         hit a milestone it waits for the count to land, `countFrame` deciding when.
       */}
+      {/*
+        The burst the count begins with, round the namecard this line is drawn in — the seat's
+        label or the viewer's footer, both positioned for it — or the glow standing in for it
+        under reduced motion (spec #280). Only while counting: it is over well before the
+        landing, and a seat that is not counting has nothing to trace.
+      */}
+      {frame.stage === "counting" && elapsedMs !== undefined && (
+        <MilestoneRing elapsedMs={elapsedMs} still={still} />
+      )}
       {frame.outShown && <span className="seat__mark seat__mark--out">out</span>}
       <span
         className={`player__score ${frame.stage === "counting" ? "player__score--counting" : ""}`}
