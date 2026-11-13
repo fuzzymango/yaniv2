@@ -153,7 +153,9 @@ function ScoredDetail({
    */
   still?: boolean | undefined;
 }) {
-  const frame = countFrame(player, wentOut, elapsedMs ?? Infinity);
+  const elapsed = elapsedMs ?? Infinity;
+  const frame = countFrame(player, wentOut, elapsed);
+  const counting = frame.stage === "counting";
   return (
     <>
       {/*
@@ -182,13 +184,9 @@ function ScoredDetail({
         under reduced motion (spec #280). Only while counting: it is over well before the
         landing, and a seat that is not counting has nothing to trace.
       */}
-      {frame.stage === "counting" && elapsedMs !== undefined && (
-        <MilestoneRing elapsedMs={elapsedMs} still={still} />
-      )}
+      {counting && <MilestoneRing elapsedMs={elapsed} still={still} />}
       {frame.outShown && <span className="seat__mark seat__mark--out">out</span>}
-      <span
-        className={`player__score ${frame.stage === "counting" ? "player__score--counting" : ""}`}
-      >
+      <span className={`player__score ${counting ? "player__score--counting" : ""}`}>
         {frame.lead}
         {/*
           The total in a box of its own, so it throbs and the sentence around it holds still
