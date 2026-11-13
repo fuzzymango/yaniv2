@@ -586,8 +586,8 @@ body {
 
 /*
  * The one mark that is news rather than a note: this round took that player out of the
- * match (docs/rules.md §7, issue #142). Louder than its siblings — which say how a score
- * was arrived at — and the only thing added to a scored round, so a round that eliminated
+ * match (docs/rules.md §7, issue #142). The one mark left in the row since the `yaniv`,
+ * `assaf` and `milestone` chips went (#156, spec #280) — and the only thing added to a scored round, so a round that eliminated
  * somebody and one that did not stay the same screen in two states.
  */
 .seat__mark--out {
@@ -1850,10 +1850,10 @@ body {
  * so the ring sits just outside the namecard's edge rather than over the words in it.
  *
  * Over every card in the seat (they count up from 0, `Seat.tsx`) and under the call banner
- * (20), so an Assafed caller's count is traced beneath the banner rather than across it. Under
- * the scorecard's backdrop (`.modal`, 10) too: a seat is its own stacking context, but the
- * footer is not, and the footer's ring would otherwise be traced over an open ledger. Inert to
- * the pointer, like the banner, so nothing on the felt is ever covered by a tap target.
+ * (20), so an Assafed caller's count is traced beneath the banner rather than across it. A seat
+ * is its own stacking context, so 9 never leaves it. The footer is not (`.you__card--open`
+ * depends on that), so the footer's ring is lowered below (`.you > …`). Inert to the pointer,
+ * like the banner, so nothing on the felt is ever covered by a tap target.
  */
 .milestone-ring {
   position: absolute;
@@ -1898,6 +1898,18 @@ body {
   border-radius: inherit;
   pointer-events: none;
   animation: milestone-glow var(--milestone-glow) ease-in-out both;
+}
+
+/*
+ * The footer's ring and glow, which compete at the root because the footer is not a stacking
+ * context. They are above everything drawn on the table (the topbar at 2, and the seat band, the
+ * history drawer and the flight at 3). They are below the two layers drawn over it: the finished
+ * match's standings (`.final`, 5), which a milestone in the deciding round counts under, and
+ * the scorecard's backdrop (`.modal`, 10). At 9 they would be traced across both.
+ */
+.you > .milestone-ring,
+.you > .milestone-glow {
+  z-index: 4;
 }
 
 @keyframes milestone-glow {

@@ -8,14 +8,15 @@
  * a multiple of 50 is shown landing there and then draining by 50 (docs/rules.md §7); this
  * says which seats and between which two numbers, and — given how far into the count a frame
  * is — what the line says, how large its total is drawn and whether the news of going out may
- * show yet. It says nothing about pixels, elements or clocks: the table latches the count and
- * runs the one clock it is read by.
+ * show yet — and which count the table holds, given the one it held (`latchCount`). It says
+ * nothing about pixels, elements or clocks: the table runs the one clock (`countClock.ts`) the
+ * count is read by.
  *
  * Total in the same way as its sibling: every pair of positions has an answer, and "nothing
  * to count" is one of them; every elapsed time has a frame, before the count and after it.
  */
 
-import type { PlayerGameView, PlayerRoundResultView } from "@yaniv/shared";
+import type { Phase, PlayerGameView, PlayerRoundResultView } from "@yaniv/shared";
 import { scoreLabel } from "./score.ts";
 import {
   MILESTONE_COUNT_MS,
@@ -36,13 +37,15 @@ export interface MilestoneCount {
 /**
  * The round being counted and every seat counting in it, or null when there is nothing.
  *
- * `round` is the scorecard's length on the position that scored it — the key the table
- * latches the count on, so a republication of the same round neither restarts nor cuts it
- * off. The seats are a non-empty tuple on `Announcement`'s precedent: an empty count is
- * unconstructible, and "nothing to count" has exactly one spelling.
+ * `round` and `phase` are the scorecard's length and the phase on the position that scored it
+ * — together the key the table latches the count on (`countLive`), so a republication of the
+ * same round neither restarts nor cuts it off. The seats are a non-empty tuple on
+ * `Announcement`'s precedent: an empty count is unconstructible, and "nothing to count" has
+ * exactly one spelling.
  */
 export type Countdown = {
   readonly round: number;
+  readonly phase: Phase;
   readonly seats: readonly [MilestoneCount, ...MilestoneCount[]];
 } | null;
 
@@ -76,7 +79,86 @@ export function countdownFrom(shown: PlayerGameView | null, arriving: PlayerGame
     }));
 
   const [first, ...rest] = seats;
-  return first === undefined ? null : { round: arriving.scorecard.length, seats: [first, ...rest] };
+  return first === undefined
+    ? null
+    : { round: arriving.scorecard.length, phase: arriving.phase, seats: [first, ...rest] };
+}
+
+/**
+ * Whether a count the table has latched is still the one on the screen: the round it was
+ * scored in, in the phase it was scored in (spec #280).
+ *
+ * The round alone is not enough. A deal leaves the scored phase with the scorecard unchanged,
+ * and so does a departure that ends the match from `roundEnd`: `gameEnd` reveals that same
+ * round again, with no new row, and `App` keeps the same table mounted under the standings. So
+ * either one ends the count only because the phase moved. A republication of the same round (a
+ * drop, a reconnect, a departure that leaves the match going) changes neither, and the count
+ * runs on through it.
+ */
+export function countLive(count: NonNullable<Countdown>, view: PlayerGameView): boolean {
+  return view.phase === count.phase && view.scorecard.length === count.round;
+}
+
+/**
+ * A count the table is holding: the countdown it was handed, when it started, and whether the
+ * viewer asked for reduced motion at that moment — asked once, as a flight asks it, a count being
+ * short enough that a preference changed halfway through can wait for the next one.
+ */
+export interface LatchedCount {
+  readonly count: NonNullable<Countdown>;
+  readonly startedAt: number;
+  readonly still: boolean;
+}
+
+/**
+ * The count the table holds once `view` and `countdown` are on the screen, given the one it held
+ * before (spec #280).
+ *
+ * **A countdown it has not latched yet is latched**, `start` asked for the moment and the
+ * preference — so a new count replaces a stale one, and the same countdown, seen again on a
+ * re-render of the same snapshot, is not latched twice. Countdowns are told apart by identity:
+ * the session replaces its snapshot wholesale and clears the one-shot on the next publication,
+ * so a countdown object is one arrival.
+ *
+ * **Otherwise the latch is kept while it is live** (`countLive`) — a republication of the same
+ * round neither restarts nor cuts it off — **and dropped the first time it is not**, returning
+ * null, so it can never come back to life on a later position that happens to share its key, a
+ * rematch ending on as many rounds as this one did.
+ *
+ * Returns `latch` itself when nothing changed, so a caller can tell an update from none by
+ * identity.
+ */
+export function latchCount(
+  latch: LatchedCount | null,
+  countdown: Countdown,
+  view: PlayerGameView,
+  start: () => { readonly startedAt: number; readonly still: boolean },
+): LatchedCount | null {
+  if (countdown !== null && countdown !== latch?.count) return { count: countdown, ...start() };
+  return latch !== null && countLive(latch.count, view) ? latch : null;
+}
+
+/** Whether `playerId` is one of the seats the latched count counts at. */
+export function isCounting(latch: LatchedCount | null, playerId: string): boolean {
+  return latch?.count.seats.some((seat) => seat.playerId === playerId) ?? false;
+}
+
+/**
+ * Whether a seat's namecard may wear the news that this round took it out — the red ring
+ * beside the `OUT` mark (spec #280, amended on review #281) — read at the grain the table
+ * re-renders on: a count is either still running or `landed`, never a frame in between.
+ *
+ * `countFrame`'s own answer, asked at the count's first moment for a seat still counting and
+ * after its end for every other, so the ring and the mark cannot disagree about when.
+ */
+export function outShownFor(
+  latch: LatchedCount | null,
+  landed: boolean,
+  line: PlayerRoundResultView,
+  wentOut: boolean,
+): boolean {
+  const running = !landed && isCounting(latch, line.playerId);
+  return countFrame(line, wentOut, running ? 0 : Infinity).outShown;
 }
 
 /** What one seat's scored line says at a moment of its count. */

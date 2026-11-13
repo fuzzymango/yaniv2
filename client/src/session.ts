@@ -306,8 +306,8 @@ export interface SessionSnapshot {
    * The **same one-shot as `announcement`, on the same trigger** — set by the publication
    * that scores the round, gone from the next — but it carries only the count's *start*. The
    * count itself outlives this field: it runs for two seconds, through republications of the
-   * same round that clear every one-shot, so the table latches it on `round` and holds it
-   * there. The session decides the start because it is the only layer that knows whether a
+   * same round that clear every one-shot, so the table latches it on `round` and `phase`
+   * (`latchCount`) and holds it there. The session decides the start because it is the only layer that knows whether a
    * position was on the screen to arrive from. `milestone.ts` decides what is in it.
    */
   readonly countdown: Countdown;

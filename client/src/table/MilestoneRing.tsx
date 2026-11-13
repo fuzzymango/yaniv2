@@ -17,9 +17,10 @@
  * stroke — rather than CSS on the rect, which not every engine applies to SVG geometry: the
  * stroke runs centred on the SVG's edge, which is exactly the ring round the namecard.
  *
- * It has no clock of its own: `elapsedMs` is the table's one frame loop, and it is gone the
- * frame `ringFrame` says the fade is done. The glow is a CSS keyframe, its duration handed in as
- * a custom property; it is drawn only while the count is, and is over before it lands.
+ * It has no clock of its own: `elapsedMs` is the table's one clock (`countClock.ts`), read by the
+ * `ScoredDetail` it is drawn in, and it is gone the frame `ringFrame` says the fade is done. The
+ * glow is a CSS keyframe, its duration handed in as a custom property; it is drawn only while the
+ * count is, and is over before it lands.
  */
 
 import type { CSSProperties } from "react";

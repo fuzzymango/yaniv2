@@ -44,7 +44,7 @@
  */
 
 import type { CSSProperties } from "react";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type {
   OpponentView,
   PlayerGameView,
@@ -63,8 +63,10 @@ import type { Announcement } from "../announcement.ts";
 import { bannerAt } from "../announcement.ts";
 import { CallAnnouncement } from "./CallAnnouncement.tsx";
 import { MilestoneRing } from "./MilestoneRing.tsx";
-import type { Countdown } from "../milestone.ts";
-import { countFrame } from "../milestone.ts";
+import type { Countdown, LatchedCount } from "../milestone.ts";
+import { countFrame, isCounting, latchCount, outShownFor } from "../milestone.ts";
+import type { CountClock, FrameSource } from "../countClock.ts";
+import { countClock } from "../countClock.ts";
 import type { CardFlight } from "../flight.ts";
 import type { Landing } from "../ghosts.ts";
 import { DECK_BOX } from "../ghosts.ts";
@@ -72,7 +74,7 @@ import { roundOutcome } from "../score.ts";
 import type { Zone } from "../seating.ts";
 import { ZONES, byRelativeSeat, seatZones } from "../seating.ts";
 import { seatStatus } from "../status.ts";
-import { DEAL_HOLD_MS, MILESTONE_COUNT_MS, SHAKE_MS } from "../timing.ts";
+import { DEAL_HOLD_MS, SHAKE_MS } from "../timing.ts";
 import type { DrawSource } from "../turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "../turn.ts";
 
@@ -123,6 +125,21 @@ interface TableProps {
 const wantsStillness = (): boolean =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/** The browser's frames, for the count's clock to run on. */
+const animationFrames: FrameSource = {
+  request: (callback) => requestAnimationFrame(callback),
+  cancel: (handle) => cancelAnimationFrame(handle),
+};
+
+/** What a seat that is not counting reads: a count long since landed, and nothing to hear. */
+const noClock = { subscribe: () => () => {}, elapsed: () => Infinity };
+
+/** How far into its count a seat is, re-rendering whoever asks on every frame of it. */
+const useCountElapsed = (clock: CountClock | null): number => {
+  const { subscribe, elapsed } = clock ?? noClock;
+  return useSyncExternalStore(subscribe, elapsed);
+};
+
 /**
  * What a scored round says about one player, beside their own cards: whether they did
  * anything, and where the round leaves them.
@@ -134,17 +151,18 @@ const wantsStillness = (): boolean =>
 function ScoredDetail({
   player,
   wentOut,
-  elapsedMs,
+  clock = null,
   still = false,
 }: {
   player: PlayerRoundResultView;
   /** Whether this round is the one that took them out of the match — the `OUT` tag. */
   wentOut: boolean;
   /**
-   * How far into its milestone count this seat is, where it is counting (spec #280); absent
-   * for every seat that is not, which reads exactly as a count long since landed.
+   * The clock of the milestone count this seat is in, where it is counting (spec #280); null
+   * for every seat that is not, which reads exactly as a count long since landed. Subscribed
+   * to here, so a frame of the count re-renders this line and nothing round it.
    */
-  elapsedMs?: number | undefined;
+  clock?: CountClock | null;
   /**
    * Whether the viewer asked for reduced motion when the count began: the total still drains,
    * and does not throb, and the namecard glows rather than being traced. Asked of the table
@@ -153,7 +171,7 @@ function ScoredDetail({
    */
   still?: boolean | undefined;
 }) {
-  const elapsed = elapsedMs ?? Infinity;
+  const elapsed = useCountElapsed(clock);
   const frame = countFrame(player, wentOut, elapsed);
   const counting = frame.stage === "counting";
   return (
@@ -344,58 +362,52 @@ export function Table({
    * **Latched, not read off the snapshot.** The session hands over a count's *start* as a
    * one-shot, cleared by the next publication of anything — which is right for the banners,
    * whose sequence a peer reconnecting may cut off at no cost, and wrong for a total halfway
-   * through draining, which would snap to its landing. So the count is held here and is live
-   * while the round it was latched for is the one on the screen, scored: keyed on the
-   * scorecard's length as the deal hold is, a republication of the same round neither restarts
-   * nor cuts it off, while a deal (a new phase), a match-ending departure (`App` mounts the
-   * table afresh for `gameEnd`) and a dropped socket (it unmounts) all end it.
+   * through draining, which would snap to its landing. So the count is held here, and what is
+   * held is `latchCount`'s to say (tested): a new countdown is latched, a latch is kept while the
+   * round it was latched for is on the screen in the phase it was scored in, and dropped the first
+   * render it is not, so it cannot come back to life on a later position sharing its key. A deal
+   * and a departure that ends the match both end it by moving the phase: the table stays mounted
+   * under the standings at `gameEnd`, and the scorecard does not grow. A dropped socket ends it
+   * by unmounting the table.
    *
-   * Latched in a layout effect so it is in place before the frame that brought it is painted:
-   * a passive one would paint one frame of the landed line first — `OUT` included, on a seat
-   * whose count is about to withhold it.
+   * Latched during render, React's pattern for state derived from a prop, so it is in place
+   * before the frame that brought it is painted: an effect would paint one frame of the landed
+   * line first — `OUT` included, on a seat whose count is about to withhold it. `latchCount`
+   * returns the latch it was given when nothing changed, so this converges in one pass.
    *
-   * The reduced-motion preference is asked once, here, as `CardsInFlight.tsx` asks it of a
-   * flight: the throb is a scale set from code, which no stylesheet media query can switch off,
-   * and a count is short enough that a preference changed halfway through it can wait for the
-   * next one.
+   * The reduced-motion preference is asked once, as the count is latched, as `CardsInFlight.tsx`
+   * asks it of a flight: the throb is a scale set from code, which no stylesheet media query can
+   * switch off.
    */
-  const [latch, setLatch] = useState<{
-    readonly count: NonNullable<Countdown>;
-    readonly startedAt: number;
-    readonly still: boolean;
-  } | null>(null);
-  useLayoutEffect(() => {
-    if (countdown !== null) {
-      setLatch({ count: countdown, startedAt: performance.now(), still: wantsStillness() });
-    }
-  }, [countdown]);
-  const counting =
-    latch !== null && result !== null && latch.count.round === roundsScored ? latch : null;
+  const [latch, setLatch] = useState<LatchedCount | null>(null);
+  const counting = latchCount(latch, countdown, view, () => ({
+    startedAt: performance.now(),
+    still: wantsStillness(),
+  }));
+  if (counting !== latch) setLatch(counting);
 
   /**
-   * The one clock every counting seat is read by: a frame loop while a count is live, stopping
-   * once it has landed and cancelled by its cleanup, so no frame callback outlives the count or
-   * the table. One loop for the table rather than one per seat — six seats can count at once.
+   * The one clock every counting seat is read by (`countClock.ts`), made fresh for each count and
+   * run on the browser's frames until it lands, cancelled by the effect's cleanup so no frame
+   * callback outlives the count or the table.
    *
-   * Holds the frame's own timestamp rather than an elapsed time: a count latched after the last
-   * one landed reads its start off the new latch, and the old stamp is before it — the count's
-   * first moment, never its last.
+   * **Read by the counting seats, not by this component.** Each `ScoredDetail` subscribes to it,
+   * so a frame re-renders the lines that are counting and nothing else — not the table, whose
+   * every render also measures every card on it for the flights. The table itself re-renders on
+   * a count twice: when it is latched, and when it lands (`landedClock`), the moment the namecards
+   * may wear the red ring of going out.
    */
-  const [frameAt, setFrameAt] = useState(0);
+  const clock = useMemo(() => (counting === null ? null : countClock(counting.startedAt)), [counting]);
+  const [landedClock, setLandedClock] = useState<CountClock | null>(null);
   useEffect(() => {
-    if (counting === null) return;
-    let frame = requestAnimationFrame(function tick(now) {
-      setFrameAt(now);
-      if (now - counting.startedAt < MILESTONE_COUNT_MS) frame = requestAnimationFrame(tick);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [counting]);
+    if (clock === null) return;
+    return clock.run(animationFrames, () => setLandedClock(clock));
+  }, [clock]);
+  const landed = clock !== null && landedClock === clock;
 
-  /** How far into the count a seat is, or undefined where it is not counting. */
-  const countedAt = (playerId: string): number | undefined =>
-    counting?.count.seats.some((seat) => seat.playerId === playerId)
-      ? frameAt - counting.startedAt
-      : undefined;
+  /** The clock a seat's line reads, or null where the seat is not counting. */
+  const clockFor = (playerId: string): CountClock | null =>
+    isCounting(counting, playerId) ? clock : null;
 
   const zones = seatZones([...view.opponents].sort(byRelativeSeat(view)));
 
@@ -441,7 +453,7 @@ export function Table({
    * would give away what the count is holding back. Everywhere else, `wentOut` as it was.
    */
   const outShown = (player: SelfView | OpponentView, row: PlayerRoundResultView): boolean =>
-    countFrame(row, wentOut(player), countedAt(player.id) ?? Infinity).outShown;
+    outShownFor(counting, landed, row, wentOut(player));
 
   /**
    * One opponent in their zone, in whichever of the two shapes the phase calls for — the
@@ -494,7 +506,7 @@ export function Table({
           <ScoredDetail
             player={row}
             wentOut={wentOut(opponent)}
-            elapsedMs={countedAt(opponent.id)}
+            clock={clockFor(opponent.id)}
             still={counting?.still}
           />
         }
@@ -856,7 +868,7 @@ export function Table({
             <ScoredDetail
               player={yourRound}
               wentOut={youWentOut}
-              elapsedMs={countedAt(view.you.id)}
+              clock={clockFor(view.you.id)}
               still={counting?.still}
             />
           ) : (

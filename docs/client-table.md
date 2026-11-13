@@ -496,11 +496,18 @@ when it starts is the session's one-shot (`countdownFrom`, `docs/client-session.
   coming back. A banner cut off by that loses a little of a sequence that has already said its
   word; a total cut off halfway through draining snaps to a number the viewer never saw it
   reach, which reads as a glitch. So `Table.tsx` latches the count in component state, keyed on
-  the scorecard's length as the deal hold is, and it is live while that round is on the screen,
-  scored. A deal leaves the scored phase; a departure that ends the match mounts the table
-  afresh for `gameEnd` (`App.tsx`); a dropped socket unmounts it — each ends the count, and none
-  replays it. One frame loop for the whole table drives every counting seat, stopping once the
-  count lands and cancelled by its cleanup, so no frame callback outlives the table.
+  the scorecard's length (as the deal hold is) and on the phase the round was scored in. It is
+  live while both still hold (`countLive`, tested). A deal and a departure that ends the match
+  both end it by moving the phase. At `gameEnd` the same table stays mounted under the
+  standings (`App.tsx`) and the scorecard does not grow, so the round alone would not end it. A
+  dropped socket ends it by unmounting the table. None of them replays it, and a latch is dropped
+  once it is not live, so it cannot match a later position by coincidence (`latchCount`, tested).
+  One clock for the whole table drives every counting seat (`countClock.ts`, tested), stopping
+  once the count lands and cancelled by its cleanup, so no frame callback outlives the table.
+  **It is a store the counting lines subscribe to, not the table's state**: held there, every
+  frame re-rendered the whole table, and every table render measures every card on it for the
+  flights. So a frame re-renders the counting lines alone, and the table re-renders twice a
+  count — at the latch, and at the landing, when the namecards may wear the red ring.
 - **It starts with the call, not after it.** The count begins on the scored position's arrival,
   the same instant the first banner starts to arrive — so on an Assafed caller who hit a
   milestone it runs under the banner. Waiting for the banners would put it after the deal hold,
@@ -530,8 +537,10 @@ when it starts is the session's one-shot (`countdownFrom`, `docs/client-session.
   not variant A's 8px — tuned to read as A's on a seat label, and proportionally longer on the
   long footer. The geometry is attributes too (`width="100%"` on an SVG inset by half the
   stroke), the spec's fallback taken up front, since not every engine applies CSS to SVG
-  geometry. It runs under a call banner and under the scorecard's backdrop (`z-index` 9: a
-  seat is its own stacking context, the footer is not). Under reduced motion it is a blue glow
+  geometry. It runs under a call banner (`z-index` 9, inside a seat's own stacking context).
+  The footer is not a stacking context, so its ring is lowered to 4. That puts it under the
+  finished match's standings (`.final`, 5) and the scorecard's backdrop (`.modal`, 10), which
+  it would otherwise be traced across. Under reduced motion it is a blue glow
   rising and falling on the namecard instead — a keyframe of `MILESTONE_GLOW_MS` (700ms), no
   sweep and no scale — chosen on the same latched preference as the throb. Both are
   `aria-hidden`, and the draining number is not a live region: the line above the felt and the

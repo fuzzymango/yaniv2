@@ -21,7 +21,17 @@ import type {
   RoundResultView,
   RoundScore,
 } from "@yaniv/shared";
-import { countFrame, countdownFrom, pulseScale, ringFrame } from "../src/milestone.ts";
+import type { LatchedCount } from "../src/milestone.ts";
+import {
+  countFrame,
+  countLive,
+  countdownFrom,
+  isCounting,
+  latchCount,
+  outShownFor,
+  pulseScale,
+  ringFrame,
+} from "../src/milestone.ts";
 import { scoreLabel } from "../src/score.ts";
 import {
   MILESTONE_COUNT_MS,
@@ -85,6 +95,7 @@ describe("countdownFrom", () => {
 
       assert.deepEqual(countdownFrom(playing(), after), {
         round: 1,
+        phase: "roundEnd",
         seats: [{ playerId: "p2", landedOn: 50, settlesOn: 0 }],
       });
     });
@@ -98,6 +109,7 @@ describe("countdownFrom", () => {
 
       assert.deepEqual(countdownFrom(before, after), {
         round: 2,
+        phase: "roundEnd",
         seats: [
           { playerId: "p1", landedOn: 100, settlesOn: 50 },
           { playerId: "p2", landedOn: 50, settlesOn: 0 },
@@ -110,6 +122,7 @@ describe("countdownFrom", () => {
 
       assert.deepEqual(countdownFrom(playing(), after), {
         round: 1,
+        phase: "roundEnd",
         seats: [{ playerId: "p1", landedOn: 50, settlesOn: 0 }],
       });
     });
@@ -122,6 +135,7 @@ describe("countdownFrom", () => {
 
       assert.deepEqual(countdownFrom(before, after), {
         round: 2,
+        phase: "gameEnd",
         seats: [{ playerId: "p1", landedOn: 100, settlesOn: 50 }],
       });
     });
@@ -161,6 +175,222 @@ describe("countdownFrom", () => {
       // for p2; the row scored here does not, so there is nothing to count.
       assert.equal(countdownFrom(playing(), scored([plain(1)])), null);
     });
+  });
+});
+
+/**
+ * Whether a count the table latched is still running on the position now on the screen.
+ * `countdownFrom` decides when a count starts, and this decides when it ends. Both questions
+ * are about a scored round being republished by several paths, and only some of those paths
+ * should stop the count.
+ */
+describe("countLive", () => {
+  const card = [plain(1), row(2, [line("p1", 10), line("p2", 0, 50)])];
+  const latchedAt = (view: PlayerGameView) => {
+    const count = countdownFrom(playing([plain(1)]), view);
+    assert.ok(count !== null, "a fixture with a count to latch");
+    return count;
+  };
+
+  it("runs on through a republication of the round it was scored in", () => {
+    // A drop, a reconnect, a departure that leaves the match going: same round, same phase.
+    assert.equal(countLive(latchedAt(scored(card)), scored(card)), true);
+  });
+
+  it("runs on at gameEnd when the round that ended the match is the one counting", () => {
+    assert.equal(countLive(latchedAt(scored(card, "gameEnd")), scored(card, "gameEnd")), true);
+  });
+
+  it("ends on a deal, the scorecard unchanged", () => {
+    assert.equal(countLive(latchedAt(scored(card)), playing(card)), false);
+  });
+
+  it("ends on a departure that ends the match, which reveals the same round again", () => {
+    // `gameEnd` with no new row, and the table stays mounted under the standings, so the
+    // only thing that has changed is the phase.
+    assert.equal(countLive(latchedAt(scored(card)), scored(card, "gameEnd")), false);
+  });
+
+  it("ends once a later round is scored", () => {
+    const later = [...card, plain(3)];
+    assert.equal(countLive(latchedAt(scored(card)), scored(later)), false);
+  });
+});
+
+/**
+ * The table's latch, render by render (spec #280's "Lifetime"). Each step is one render of the
+ * table: the latch it held, the snapshot's countdown and view, and what it holds after. A
+ * countdown is a one-shot — non-null on the publication that scored the round, null on every
+ * one after — so the sequences below are the session's, played into the table.
+ */
+describe("latchCount", () => {
+  const card = [plain(1), row(2, [line("p1", 10), line("p2", 0, 50)])];
+  const arrive = (from: PlayerGameView, to: PlayerGameView) => {
+    const count = countdownFrom(from, to);
+    assert.ok(count !== null, "a fixture with a count to latch");
+    return count;
+  };
+
+  /** A `start` that hands out increasing moments and counts how often it was asked. */
+  const clock = () => {
+    let asked = 0;
+    const start = () => {
+      asked += 1;
+      return { startedAt: asked * 1000, still: false };
+    };
+    return { start, asked: () => asked };
+  };
+
+  it("latches a countdown it has not seen, asking for the moment once", () => {
+    const { start, asked } = clock();
+    const view = scored(card);
+    const countdown = arrive(playing([plain(1)]), view);
+    const latch = latchCount(null, countdown, view, start);
+    assert.deepEqual(latch, { count: countdown, startedAt: 1000, still: false });
+    assert.equal(asked(), 1);
+  });
+
+  it("carries the reduced-motion answer it was handed at the latch", () => {
+    const view = scored(card);
+    const countdown = arrive(playing([plain(1)]), view);
+    const latch = latchCount(null, countdown, view, () => ({ startedAt: 5, still: true }));
+    assert.equal(latch?.still, true);
+  });
+
+  it("keeps the latch, the very same one, on a re-render of the snapshot that brought it", () => {
+    // Same snapshot, same countdown object: a selection toggled, a toast arriving.
+    const { start, asked } = clock();
+    const view = scored(card);
+    const countdown = arrive(playing([plain(1)]), view);
+    const latch = latchCount(null, countdown, view, start);
+    assert.equal(latchCount(latch, countdown, view, start), latch);
+    assert.equal(asked(), 1, "never restarted");
+  });
+
+  it("keeps the latch through a republication of the same round, its start untouched", () => {
+    // A peer drops: the one-shot is cleared, the round is the same.
+    const { start, asked } = clock();
+    const view = scored(card);
+    const latch = latchCount(null, arrive(playing([plain(1)]), view), view, start);
+    const after = latchCount(latch, null, scored(card), start);
+    assert.equal(after, latch);
+    assert.equal(after?.startedAt, 1000);
+    assert.equal(asked(), 1);
+  });
+
+  it("drops the latch on a deal", () => {
+    const { start } = clock();
+    const view = scored(card);
+    const latch = latchCount(null, arrive(playing([plain(1)]), view), view, start);
+    assert.equal(latchCount(latch, null, playing(card), start), null);
+  });
+
+  it("drops the latch on a departure that ends the match from roundEnd", () => {
+    const { start } = clock();
+    const view = scored(card);
+    const latch = latchCount(null, arrive(playing([plain(1)]), view), view, start);
+    assert.equal(latchCount(latch, null, scored(card, "gameEnd"), start), null);
+  });
+
+  it("is never revived once dropped, even by a later position that shares its key", () => {
+    // A rematch that ends on as many rounds as this match did, at roundEnd again: the key
+    // matches the old latch, but the table already let it go, and no countdown came with it.
+    const { start, asked } = clock();
+    const view = scored(card);
+    const latch = latchCount(null, arrive(playing([plain(1)]), view), view, start);
+    const dealt = latchCount(latch, null, playing(card), start);
+    assert.equal(dealt, null);
+    assert.equal(latchCount(dealt, null, scored(card), start), null);
+    assert.equal(asked(), 1);
+  });
+
+  it("replaces a stale latch with a new countdown, asking for a new moment", () => {
+    const { start } = clock();
+    const first = scored(card);
+    const old = latchCount(null, arrive(playing([plain(1)]), first), first, start);
+    const later = scored([...card, row(3, [line("p1", 0, 50), line("p2", 20)])]);
+    const countdown = arrive(playing(card), later);
+    const latch = latchCount(old, countdown, later, start);
+    assert.notEqual(latch, old);
+    assert.equal(latch?.count, countdown);
+    assert.equal(latch?.startedAt, 2000);
+  });
+
+  it("holds nothing where there was nothing to hold", () => {
+    const { start, asked } = clock();
+    assert.equal(latchCount(null, null, scored(card), start), null);
+    assert.equal(asked(), 0);
+  });
+});
+
+describe("isCounting", () => {
+  const latched = (seats: string[]): LatchedCount => {
+    const [first, ...rest] = seats.map((playerId) => ({ playerId, landedOn: 50, settlesOn: 0 }));
+    assert.ok(first !== undefined);
+    return { count: { round: 2, phase: "roundEnd", seats: [first, ...rest] }, startedAt: 0, still: false };
+  };
+
+  it("counts at every seat the count names, the viewer's own included", () => {
+    const latch = latched(["p1", "p2", "p3"]);
+    assert.deepEqual(["p1", "p2", "p3"].map((id) => isCounting(latch, id)), [true, true, true]);
+  });
+
+  it("counts at no seat the count does not name", () => {
+    assert.equal(isCounting(latched(["p2"]), "p1"), false);
+  });
+
+  it("counts at no seat with no count latched", () => {
+    assert.equal(isCounting(null, "p2"), false);
+  });
+});
+
+describe("outShownFor", () => {
+  /** p2, who stood on 20 and was caught holding 30: a milestone, and — by `wentOut` — out. */
+  const lineOf = (delta: number, milestoneReduction: number): PlayerRoundResultView => ({
+    playerId: "p2",
+    name: "Grace",
+    hand: cards("spades-9"),
+    handValue: delta,
+    delta,
+    milestoneReduction,
+    scoreAfter: 20 + delta - milestoneReduction,
+  });
+  const milestone = lineOf(30, 50);
+  const plainLine = lineOf(7, 0);
+  const latch: LatchedCount = {
+    count: { round: 2, phase: "roundEnd", seats: [{ playerId: "p2", landedOn: 50, settlesOn: 0 }] },
+    startedAt: 0,
+    still: false,
+  };
+
+  it("withholds going out from a seat still counting", () => {
+    assert.equal(outShownFor(latch, false, milestone, true), false);
+  });
+
+  it("shows it the moment the count lands", () => {
+    assert.equal(outShownFor(latch, true, milestone, true), true);
+  });
+
+  it("shows it at once on a seat that went out with nothing to count", () => {
+    const other: LatchedCount = {
+      ...latch,
+      count: { ...latch.count, seats: [{ playerId: "p3", landedOn: 50, settlesOn: 0 }] },
+    };
+    assert.equal(outShownFor(other, false, plainLine, true), true);
+    assert.equal(outShownFor(null, false, plainLine, true), true);
+  });
+
+  it("shows nothing on a seat that did not go out, counting or not", () => {
+    assert.equal(outShownFor(latch, false, milestone, false), false);
+    assert.equal(outShownFor(latch, true, milestone, false), false);
+  });
+
+  it("agrees with the line's own OUT mark at the start of the count and at its end", () => {
+    assert.equal(outShownFor(latch, false, milestone, true), countFrame(milestone, true, 0).outShown);
+    assert.equal(
+      outShownFor(latch, true, milestone, true),
+      countFrame(milestone, true, MILESTONE_COUNT_MS).outShown,
+    );
   });
 });
 

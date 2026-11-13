@@ -2387,7 +2387,7 @@ describe("the milestone to count", () => {
       host.subscribe(() => seen.push(host.getSnapshot()));
       const over = await playToMatchEnd([host]);
 
-      const expected: NonNullable<Countdown>[] = over.view!.scorecard.flatMap((row, i) => {
+      const expected: Omit<NonNullable<Countdown>, "phase">[] = over.view!.scorecard.flatMap((row, i) => {
         const counting = row.players.filter((line) => line.milestoneReduction > 0);
         if (counting.length === 0) return [];
         const [first, ...rest] = counting.map((line) => ({
@@ -2400,7 +2400,15 @@ describe("the milestone to count", () => {
       assert.ok(expected.length > 0, "a match with a milestone in it to count");
 
       const counted = seen.flatMap((s) => (s.countdown === null ? [] : [s.countdown]));
-      assert.deepEqual(counted, expected, "one count per milestone round, and no more");
+      assert.deepEqual(
+        counted.map(({ phase: _, ...rest }) => rest),
+        expected,
+        "one count per milestone round, and no more",
+      );
+      // Keyed on the phase it was scored in, which the table needs to end it (`countLive`).
+      for (const s of seen) {
+        if (s.countdown !== null) assert.equal(s.countdown.phase, s.view?.phase);
+      }
 
       // A one-shot: whatever is published next — an ack, a tap, a deal — has none.
       seen.forEach((s, i) => {
