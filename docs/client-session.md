@@ -19,7 +19,7 @@ modules beside it (`turn.ts`, `seating.ts`, `fan.ts`, `flight.ts`, `ghosts.ts`, 
 `useSession`.
 
 Snapshots are **replaced wholesale, never mutated**: `useSyncExternalStore` compares by
-identity. Ten fields, and each answers a different question:
+identity. Eleven fields, and each answers a different question:
 
 - **`view`** — the position, or `null`. Null *is* the main menu: the one screen not a function of
   `view.phase`, there being nothing sent before a room exists — `resuming` qualifies it, below.
@@ -63,6 +63,13 @@ identity. Ten fields, and each answers a different question:
   (the seat's custom call, else `YANIV`/`ASSAF`, #238), and null otherwise. The same
   one-shot in the same place, asking `announcement.ts` — which keys on the **scorecard growing**,
   never on a round result standing. See "Call announcement" in `CONTEXT.md` and docs/adr/0018.
+- **`countdown`** — the milestone count a scored round arrived with: every seat the newest
+  scorecard row left on a multiple of 50, each with the number it `landedOn` and the one it
+  `settlesOn`, keyed by `round` (the scorecard's length), and null otherwise (spec #280). The
+  same one-shot on the announcement's own trigger, asking `milestone.ts`. **The session decides
+  only the *start***: the count runs for two seconds, through republications of the same round
+  that clear every one-shot, so the table latches it on `round` rather than reading this field
+  for its length. Null on a resumed seat or a cold boot — nobody was watching it scored.
 
 **`busy` locks on emit, and settles two different ways.** Entering or leaving a room settles
 on the **ack**: entry has been broadcast before it is acked, and a departing connection is

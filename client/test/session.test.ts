@@ -50,6 +50,7 @@ import {
 } from "socket.io-client";
 import type { Announcement } from "../src/announcement.ts";
 import type { CardFlight } from "../src/flight.ts";
+import type { Countdown } from "../src/milestone.ts";
 import {
   createSession,
   type AccountStore,
@@ -2352,6 +2353,80 @@ describe("the call to announce", () => {
       assert.ok(ended.view!.roundResult, "the previous round is still on the table");
       assert.equal(ended.announcement, null, "and it is not announced a second time");
       assert.equal(heard.length, 1, "nothing new was called");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
+ * The milestone count a scored round arrived with, published for the table to latch and run
+ * (spec #280). Which seats and between which numbers is `milestone.ts`'s question, answered
+ * against fixtures; these are about the field's lifetime off a real server — the session
+ * decides only the *start*, so it is set on the scoring publication and on no other.
+ */
+describe("the milestone to count", () => {
+  /**
+   * The seed the count is played on: a match, the human seat driven by `playOn` beside five
+   * bots, in which at least one round leaves a total on a multiple of 50 before the match
+   * ends. Nothing else about it is special, and the first test says so if it stops being true.
+   */
+  const MILESTONE_MATCH = 2;
+
+  /** Whether the newest scored round took a milestone off anybody. */
+  const scoredAMilestone = (view: PlayerGameView | null): boolean =>
+    view !== null &&
+    view.phase !== "playing" &&
+    (view.scorecard.at(-1)?.players.some((line) => line.milestoneReduction > 0) ?? false);
+
+  it("counts exactly the rounds a match scored a milestone in, and once each", async () => {
+    const server = await startServer(MILESTONE_MATCH);
+    try {
+      const host = await soloMatch(server);
+      const seen: SessionSnapshot[] = [];
+      host.subscribe(() => seen.push(host.getSnapshot()));
+      const over = await playToMatchEnd([host]);
+
+      const expected: NonNullable<Countdown>[] = over.view!.scorecard.flatMap((row, i) => {
+        const counting = row.players.filter((line) => line.milestoneReduction > 0);
+        if (counting.length === 0) return [];
+        const [first, ...rest] = counting.map((line) => ({
+          playerId: line.playerId,
+          landedOn: line.scoreAfter + line.milestoneReduction,
+          settlesOn: line.scoreAfter,
+        }));
+        return [{ round: i + 1, seats: [first!, ...rest] }];
+      });
+      assert.ok(expected.length > 0, "a match with a milestone in it to count");
+
+      const counted = seen.flatMap((s) => (s.countdown === null ? [] : [s.countdown]));
+      assert.deepEqual(counted, expected, "one count per milestone round, and no more");
+
+      // A one-shot: whatever is published next — an ack, a tap, a deal — has none.
+      seen.forEach((s, i) => {
+        if (s.countdown !== null && i + 1 < seen.length) {
+          assert.equal(seen[i + 1]!.countdown, null, "the count is gone from the next publication");
+        }
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not count a round to a seat that has just been claimed back", async () => {
+    const server = await startServer(MILESTONE_MATCH);
+    try {
+      const host = await soloMatch(server);
+      await playOn([host], "a milestone round", (all) =>
+        all.every((s) => scoredAMilestone(s.view) && !s.busy),
+      );
+
+      server.drop(host, true);
+      await waitForSnapshot(host, "the drop", (s) => !s.connected);
+
+      const back = await waitForSnapshot(host, "the seat", (s) => s.connected && !s.resuming);
+      assert.ok(scoredAMilestone(back.view), "the milestone round is still on the table");
+      assert.equal(back.countdown, null, "but nobody was there to watch it scored");
     } finally {
       await server.close();
     }
