@@ -21,10 +21,12 @@ interface WayOutProps {
 
 export function WayOut({ busy, onExit }: WayOutProps) {
   // Promises nothing about the rest of the table, because leaving costs it nothing: the
-  // room plays on without whoever goes.
+  // room plays on without whoever goes. One word, so it fits half of a phone-width row
+  // beside whatever it is offered against (issue #263), and the same word on every screen
+  // that offers it, those screens included.
   return (
     <button className="button" type="button" onClick={onExit} disabled={busy}>
-      Leave the room
+      Leave
     </button>
   );
 }

@@ -16,9 +16,20 @@ import type { ReactNode } from "react";
  */
 export const SETTINGS_TITLE = "Room settings";
 
-export function SettingsPanel({ children }: { children: ReactNode }) {
+interface SettingsPanelProps {
+  /**
+   * Whether the box holds the host's controls rather than the read-only copy. Said outright
+   * rather than read off whatever the box happens to contain, because the lobby sizes the two
+   * differently (issue #263): the controls grow into the room the roster leaves, the copy
+   * does not.
+   */
+  editable?: boolean;
+  children: ReactNode;
+}
+
+export function SettingsPanel({ editable = false, children }: SettingsPanelProps) {
   return (
-    <section className="settings">
+    <section className={editable ? "settings settings--editor" : "settings"}>
       <h2 className="settings__title">{SETTINGS_TITLE}</h2>
       {children}
     </section>
