@@ -15,6 +15,8 @@
   --danger: #fca5a5;
   --news: #86efac;
   --surface: rgb(0 0 0 / 25%);
+  /* A total a milestone cut (docs/rules.md §7): the scorecard's cell and a count draining. */
+  --milestone: #93c5fd;
 
   /*
    * The call banner's two colors, scoped to themselves rather than aliasing `--accent`/
@@ -584,8 +586,8 @@ body {
 
 /*
  * The one mark that is news rather than a note: this round took that player out of the
- * match (docs/rules.md §7, issue #142). Louder than its siblings — which say how a score
- * was arrived at — and the only thing added to a scored round, so a round that eliminated
+ * match (docs/rules.md §7, issue #142). The one mark left in the row since the `yaniv`,
+ * `assaf` and `milestone` chips went (#156, spec #280) — and the only thing added to a scored round, so a round that eliminated
  * somebody and one that did not stay the same screen in two states.
  */
 .seat__mark--out {
@@ -1743,6 +1745,8 @@ body {
  * are on the screen at a full table, and none of them is what anybody is playing.
  */
 .table-seat__label {
+  /* The box a milestone count's ring is traced round (`MilestoneRing.tsx`), as is `.you`. */
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -1766,6 +1770,7 @@ body {
 }
 
 .you {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -1808,6 +1813,116 @@ body {
 .player__score {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+}
+
+/*
+ * A total draining from the multiple of 50 it landed on (spec #280): in the scorecard's
+ * milestone blue, and glowing, so a seat counting reads from across the table. Landing is the
+ * class coming off in one frame — the number back in ink, on the sentence every seat reads.
+ */
+.player__score--counting {
+  color: var(--milestone);
+  text-shadow:
+    0 0 0.35em var(--milestone),
+    0 0 0.8em rgb(147 197 253 / 60%);
+}
+
+/*
+ * The total on its own, so it can throb while the sentence around it holds still (spec #280):
+ * a box a transform applies to, scaled from the table's clock rather than by a keyframe, which
+ * is why reduced motion is answered in `Table.tsx` and not here. Grown from a little below its
+ * middle, as variant A was (#279), so it swells up out of the line rather than down into the
+ * next one. Promoted to its own layer only while it is counting, not on every scored seat.
+ */
+.player__total {
+  display: inline-block;
+  transform-origin: 50% 60%;
+}
+
+.player__score--counting .player__total {
+  will-change: transform;
+}
+
+/*
+ * The laser ring a milestone count begins with (`MilestoneRing.tsx`, spec #280), round the
+ * namecard it is drawn in. The SVG's box is the namecard's, out by half the trail's stroke on
+ * every side, and its rects are that box at `width="100%"`: a stroke runs centred on its path,
+ * so the ring sits just outside the namecard's edge rather than over the words in it.
+ *
+ * Over every card in the seat (they count up from 0, `Seat.tsx`) and under the call banner
+ * (20), so an Assafed caller's count is traced beneath the banner rather than across it. A seat
+ * is its own stacking context, so 9 never leaves it. The footer is not (`.you__card--open`
+ * depends on that), so the footer's ring is lowered below (`.you > …`). Inert to the pointer,
+ * like the banner, so nothing on the felt is ever covered by a tap target.
+ */
+.milestone-ring {
+  position: absolute;
+  top: -1.5px;
+  left: -1.5px;
+  z-index: 9;
+  width: calc(100% + 3px);
+  height: calc(100% + 3px);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.milestone-ring rect {
+  fill: none;
+}
+
+/* The trail: blue, glowing, its colour and fade per segment set from `ringFrame`. */
+.milestone-ring__trail {
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 4px var(--milestone));
+}
+
+/* The head: white-hot, wider than the trail and glowing harder than anything behind it. */
+.milestone-ring__head {
+  stroke: #fff;
+  stroke-width: 4.5px;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px #e0f2fe)
+    drop-shadow(0 0 12px var(--milestone));
+}
+
+/*
+ * The ring's stand-in under reduced motion: the namecard lit blue and let go again — light and
+ * nothing else, no sweep and no scale. A keyframe rather than the table's clock, there being
+ * nothing to follow; its length is `MILESTONE_GLOW_MS`, handed in as `--milestone-glow`.
+ */
+.milestone-glow {
+  position: absolute;
+  inset: 0;
+  /* Where the ring would be, for the ring's reasons (above). */
+  z-index: 9;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: milestone-glow var(--milestone-glow) ease-in-out both;
+}
+
+/*
+ * The footer's ring and glow, which compete at the root because the footer is not a stacking
+ * context. They are above everything drawn on the table (the topbar at 2, and the seat band, the
+ * history drawer and the flight at 3). They are below the two layers drawn over it: the finished
+ * match's standings (`.final`, 5), which a milestone in the deciding round counts under, and
+ * the scorecard's backdrop (`.modal`, 10). At 9 they would be traced across both.
+ */
+.you > .milestone-ring,
+.you > .milestone-glow {
+  z-index: 4;
+}
+
+@keyframes milestone-glow {
+  0%,
+  100% {
+    background: rgb(147 197 253 / 0%);
+    box-shadow: 0 0 0 0 rgb(147 197 253 / 0%);
+  }
+
+  40% {
+    background: rgb(147 197 253 / 25%);
+    box-shadow: 0 0 22px 4px rgb(147 197 253 / 55%);
+  }
 }
 
 /*
@@ -1942,7 +2057,7 @@ body {
 }
 
 .scorecard__cell--milestone {
-  color: #93c5fd;
+  color: var(--milestone);
   font-weight: 700;
 }
 

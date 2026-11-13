@@ -624,14 +624,13 @@ gap — behaviour worth testing belongs in the session core or in one of the pur
 it, which `docs/code-map.md` names.
 
 Snapshots are **replaced wholesale, never mutated**, `useSyncExternalStore` comparing by
-identity. Ten fields, each answering a different question: `view` (null *is* the main menu),
+identity. Eleven fields, each answering a different question: `view` (null *is* the main menu),
 `account` (tagged: `guest` / `nameNeeded` / `signedIn`), `stats` (read by `loadStats`, dropped
 whenever the signed-in account changes, so one account never reads another's), `toasts`
 (stacked in arrival order, a refusal in red or the news of a kick in green, each leaving only by
-`dismissToast`, docs/adr/0027),
-`notice`, `connected`, `resuming`, `selection` (surviving the views that arrive underneath
-it), and the two
-**one-shots**, `flight` and `announcement`. **No credential is on it**: the Google ID token a
+`dismissToast`, docs/adr/0027), `notice`, `connected`, `resuming`, `selection` (surviving the
+views that arrive underneath it), and three **one-shots**, `flight`, `announcement` and
+`countdown` — the last a milestone count's *start* only, the table latching the count itself. **No credential is on it**: the Google ID token a
 first sign-in resends is held privately, and the session token sits in a second injected store
 beside the seat's (`tokens.ts`). A cold boot resumes the **account, then the seat**, `resuming`
 up across both. **`busy` locks on emit and settles two ways** — on the ack for entering,

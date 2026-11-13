@@ -40,6 +40,8 @@ import type { Announcement } from "./announcement.ts";
 import { announcementFrom } from "./announcement.ts";
 import type { CardFlight } from "./flight.ts";
 import { flightFrom } from "./flight.ts";
+import type { Countdown } from "./milestone.ts";
+import { countdownFrom } from "./milestone.ts";
 import type { DrawSource } from "./turn.ts";
 import {
   isLegalCall,
@@ -296,6 +298,19 @@ export interface SessionSnapshot {
    * it; nothing here re-decides.
    */
   readonly announcement: Announcement;
+  /**
+   * The milestone count a scored round arrived with, when this viewer watched it scored: every
+   * seat the round left on a multiple of 50, with the number it landed on and the one it
+   * settles on (spec #280). Null the rest of the time.
+   *
+   * The **same one-shot as `announcement`, on the same trigger** — set by the publication
+   * that scores the round, gone from the next — but it carries only the count's *start*. The
+   * count itself outlives this field: it runs for two seconds, through republications of the
+   * same round that clear every one-shot, so the table latches it on `round` and `phase`
+   * (`latchCount`) and holds it there. The session decides the start because it is the only layer that knows whether a
+   * position was on the screen to arrive from. `milestone.ts` decides what is in it.
+   */
+  readonly countdown: Countdown;
 }
 
 export interface Session {
@@ -558,6 +573,7 @@ export function createSession(
     selection: [],
     flight: null,
     announcement: null,
+    countdown: null,
   };
   const listeners = new Set<() => void>();
 
@@ -571,17 +587,17 @@ export function createSession(
   ];
 
   /**
-   * `flight` and `announcement` are cleared unless the publication being made is one that has
-   * a move or a call to show, which is what makes them one-shot: nothing has to remember to
-   * put either back down, and no publication about something else — a tap, a refusal, a
-   * connection going — can leave the last move on the screen to be flown a second time or the
-   * last call to be announced twice.
+   * `flight`, `announcement` and `countdown` are cleared unless the publication being made is
+   * one that has a move, a call or a milestone to show, which is what makes them one-shot:
+   * nothing has to remember to put any back down, and no publication about something else — a
+   * tap, a refusal, a connection going — can leave the last move on the screen to be flown a
+   * second time, the last call to be announced twice or the last count to start again.
    */
   const publish = (next: Partial<SessionSnapshot>): void => {
     const stats = sameAccount(snapshot.account, next.account ?? snapshot.account)
       ? snapshot.stats
       : null;
-    snapshot = { ...snapshot, flight: null, announcement: null, stats, ...next };
+    snapshot = { ...snapshot, flight: null, announcement: null, countdown: null, stats, ...next };
     for (const listener of listeners) listener();
   };
 
@@ -647,6 +663,7 @@ export function createSession(
       view,
       flight: flightFrom(snapshot.view, view),
       announcement: announcementFrom(snapshot.view, view),
+      countdown: countdownFrom(snapshot.view, view),
       selection: carriedInto(view),
       busy: played ? false : snapshot.busy,
     });

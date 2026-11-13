@@ -19,6 +19,12 @@
  *
  *   DEAL_HOLD_MS        how long a scored round is on screen before it can be dealt away
  *
+ *   MILESTONE_COUNT_MS  a milestone seat's total draining from the multiple of 50
+ *   MILESTONE_PULSE_MS  one throb of that total while it drains
+ *   MILESTONE_RING_MS   the laser's one lap round the counting seat's namecard
+ *   MILESTONE_RING_FADE_MS  the ring fading once the lap is done
+ *   MILESTONE_GLOW_MS   the glow that stands in for the ring under reduced motion
+ *
  * What a test asserts here is the staging built on them and where a duration would collide with
  * something outside the animation — the server's auto-deal delay, and a deal landing before an
  * Assaf has — never a number. Pure arithmetic and nothing else — no element, no clock, no
@@ -122,3 +128,56 @@ export const announceLeaveAt = (count: number): number =>
  * no tap, and the deal is never held back for them.
  */
 export const DEAL_HOLD_MS = 2000;
+
+/**
+ * How long a milestone seat's total takes to drain from the multiple of 50 it landed on to the
+ * score the round recorded (docs/rules.md §7, spec #280).
+ *
+ * Two seconds because that is what the prototype was judged on (#279): long enough that the
+ * total reads as *falling* — the integers ticking through, from across a six-seat table on a
+ * phone — rather than as one number swapped for another, and short enough that it is over while
+ * the call's banners are still up, so the table is not still settling when it is dealt. That it
+ * equals `DEAL_HOLD_MS` is a coincidence, not a derivation: the count holds nothing up, and a
+ * prompt deal ends it wherever it has got to.
+ *
+ * Bounded by the server's auto-deal delay (`AUTO_DEAL_MS`, ten seconds), like the banners: a
+ * watcher of a table only bots are playing has to see the count land.
+ */
+export const MILESTONE_COUNT_MS = 2000;
+
+/**
+ * One throb of a draining total — a scale of 1 to 1.1 and back (`pulseScale` in
+ * `milestone.ts`, spec #280) — so a steady 4Hz.
+ *
+ * What the prototype was judged on (#279, variant A): quick enough to read as the number
+ * *beating* rather than breathing, which is what says something is still happening to it, and
+ * slow enough that a phone's frame rate draws every throb as a rise and a fall rather than as a
+ * flicker. That a count is a whole number of them, so the last one ends at rest as the total
+ * lands, is the two values as they stand and not a derivation: a count that landed mid-throb
+ * would only snap a tenth of a size back.
+ */
+export const MILESTONE_PULSE_MS = 250;
+
+/**
+ * The laser's one lap round a counting seat's namecard (`MilestoneRing.tsx`, spec #280), eased
+ * in and out, starting with the count.
+ *
+ * What the prototype was judged on (#279, variant A): quick enough to land as a burst — the
+ * count *beginning*, not a second thing to watch — and long enough that the head is seen to go
+ * round rather than the ring simply appearing. Over well before the total lands, as is its fade.
+ */
+export const MILESTONE_RING_MS = 420;
+
+/**
+ * The ring fading once its lap is done — short, so the lap reads as the event and the fade as
+ * it clearing away, and the namecard is plain again while the total is still draining.
+ */
+export const MILESTONE_RING_FADE_MS = 180;
+
+/**
+ * Under reduced motion, the blue glow that rises and falls on the namecard in the ring's place
+ * (spec #280): no sweep and no scale, only light. Longer than the ring's lap and fade together,
+ * because a glow has no head to follow and needs the time to be seen rising and falling at all;
+ * the prototype's 700ms. Over before the total lands, which unmounts it.
+ */
+export const MILESTONE_GLOW_MS = 700;
