@@ -223,7 +223,8 @@ The integration fuzzer has its **own** discard/draw logic and deliberately does 
 Every rule-violating action returns a `Result<T>` carrying a `GameErrorCode` and never throws,
 so TypeScript forces call sites to handle failure. Anything that *does* throw (`RoomManager`
 code exhaustion, `deal` given too small a deck) is a genuine defect, and the socket layer lets
-it propagate rather than reporting it to a player.
+it propagate rather than reporting it to a player — so no packet may reach one: a mis-shaped
+one is dropped by `socket.use`, and every payload is `unknown` until checked (#271).
 
 ### Randomness is injected, never ambient
 
