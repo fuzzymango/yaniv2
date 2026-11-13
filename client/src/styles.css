@@ -546,10 +546,14 @@ body {
   min-width: 0;
 }
 
+/*
+ * One line, never two: the group moves under the name whole, so a row is at most two lines
+ * however narrow it gets. Left to wrap inside itself, YOU and HOST took a line each at a
+ * phone's larger text sizes, and three lines spilled out of the row they were drawn in.
+ */
 .seat__chips {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.125rem 0.5rem;
+  gap: 0.5rem;
 }
 
 /* A row with nothing to say about its player keeps the name's line to itself. */
@@ -767,7 +771,7 @@ body {
 /*
  * One option. Sized to a thumb in both directions — the height is a full tap target (the
  * lobby's compact one, below), and the width is only slightly under it so that all six bot
- * counts still sit on one line of the narrowest phone.
+ * counts sit on one line from a 360px phone up. Narrower than that, the row wraps.
  */
 .chip {
   flex: 1 0 auto;
@@ -828,22 +832,27 @@ body {
 /*
  * Whatever height the roster does not need goes to the host's controls rather than into a
  * gap under the seats: the box grows down to the actions, and the settings spread through
- * it, each centred in an equal share. Never shrinks — the roster is the part that gives
- * way. A guest's four lines of text stay together, read at a glance, with the room left
- * over above Leave: spread through a tall box they stopped reading as one list.
+ * it. Never shrinks — the roster is the part that gives way. A guest's four lines of text
+ * stay together, read at a glance, with the room left over above Leave: spread through a
+ * tall box they stopped reading as one list.
  */
 .lobby .settings--editor {
   flex: 1 0 auto;
 }
 
 /*
- * Spread by auto margins rather than by growing each setting: the score's setting is a
- * `<label>`, and a label grown into the spare height would make all of it a tap that focuses
- * the field and puts up a phone's keyboard. Margins split the space the same way and keep
- * each setting the size of what is in it.
+ * Each setting takes an equal share of the box's spare height, its content centred in it,
+ * but only up to `6rem`: uncapped, a tall phone with one seat spread them ~100px apart, and
+ * stopped them reading as one form. What the settings cannot take sits at the foot of the
+ * box. The floor is the content (`min-content`, stated so that it outranks the cap), so a
+ * setting whose chips wrap is never cut short. None is a `<label>` wrapping its control —
+ * the score's names its field by id — so a grown setting is no taller a tap target.
  */
 .lobby .setting {
-  margin-block: auto;
+  flex: 1 0 auto;
+  justify-content: center;
+  min-height: min-content;
+  max-height: 6rem;
   gap: 0.25rem;
 }
 
