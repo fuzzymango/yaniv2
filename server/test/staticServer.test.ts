@@ -62,6 +62,14 @@ describe("serveStatic", () => {
     assert.match(await res.text(), /root/);
   });
 
+  // Issue #271: decoding it threw inside the request listener, which nothing catches —
+  // a crashed server, or here a request never answered, hence the timeout.
+  it("falls back to index.html for a path that does not decode", async () => {
+    const res = await fetch(`${base}/%E0%A4%A`, { signal: AbortSignal.timeout(1000) });
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /root/);
+  });
+
   it("leaves /socket.io requests unhandled", async () => {
     const res = await fetch(`${base}/socket.io/?EIO=4`);
     assert.equal(res.status, 404);
