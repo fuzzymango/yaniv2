@@ -94,12 +94,18 @@ export function Lobby({
       */}
       <div className="lobby__body">
         {/*
-          The seats' floor, in rows: half of them, which caps the roster at two across.
-          Arithmetic on the count, not a measurement — CSS decides whether one column fits.
+          The rows the roster asks for — one per seat — and its floor, half of them, which
+          caps it at two across. Arithmetic on the count, not a measurement: CSS decides
+          whether one column fits.
         */}
         <ul
           className="seats"
-          style={{ "--seat-rows": Math.ceil(seats.length / 2) } as CSSProperties}
+          style={
+            {
+              "--seats": seats.length,
+              "--seat-rows": Math.ceil(seats.length / 2),
+            } as CSSProperties
+          }
         >
           {seats.map((seat) => {
             const status = seatStatus(seat);
@@ -183,7 +189,11 @@ export function Lobby({
       </div>
 
       <div className="lobby__actions">
-        {isHost ? (
+        {/*
+          Nothing in Start's place for a guest: the roster's HOST mark and "The host sets
+          these" already say whose the room is, and Leave takes the whole row.
+        */}
+        {isHost && (
           <button
             className="button button--primary"
             type="button"
@@ -192,10 +202,6 @@ export function Lobby({
           >
             Start
           </button>
-        ) : (
-          // Its own class rather than `notice`, which carries news that has just
-          // arrived. This is a standing fact about the screen.
-          <p className="hint">The host starts the match.</p>
         )}
 
         {/*

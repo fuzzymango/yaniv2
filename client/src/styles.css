@@ -462,17 +462,8 @@ body {
 
 /*
  * Still the loudest thing on the screen, but no longer a third of it: a code read out once
- * does not need 72px to be read. On one line with its label where the width allows, which
- * costs the label's line; wrapping under it where it does not, rather than truncating.
+ * does not need 72px to be read. Under its label and centred, as on every other screen.
  */
-.lobby .code {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: center;
-  column-gap: 0.75rem;
-}
-
 .lobby .code__value {
   font-size: 3rem;
   line-height: 1;
@@ -497,22 +488,28 @@ body {
 }
 
 /*
- * One column of seats wherever one fits, and two across only where it does not (issue #263):
- * the roster takes the height the settings leave it and fills it top to bottom, so a second
- * column starts only once the first is full. That follows the room on the screen, not the
- * seat count — four seats that fit stacked stay stacked on a tall phone.
+ * One column of seats wherever one fits, and two across only where it does not (issue #263).
+ * The roster asks for a row per seat (`--seats`, from render) and gives height back only
+ * when the body is short of it, filling what it keeps top to bottom, so a second column
+ * starts only once the first is full. That follows the room on the screen, not the seat
+ * count — four seats that fit stacked stay stacked on a tall phone.
  *
- * Never a third: the floor is half the seats' rows (`--seat-rows`, ⌈n/2⌉, from render), and
- * below it the roster stops shrinking and `.lobby__body` scrolls instead, as it always has.
+ * Never a third: the floor is half the seats' rows (`--seat-rows`, ⌈n/2⌉), and below it the
+ * roster stops shrinking and `.lobby__body` scrolls instead, as it always has.
  */
 .seats {
   margin: 0;
   padding: 0;
   list-style: none;
   display: grid;
-  flex: 1 0 0;
+  flex: 0 1 calc(var(--seats) * var(--tap-compact) + (var(--seats) - 1) * 0.375rem);
   grid-auto-flow: column;
-  grid-template-rows: repeat(auto-fill, var(--tap-compact));
+  /*
+   * Whole rows only, so a roster given back part of a row's height would leave it as a gap
+   * under the seats; the rows stretch into it instead. One column is asked for exactly, so
+   * this only ever adds the remainder of a row to a two-across roster.
+   */
+  grid-template-rows: repeat(auto-fill, minmax(var(--tap-compact), auto));
   grid-auto-columns: minmax(0, 1fr);
   gap: 0.375rem;
   min-height: calc(
@@ -657,8 +654,7 @@ body {
  */
 /*
  * Exact halves, whatever the words, so neither reads as the lesser offer. A grid rather than
- * the flex halves that pair uses, because a flex share counts a button's padding and a hint
- * has none, so a guest's two halves came out unequal.
+ * the flex halves that pair uses, so the halves stay equal however the labels measure.
  */
 .lobby__actions {
   display: grid;
@@ -666,22 +662,23 @@ body {
   gap: 0.75rem;
 }
 
+/* A guest has only Leave, which takes the whole row rather than half of it beside a gap. */
+.lobby__actions > :only-child {
+  grid-column: 1 / -1;
+}
+
 /*
  * Shorter than `--tap`: this row is the last thing on the screen, so a thumb reaches it
- * without aiming, but it is still at least the 44px a touch target needs. A guest's hint is
- * the same height as the button beside it. Where its words wrap at a narrow width, the row
- * grows and both halves grow with it, rather than the hint spilling out.
+ * without aiming, but it is still at least the 44px a touch target needs.
  */
-.lobby__actions > .button,
-.lobby__actions > .hint {
+.lobby__actions > .button {
   min-height: 3rem;
 }
 
 /*
- * Where the host's control sits on the host's own screen — starting the match in the
- * lobby, dealing the next round at a scored one — so everybody else sees the reason there
- * is no button rather than a gap. Sized like the control it stands in for, but plainly not
- * one.
+ * Where the host's control sits on the host's own screen — dealing the next round at a
+ * scored one — so everybody else sees the reason there is no button rather than a gap.
+ * Sized like the control it stands in for, but plainly not one.
  */
 .hint {
   display: flex;
@@ -826,7 +823,20 @@ body {
   padding: 0.625rem 0.75rem;
 }
 
+/*
+ * Whatever height the roster does not need goes to the host's controls rather than into a
+ * gap under the seats: the box grows down to the actions, and the settings spread through
+ * it, each centred in an equal share. Never shrinks — the roster is the part that gives
+ * way. A guest's four lines of text stay together, read at a glance, with the room left
+ * over above Leave: spread through a tall box they stopped reading as one list.
+ */
+.lobby .settings:has(.setting) {
+  flex: 1 0 auto;
+}
+
 .lobby .setting {
+  flex: 1 0 auto;
+  justify-content: center;
   gap: 0.25rem;
 }
 
