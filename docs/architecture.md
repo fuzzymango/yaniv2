@@ -513,40 +513,11 @@ sends — so `isSlapdownTarget` reads the wire's own answer, and answers `false`
 
 ### The table is seated, and the scored round is the same table
 
-Opponents are drawn round three sides of the felt (`seatZones`): fans of face-down backs while
-the round is played, the same seats cascaded face up once it is scored, and the same again with
-the standings floating over them once the match is. The top is filled first and never doubled,
-the sides taking the doubles, and play still goes round the table (#242). **One screen, not three** (issues #78,
-#130): `Table.tsx` renders every phase off one placement (`byRelativeSeat` off the live roster)
-and one reserved box per seat (`seatFootprint`).
-
-**A move is watched crossing that table, not merely published onto it** (issues #69, #72-#74).
-The session says *what* moved (`flight.ts`), `ghosts.ts` which of it the screen can draw and
-which way up, and `CardsInFlight.tsx` measures where and closes the difference (FLIP,
-`flip.ts`). Every move flies both ways, whoever took it, with the wire's redaction passed
-through, and **a slapdown flies as its own shape** (#95). Nothing waits on a flight, reduced
-motion skips it, and it is scoped to `playing`. A spectator watches that same table with a bar
-where their hand was (#143); an out seat keeps its place on the felt, darkened (#144).
-
-**The match's record is held up in front of that table** (#154, docs/adr/0017): the scorecard,
-opened from a button in the viewer's own name bar — rounds down, the roster's seats across,
-running totals in the cells, three colours saying what happened, and a blank where a seat was
-already out. Offered while a round is played or scored, watchers included; not once the match
-is over, the standings answering it over the very bar the button would sit in.
-
-**And the call that ended the round is announced over the seat that made it** (#124, #156,
-docs/adr/0018): `YANIV` in yellow, `ASSAF` in red a beat later, both faded out together — or
-each seat's custom call for that kind (#238), resolved in `announcement.ts` off the arriving
-roster, upper-cased in the viewer's locale, shrunk then wrapped to #234's steps, and **still
-coloured by the kind**, so a red banner is an Assaf whatever it says. A one-shot
-like the flight, keyed on the scorecard growing so no republish replays it, in the two colours
-the scorecard now speaks. **The deal that replaces the call is held disabled for a moment**
-(`DEAL_HOLD_MS`, #205), keyed on the scorecard's length — the browser presenting a round, not a
-rule — and outlasts the banners' arrival only, so a prompt deal may cut them off (#241).
-**Every animation duration in `timing.ts` is a plain number derived from no other** (#241), so
-each is tuned by eye on its own; the chains they once formed were released (ADR-0018). Every
-decision behind the geometry, the flight, the banner, the bar and the dim is in
-**`docs/client-table.md`** and the ADRs; the code is `fan.ts`, `score.ts`, `seating.ts`, `table/`.
+**One screen, not three**: `Table.tsx` draws the round being played, the round scored and the
+finished match off one seated placement. The seating, the flight of a move across it, the
+spectator's bar, the darkened out seat, the scorecard and the call banner are all in
+**`docs/client-table.md`**, with the decisions behind them in `docs/adr/0017` (the scorecard)
+and `docs/adr/0018` (the announcement); the code is `fan.ts`, `score.ts`, `seating.ts`, `table/`.
 
 ### Settings are edited in one place and shown in another
 
@@ -588,31 +559,10 @@ docs/adr/0020) — sign-in is an option, never a wall.
 ### The client's session core
 
 The browser client's logic lives in `client/src/session.ts`, a plain module outside React that
-owns the socket and exposes exactly two things: a `SessionSnapshot` to read and a set of intents
-to call. `useSession` subscribes with `useSyncExternalStore` and holds no logic — **if that hook
-ever grows a branch, the branch is in the wrong place.** The point is testability: the core is
-driven under `node:test` against a real socket server, with no browser, no jsdom and no React
-test dependencies. Components are not tested at all, a consequence of that split rather than a
-gap — behaviour worth testing belongs in the session core or in one of the pure modules beside
-it, which `docs/code-map.md` names.
-
-Snapshots are **replaced wholesale, never mutated**, `useSyncExternalStore` comparing by
-identity. Ten fields, each answering a different question: `view` (null *is* the main menu),
-`account` (tagged: `guest` / `nameNeeded` / `signedIn`), `stats` (read by `loadStats`, dropped
-whenever the signed-in account changes, so one account never reads another's), `toasts`
-(stacked in arrival order, a refusal in red or the news of a kick in green, each leaving only by
-`dismissToast`, docs/adr/0027),
-`notice`, `connected`, `resuming`, `selection` (surviving the views that arrive underneath
-it), and the two
-**one-shots**, `flight` and `announcement`. **No credential is on it**: the Google ID token a
-first sign-in resends is held privately, and the session token sits in a second injected store
-beside the seat's (`tokens.ts`). A cold boot resumes the **account, then the seat**, `resuming`
-up across both. **`busy` locks on emit and settles two ways** — on the ack for entering,
-leaving, the six account events that act (`loadStats` is a read and locks nothing) and
-anything producing a new position, on a strictly newer position for a move — so a control is never released over a position still showing the
-mover's own turn. **The client never enforces a rule the server owns**: what is
-legal about the cards is all it applies ahead of the server (ADR-0002), and everything else it
-offers is sent and refused.
+owns the socket and exposes a `SessionSnapshot` to read and a set of intents to call;
+`useSession` subscribes and holds no logic, so the core is tested under `node:test` against a
+real socket server and components are not tested at all. **The client never enforces a rule the
+server owns**: what is legal about the cards is all it applies ahead of the server (ADR-0002).
 
 **Every rule of the snapshot, `busy`, the seat and account resumed from `localStorage` and the
 screen a dropped socket puts up is in `docs/client-session.md`.**
@@ -631,15 +581,17 @@ the `.d.ts` files `tsc --build` emits.
 server's: `types` is per-project, so folding them in would grant `shared/src` the Node types its
 suites need. Split, `shared/src` importing a Node builtin is a typecheck error.
 
-## Explicitly out of scope (for now)
+## Deferred on purpose
 
-Not oversights — deferred on purpose, in this order of likely next work:
+Not oversights — choices, in this order of likely next work. Each names where its reasoning is
+recorded; don't build one as a side effect of other work. Remove an item when it ships.
 
 - **What a mid-round seat does while its player is gone.** The rest of #138 (#143, #144 and
   #146-#150 are done): the status slot is display only, and within the room's grace period nothing
-  pauses, times out, bot-plays or frees a seat whose player never comes back.
+  pauses, times out, bot-plays or frees a seat whose player never comes back. `docs/adr/0015`.
 - **Starting a match with seats open for latecomers.** `startGame` seats bots on the spot, so
-  anyone not joined by then plays the next match, not this one.
+  anyone not joined by then plays the next match, not this one. `docs/adr/0006` (no record of
+  the deferral itself).
 - **The settings and the scorecard from the terminal harness.** The browser edits all four
   settings (docs/adr/0006) and draws the ledger (0017); the CLI does neither.
 - **Persistence for *rooms*.** Accounts are in Postgres (`docs/adr/0019`); rooms are still a
@@ -647,7 +599,8 @@ Not oversights — deferred on purpose, in this order of likely next work:
   being a thing you were in the middle of, and the constraint that makes startup migrations safe.
 - **Bots slapping down for themselves.** A human can win one inside the pause a bot takes before
   its turn, but no bot slaps down for itself — ADR-0005's other half.
-- **Disambiguating a joker that extends a run.** Tap order decides where it sits — a wart (§4).
+- **Disambiguating a joker that extends a run.** Tap order decides where it sits — a wart.
+  `docs/rules.md` §4 (the rule; no record of the deferral itself).
 - **A content filter for custom calls**, or for names. Rooms are joined by invite code, and a
   word list is easy to get round and catches innocent words in every script the rules allow; if
   public matchmaking arrives, filtering both is one question (#233).
