@@ -15,6 +15,7 @@ import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
 import type {
   AccountView,
+  ClientToServerEvents,
   GameError,
   PlayerGameView,
   ResumeRequest,
@@ -3765,5 +3766,75 @@ describe("the scorecard on the wire", () => {
     );
 
     assert.deepEqual(view.scorecard, dealtOn.scorecard, "the match's history, not a blank sheet");
+  });
+});
+
+/**
+ * A packet is not a call (issue #271). What arrives is whatever a client chose to send, and
+ * nothing in the server catches a throw — so a handler reaching for an ack that is not
+ * there, or for a field of a payload that is not the shape its wire type claims, is a
+ * crashed server and every match on it gone. Each test asks something well-formed
+ * afterwards, so a crash shows up as that ack never arriving.
+ */
+describe("malformed requests", () => {
+  /** Every event a client may send, each of which takes an ack. */
+  const EVENTS = [
+    "signIn",
+    "createAccount",
+    "resumeSession",
+    "signOut",
+    "renameAccount",
+    "setCustomCall",
+    "loadStats",
+    "createRoom",
+    "joinRoom",
+    "resumeSeat",
+    "updateSettings",
+    "kickPlayer",
+    "startGame",
+    "takeTurn",
+    "callYaniv",
+    "slapDown",
+    "startNextRound",
+    "playAgain",
+    "exitToMenu",
+  ] as const satisfies readonly (keyof ClientToServerEvents)[];
+
+  it("drops an event with no ack, or with something else where its ack belongs", async () => {
+    const host = await server.connect();
+    const watcher = watch(host);
+    const { roomCode } = expectOk(
+      await ask<{ roomCode: string; playerId: string }>(host, "createRoom", "Ada"),
+    );
+    await watcher.until((v) => v.phase === "lobby", "the lobby");
+    const stranger = await server.connect();
+    watcher.reset();
+
+    let answered = 0;
+    const ack = () => answered++;
+    for (const client of [host, stranger]) {
+      for (const event of EVENTS) {
+        client.emit(event);
+        client.emit(event, roomCode);
+        client.emit(event, roomCode, "Bob");
+        client.emit(event, roomCode, "Bob", 42);
+        // A real ack, but past where the handler reads one: what it finds there is a string.
+        client.emit(event, roomCode, "Bob", "Cy", "Di", ack);
+      }
+      // Fewer arguments than the event takes: the ack lands where a payload belongs.
+      client.emit("joinRoom", roomCode, ack);
+      client.emit("createRoom", ack);
+    }
+
+    // Asked on the same connections afterwards: both still answered, and neither moved.
+    assert.equal(expectError(await ask(host, "createRoom", "Ada")).code, "ALREADY_IN_ROOM");
+    expectOk(await ask(stranger, "joinRoom", roomCode, "Bob"));
+    assert.equal(answered, 0, "an ack out of place is never answered");
+    await watcher.until((v) => v.opponents.length === 1, "the one well-formed join");
+    assert.deepEqual(
+      watcher.seen.map((v) => v.opponents.length),
+      [1],
+      "nothing but the well-formed join was published",
+    );
   });
 });

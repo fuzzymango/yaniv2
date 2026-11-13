@@ -270,6 +270,27 @@ export function createSocketServer(
   }
 
   io.on("connection", (socket) => {
+    /*
+     * A packet is not a call (issue #271): what arrives is whatever a client chose to send,
+     * and every handler below answers through an ack it reads by position. One that is not
+     * there, or is something else, is a throw — and nothing catches a throw, so it would
+     * take the server and every match on it down. Every event takes an ack, so this is the
+     * one check for all of them: a packet is let through only when it carries exactly as
+     * many arguments as its handler declares, the last a function — the ack socket.io
+     * appends, where the handler will read it. Anything else is dropped unanswered, there
+     * being nothing to answer it through.
+     *
+     * The count is read off the handler itself rather than a table, so an event added
+     * below is guarded without being listed anywhere. `disconnect` is reserved, and never
+     * comes through here.
+     */
+    socket.use(([event, ...args], next) => {
+      const [handler] = socket.listeners(event as keyof ClientToServerEvents);
+      if (handler && args.length === handler.length && typeof args.at(-1) === "function") {
+        next();
+      }
+    });
+
     const alreadySeated = () =>
       err("ALREADY_IN_ROOM", "This connection is already in a room");
     const notSeated = () => err("PLAYER_NOT_FOUND", "This connection is not in a room");
