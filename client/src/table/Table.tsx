@@ -26,7 +26,7 @@
  * A turn is two taps and no button. Cards are tapped to build a selection, and the next
  * tap — on the deck, or on an end of the face-up discard — *is* the commit: the selection
  * is discarded and that card drawn, in one action, because the engine has no state in
- * between (see "Turn model" in CLAUDE.md, and "Selection" in CONTEXT.md).
+ * between (see "Turn model" in `docs/architecture.md`, and "Selection" in CONTEXT.md).
  *
  * Draw targets are dead until the selection is a legal discard, so an illegal set is
  * never offered rather than being sent and refused. That is the only rule this screen

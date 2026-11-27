@@ -545,7 +545,7 @@ describe("serializeStateForPlayer — the move history", () => {
 
   /**
    * The same leak test run against a deliberately broken serializer, to prove it can
-   * fail: the convention `CLAUDE.md` records for this boundary, kept in the suite here
+   * fail: the convention `docs/architecture.md` records for this boundary, kept in the suite here
    * rather than as a one-off edit somebody has to remember to make.
    */
   it("would catch a serializer that stopped redacting", () => {

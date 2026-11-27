@@ -22,7 +22,7 @@
  * half-filled form. It is not a fact about the room and no arriving view can contradict
  * it: nothing on the wire knows or cares that somebody is looking at a panel, so keeping
  * it in the session core would put a purely local thing where server state lives. See
- * "The client's session core" in CLAUDE.md.
+ * "The client's session core" in `docs/architecture.md`.
  */
 
 import { useState } from "react";

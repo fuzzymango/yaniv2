@@ -7,7 +7,7 @@
  * viewer the one who got Assafed?" has more edges than a component should be trusted with.
  *
  * **Names come off the round's own record** (see "A finished round names its own players" in
- * CLAUDE.md), which is the only place a seat given up since is still named.
+ * `docs/architecture.md`), which is the only place a seat given up since is still named.
  */
 
 import type { RoundResultView } from "@yaniv/shared";

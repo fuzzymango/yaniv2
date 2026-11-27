@@ -1,8 +1,8 @@
 # Code map
 
 Every file in the four source trees, one line each: what is in it, and where a decision
-behind it is written down. `CLAUDE.md` names the trees and the rules that hold across
-them; this is the table underneath that. Adding a module means adding its row here.
+behind it is written down. `docs/architecture.md`, "Code structure", names the trees and the
+rules that hold across them; this is the table underneath that. Adding a module means adding its row here.
 
 ## `shared/src/`
 
@@ -21,7 +21,7 @@ them; this is the table underneath that. Adding a module means adding its row he
 | `standings.ts` | `standings` — a finished match's final table, ordered by how long each player lasted (the survivor, then out order descending, then score, then the roster), read off the append-only roster alone, so whoever has left since is still on it. Read by both clients |
 
 Why the rulebook, `standings`, the display-name and custom-call rules and the account types sit here rather than in `server/src`:
-`CLAUDE.md`, "Code structure", and `docs/adr/0002`.
+`docs/architecture.md`, "Code structure", and `docs/adr/0002`.
 
 ## `server/src/`
 
@@ -34,9 +34,9 @@ Why the rulebook, `standings`, the display-name and custom-call rules and the ac
 | `profiles.ts` | `ProfileStore` — the seam a player is remembered through between rooms — its types (`Account`, `AccountId`, `CredentialKind`, `NewCredential`, `StoredCredential`, and `StatsDelta`/`NO_STATS` over `shared`'s `Stats`, the six counters an account carries, and `CustomCalls`/`NO_CUSTOM_CALLS`, its two custom calls, `null` unset) and `createMemoryProfileStore`, the implementation that needs nothing installed. Eleven methods, **task-shaped not table-shaped** so `createAccount`'s two rows land together behind the seam, all async by decision, absence `null` and failure thrown. Stats are written through one method, `recordStats(id, delta)`, a partial record added atomically (`docs/adr/0024`), and custom calls through one, `setCustomCall(id, call, text \| null)`. Its neighbours above are why it is flat here: a capability the server is handed. The in-memory store is **shipped code, not a test helper**, and `test/profiles.test.ts` is a contract suite parameterised over a store factory — the interface's specification, the Postgres arm one registration away. `docs/adr/0019` |
 | `deck.ts` | `createDeck`, `shuffle`, `deal` — pure functions, no class. `shuffle` is generic, the roster being the other thing drawn at random |
 | `game.ts` | `updateSettings`, `startGame`, `takeTurn`, `callYaniv`, `slapDown`, `startNextRound`, `playAgain`, `removePlayer`, `kickPlayer` — the pure state transitions. `startGame` draws the **seating** — the whole roster shuffled, bots included, once per room (docs/rules.md §2, #202) — and `playAgain` deals from it as it stands |
-| `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained in `CLAUDE.md`, "Serialization is the security boundary" |
+| `serialize.ts` | `serializeStateForPlayer` — the security boundary, explained in `docs/architecture.md`, "Serialization is the security boundary" |
 | `roomManager.ts` | `RoomManager` — owns live rooms, applies transitions, persists only on success, and hands every accepted one to its observers (`observe`) once stored: the one place every route to a new position passes, knowing nothing of what listens (`docs/adr/0024`). Held privately by `rooms.ts`: `index.ts` constructs one and `createSocketServer` composes `Rooms` from it, and nothing else drives it but the tests and `scripts/play.ts` (`docs/adr/0025`). Seats every player from one `Occupant` — who is sitting down, every field required: the name, the account that took the seat or `null`, and its custom calls or `null` (a guest's and a bot's). The one home of the claim rule (`docs/adr/0022`): `claims` over a seat and a `Claimant`, asked by `claimSeat` for `resumeSeat` — `ROOM_NOT_FOUND` for a missing room, `INVALID_RESUME_TOKEN` for every refusal inside one — and by `joinRoom`, which hands an account already seated in the room its seat back (`resumed`) ahead of any refusal of a new one |
-| `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See `CLAUDE.md`, "Bot architecture" |
+| `bot.ts` | `decideTurn` and friends — a deliberately simple opponent. See `docs/architecture.md`, "Bot architecture" |
 | `roomTimers.ts` | `createRoomTimers` — the work a room has waiting on the clock, keyed by purpose (`TimerPurpose`). Set replaces, cancel is explicit, and `cancelRoom` calls off everything one room holds. Deliberately dumb: it schedules and cancels, and never decides *whether* to |
 | `botTurns.ts` | `playBotTurn` — takes the turn in front of a room when it belongs to a bot — and `createBotTurnRunner`, which waits out **bot think time** before each one and so walks a chain a move at a time. One pending run per room, as the registry's `botTurn` purpose |
 | `autoDeal.ts` | `autoDealSeat` — whether a scored round deals itself on, and as which seat — and `createAutoDealer`, the pause it waits out first. The registry's `autoDeal` purpose. Only where a spectator is watching a table only bots are still playing (#148) |
@@ -77,7 +77,7 @@ and CI with a `postgres` service is the named fix (`docs/adr/0019`).
 
 Not part of the shipped engine — two smoke-test harnesses, split by what they exercise: `play.ts`
 answers "do the rules and the bot behave?", `playSocket.ts` "does the wire work?". What binds both
-is in `CLAUDE.md`.
+is in `docs/architecture.md`, "Code structure".
 
 - **`playSocket.ts`** — `npm run play`. A human against bots or other humans, over a **real
   socket** to a separately running server. Composition only, like `index.ts`: argv, stdio and a
@@ -107,7 +107,7 @@ fakes, and `test/profiles.test.ts` under `profiles.ts`, the contract suite it is
 
 A third client of the same contract, alongside the two harnesses. One exported component per
 file, foldered by screen, no barrels — the rule, the folder list and the two files exempt from
-it are in `CLAUDE.md`.
+it are in `CLAUDE.md`, "Code Style".
 
 | File | Contents |
 |---|---|

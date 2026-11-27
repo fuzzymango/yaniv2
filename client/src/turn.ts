@@ -146,7 +146,7 @@ function drawFrom(source: DrawSource, view: PlayerGameView): DrawAction | null {
 /**
  * The whole turn a tap commits: the selection discarded and the tapped card drawn, in
  * one action, because the engine has no state in between (see "Turn model" in
- * CLAUDE.md).
+ * `docs/architecture.md`).
  *
  * Null means the interface should not have offered the tap — an illegal selection, a
  * face-up card that is buried under the ends of the discard, or a viewer who is only

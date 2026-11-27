@@ -100,7 +100,7 @@ const sameSlapdown = (a: LastSlapdownView, b: LastSlapdownView): boolean =>
  * Two facts are watched, not one: the **last move** and the **last slapdown**, which are
  * siblings on the wire precisely because a slapdown is not a turn (ADR-0007, ADR-0008). Each
  * is left standing by whatever the other records, and a broadcast carries one move (see
- * "Broadcasting" in CLAUDE.md), so at most one of the two can have changed on any arrival —
+ * "Broadcasting" in `docs/architecture.md`), so at most one of the two can have changed on any arrival —
  * the turn is asked about first only because a position has to be read in some order.
  *
  * `shown` is null where there is no position to have moved from: a page that has just come

@@ -105,7 +105,7 @@ last discard (`pickupCandidates` in `shared/src/rules.ts`). Tapping a draw targe
 turns a pending selection into a finished turn — the two are a pair, and neither means
 anything alone. A draw target is *live* only while the current selection is a legal
 discard; otherwise it is inert, and a tap on it asks for nothing and is refused nothing
-(see "The turn is two taps" in `CLAUDE.md`). This is the same fact the wire already
+(see "The turn is two taps" in `docs/architecture.md`). This is the same fact the wire already
 carries as `DrawAction` — which pile, and which card if it came off the discard — named for
 the tap that produces it rather than the message it sends.
 

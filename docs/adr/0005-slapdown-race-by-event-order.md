@@ -25,7 +25,7 @@ for it to race over.
 The real consequence is what this does to bots. `playBotTurns` (`server/src/botTurns.ts`)
 runs every bot-controlled turn synchronously, in the same tick as the action that handed
 it the turn, with no delay — a deliberate property of this codebase (see "Broadcasting:
-one send per socket, one broadcast per move" in `CLAUDE.md`), not something slapdown
+one send per socket, one broadcast per move" in `docs/architecture.md`), not something slapdown
 introduces. If the seat after a slapdown-eligible turn is a bot, that bot's turn is
 already played and broadcast before the human's client has finished processing the ack
 that told them the window was even open. **A human cannot win a slapdown race against a

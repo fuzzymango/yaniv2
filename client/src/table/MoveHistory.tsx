@@ -76,7 +76,7 @@ function TurnEntry({ entry, who }: { entry: TurnHistoryEntryView; who: string })
 
 /**
  * One slapdown, marked as its own kind of move rather than laid out like a shortened turn:
- * a slapdown is not a turn (docs/rules.md §9, and "Turn model" in `CLAUDE.md`), and a row
+ * a slapdown is not a turn (docs/rules.md §9, and "Turn model" in `docs/architecture.md`), and a row
  * that read as a turn with the draw missing would be saying the wrong thing about it.
  */
 function SlapdownEntry({
