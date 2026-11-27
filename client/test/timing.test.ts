@@ -7,6 +7,10 @@ import {
   ANNOUNCE_HOLD_MS,
   ANNOUNCE_LEAD_MS,
   DEAL_HOLD_MS,
+  MILESTONE_COUNT_MS,
+  MILESTONE_GLOW_MS,
+  MILESTONE_RING_FADE_MS,
+  MILESTONE_RING_MS,
   announceEnterAt,
   announceLeaveAt,
 } from "../src/timing.ts";
@@ -63,5 +67,29 @@ describe("the deal hold", () => {
     // A human in the browser is never held longer than a bots-only table waits for its
     // spectator (ADR-0014).
     assert.ok(DEAL_HOLD_MS < AUTO_DEAL_MS);
+  });
+});
+
+/*
+ * How long a milestone seat's total takes to drain from the multiple of 50 it landed on (spec
+ * #280). Asserted against the one thing outside the animation it could collide with: a table
+ * only bots are playing deals itself on, and a watcher has to have seen the count land first.
+ * Against the deal hold it is asserted nothing — a deal may cut a count short, as it may the
+ * banners, and the count holds nothing up.
+ */
+describe("the milestone count", () => {
+  it("lands well inside the server's auto-deal delay", () => {
+    assert.ok(MILESTONE_COUNT_MS < AUTO_DEAL_MS / 2);
+  });
+
+  it("has traced and faded its ring before it lands", () => {
+    // The ring is the count *beginning*: still on the namecard as the total lands, it would
+    // be cut off in the frame the line goes back to ink, which unmounts it.
+    assert.ok(MILESTONE_RING_MS + MILESTONE_RING_FADE_MS < MILESTONE_COUNT_MS);
+  });
+
+  it("has let its reduced-motion glow rise and fall before it lands", () => {
+    // The glow is the ring's stand-in, and is cut off by the landing in the same way.
+    assert.ok(MILESTONE_GLOW_MS < MILESTONE_COUNT_MS);
   });
 });

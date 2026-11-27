@@ -260,6 +260,23 @@ Under reduced motion it keeps the banner and the beat and drops only the movemen
 the flight, which is skipped outright. A flight is redundant with a position that can be read
 at leisure; the entire premise here is that the quieter treatment was not enough.
 
+## Milestone countdown
+
+A total a milestone cut (docs/rules.md §7), shown **landing on the multiple of 50 and then
+draining from it**: the round unfolded, `20 + 30 = 50 pts`, the total falling in milestone blue
+to `0` over two seconds and throbbing at 4Hz as it goes — a blue laser ring traced once round
+the seat's namecard as it begins, a glow in its place under reduced motion — then the folded `20 - 20 = 0 pts` every scored seat reads (spec #280).
+The call announcement's sibling and on **its trigger exactly** — the scorecard growing from a
+position on the screen (`countdownFrom` in `client/src/milestone.ts`, published as
+`SessionSnapshot.countdown`) — so it too is an event and not a record: never replayed on a
+reload or a resumed seat, the scorecard's blue cell being the record.
+
+It differs in one way, deliberately: **a republication does not cut it off.** The session hands
+over only its start; the table latches it on the scorecard's length and the phase it was scored
+in, and lets it run until it lands, the phase moves (a deal, or a departure that ends the match)
+or the table goes. On a seat the same round took out, `OUT` waits for the
+landing. See `docs/client-table.md`.
+
 ## Yellow is the call, red is the Assaf
 
 One colour language across the table and the scorecard: the **accent yellow** means a Yaniv

@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import type { CSSProperties } from "react";
 import type { PlayerGameView, RoomSettings } from "@yaniv/shared";
 import { effectiveBotCount } from "@yaniv/shared";
 import { SettingsEditor } from "./SettingsEditor.tsx";
@@ -89,34 +90,56 @@ export function Lobby({
       {/*
         The roster and the room's settings scroll together, so that however many seats fill
         and however tall the settings are, the controls stay at the bottom of the phone
-        where a thumb is.
+        where a thumb is. The roster goes two across before it comes to that (issue #263).
       */}
       <div className="lobby__body">
-        <ul className="seats">
+        {/*
+          The rows the roster asks for — one per seat — and its floor, half of them, which
+          caps it at two across. Arithmetic on the count, not a measurement: CSS decides
+          whether one column fits.
+        */}
+        <ul
+          className="seats"
+          style={
+            {
+              "--seats": seats.length,
+              "--seat-rows": Math.ceil(seats.length / 2),
+            } as CSSProperties
+          }
+        >
           {seats.map((seat) => {
             const status = seatStatus(seat);
             return (
               <li className="seat" key={seat.id}>
-                <span className="seat__name">{seat.name}</span>
                 {/*
-                  "you" can only be decided here — it depends on whose screen this is, which
-                  is why it is never stored or sent over the wire.
+                  The name and its chips, apart from the ✕: where a two-across row is too
+                  narrow for both on one line, the chips move under the name as one group.
                 */}
-                {seat.id === view.you.id && <span className="seat__mark">you</span>}
-                {seat.id === view.hostId && <span className="seat__mark">host</span>}
-                {/*
-                  The same status slot the felt's seats carry (issue #146), off the same
-                  rule. In a lobby only one of its three words can ever come up — nobody is
-                  out of a match that has not been dealt, and a player who leaves one is
-                  spliced out of the roster — so this row says "away" or nothing. Worth
-                  saying here for the reason it is worth saying at the table: a room waiting
-                  to start should not be waiting on somebody whose phone locked itself.
-                */}
-                {status && (
-                  <span className={`seat__status seat__status--${status}`}>
-                    {STATUS_LABEL[status]}
+                <span className="seat__who">
+                  <span className="seat__name">{seat.name}</span>
+                  <span className="seat__chips">
+                    {/*
+                      "you" can only be decided here — it depends on whose screen this is,
+                      which is why it is never stored or sent over the wire.
+                    */}
+                    {seat.id === view.you.id && <span className="seat__mark">you</span>}
+                    {seat.id === view.hostId && <span className="seat__mark">host</span>}
+                    {/*
+                      The same status slot the felt's seats carry (issue #146), off the same
+                      rule. In a lobby only one of its three words can ever come up — nobody
+                      is out of a match that has not been dealt, and a player who leaves one
+                      is spliced out of the roster — so this row says "away" or nothing.
+                      Worth saying here for the reason it is worth saying at the table: a
+                      room waiting to start should not be waiting on somebody whose phone
+                      locked itself.
+                    */}
+                    {status && (
+                      <span className={`seat__status seat__status--${status}`}>
+                        {STATUS_LABEL[status]}
+                      </span>
+                    )}
                   </span>
-                )}
+                </span>
                 {/*
                   One tap and no confirm (docs/adr/0028): a seat removed by mistake costs that
                   player the code again, and an "away" row gets one too, being the seat most
@@ -166,19 +189,19 @@ export function Lobby({
       </div>
 
       <div className="lobby__actions">
-        {isHost ? (
+        {/*
+          Nothing in Start's place for a guest: the roster's HOST mark and "The host sets
+          these" already say whose the room is, and Leave takes the whole row.
+        */}
+        {isHost && (
           <button
             className="button button--primary"
             type="button"
             onClick={onStart}
             disabled={busy}
           >
-            Start the match
+            Start
           </button>
-        ) : (
-          // Its own class rather than `notice`, which carries news that has just
-          // arrived. This is a standing fact about the screen.
-          <p className="hint">The host starts the match.</p>
         )}
 
         {/*

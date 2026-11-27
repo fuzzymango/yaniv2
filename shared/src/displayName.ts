@@ -42,8 +42,12 @@ const NAME_PATTERN = /^[\p{L}\p{N}]+( [\p{L}\p{N}]+)*$/u;
  * stop being the one that was checked. Trimming is the only tidying it does: a name with
  * a character the rule refuses is refused, never stripped into one that passes — nobody
  * is seated under a name they did not choose.
+ *
+ * `unknown` rather than `string`, for the server's sake (issue #271): a name off the wire
+ * is whatever a client sent, and something that is not a string has no name in it.
  */
-export function normalizeDisplayName(name: string): string | null {
+export function normalizeDisplayName(name: unknown): string | null {
+  if (typeof name !== "string") return null;
   const trimmed = name.trim();
   if (trimmed.length > MAX_DISPLAY_NAME_LENGTH || !NAME_PATTERN.test(trimmed)) return null;
   return trimmed;

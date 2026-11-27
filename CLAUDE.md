@@ -33,7 +33,8 @@ terminal first. Every command and flag is in `README.md`.
 - **Erasable TypeScript only** — no `enum`, `namespace` or parameter properties; `import type` for
   types (`erasableSyntaxOnly`). Node strips the types, so anything that needs compiling breaks.
 - **Errors are values.** A rule violation returns a `Result<T>` carrying a `GameErrorCode`; a
-  `throw` means a defect, and the socket layer lets it propagate.
+  `throw` means a defect, and the socket layer lets it propagate — so no packet may reach one:
+  `socket.use` drops a mis-shaped one, and every payload is `unknown` until checked (#271).
 - **Randomness and time are injected.** Anything random takes an `Rng` (`() => number`); tests
   seed `mulberry32` so a deal replays exactly. Anything timed takes a clock, defaulting to real time.
 - **Client components:** a file *exports* one component (private helper components beside it are

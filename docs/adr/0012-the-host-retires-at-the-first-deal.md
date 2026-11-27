@@ -102,7 +102,10 @@ refused when they come back (`INVALID_RESUME_TOKEN` / `ROOM_NOT_FOUND`).
   off the table's topbar, `WayOut` is one button reading "Leave the room" for everybody, and
   `GameEnd`'s play-again is offered to whoever is looking at it. The confirm dialog that
   guarded closing goes with it — leaving costs nobody else anything, so there is nothing to
-  ask about.
+  ask about. *Amended 2026-11-12 by spec #263:* the button now reads just "Leave", so it fits
+  half of the lobby's one-row Start/Leave pair on a phone. It is still one label for
+  everybody, and it changed at the source, so `GameEnd` and the table's leave confirm read
+  "Leave" too.
 - **A bots-only table at `roundEnd` stalled until #148**, since every human being eliminated
   while bots play on leaves nobody eligible to deal. The server now deals it for a watching
   spectator (docs/adr/0014); the suites that play matches out still seat one bot rather than

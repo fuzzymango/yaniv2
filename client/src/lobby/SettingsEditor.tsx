@@ -15,7 +15,7 @@
  * half-way between one set of choices and another (docs/adr/0006).
  */
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { HandSize, RoomSettings, YanivThreshold } from "@yaniv/shared";
 import {
   HAND_SIZES,
@@ -134,6 +134,13 @@ export function SettingsEditor({
   const shownScore = typed ?? String(shown.maxScore);
 
   /**
+   * The score field's label names it by id rather than by wrapping it: in the lobby each
+   * setting grows into spare height (issue #263), and a wrapping `<label>` grown with it
+   * would make the blank space a tap that focuses the field and puts up a phone's keyboard.
+   */
+  const scoreId = useId();
+
+  /**
    * One control's worth of change, sent as the whole object the event asks for — and only
    * if the whole object is one the room would take.
    *
@@ -164,7 +171,7 @@ export function SettingsEditor({
   };
 
   return (
-    <SettingsPanel>
+    <SettingsPanel editable>
       <Choices<HandSize>
         label="Hand size"
         options={HAND_SIZES}
@@ -181,8 +188,10 @@ export function SettingsEditor({
         onChoose={(yanivThreshold) => change({ yanivThreshold })}
       />
 
-      <label className="setting">
-        <span className="setting__label">Match ends at</span>
+      <div className="setting">
+        <label className="setting__label" htmlFor={scoreId}>
+          Match ends at
+        </label>
         {/*
           The one setting with no list to choose from, so the one control that is typed
           into. It commits when the field is left rather than on every keystroke: a room
@@ -190,6 +199,7 @@ export function SettingsEditor({
           last of those would survive the lock the first takes.
         */}
         <input
+          id={scoreId}
           className="field__input field__input--score"
           type="number"
           inputMode="numeric"
@@ -207,7 +217,7 @@ export function SettingsEditor({
             if (event.key === "Enter") event.currentTarget.blur();
           }}
         />
-      </label>
+      </div>
 
       <Choices<number>
         label="Bots"

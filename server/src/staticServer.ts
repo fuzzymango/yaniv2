@@ -32,9 +32,17 @@ function contentType(filePath: string): string {
 /**
  * Resolves a request path to a file under `root`, refusing anything `path.normalize`
  * would still leave outside it — `..` segments included, however the URL encoded them.
+ *
+ * A path that does not decode names no file either (issue #271): `decodeURIComponent`
+ * throws on a broken escape, and nothing catches a throw in the request listener.
  */
 function resolveWithin(root: string, urlPath: string): string | null {
-  const decoded = decodeURIComponent(urlPath.split("?")[0] ?? "/");
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(urlPath.split("?")[0] ?? "/");
+  } catch {
+    return null;
+  }
   const resolved = path.normalize(path.join(root, decoded));
   return resolved === root || resolved.startsWith(root + path.sep) ? resolved : null;
 }

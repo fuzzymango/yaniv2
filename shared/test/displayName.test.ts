@@ -37,6 +37,12 @@ describe("normalizeDisplayName", () => {
     assert.equal(normalizeDisplayName("   "), null);
   });
 
+  it("refuses something that is not a string, rather than throwing on it", () => {
+    for (const notAName of [undefined, null, 42, {}, ["Ada"], { toString: 1 }]) {
+      assert.equal(normalizeDisplayName(notAName), null);
+    }
+  });
+
   it("accepts a name of exactly the limit", () => {
     const name = "x".repeat(MAX_DISPLAY_NAME_LENGTH);
     assert.equal(normalizeDisplayName(name), name);

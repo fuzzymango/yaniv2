@@ -325,7 +325,9 @@ export function createRooms(
       const joined = manager.joinRoom(roomCode, occupant);
       if (!joined.ok) return joined;
       const { playerId, resumeToken, resumed, state } = joined.value;
-      const name = getPlayer(state, playerId)?.name ?? occupant.name;
+      // Read off the seat, which was just taken or handed back, rather than the occupant,
+      // whose name is only what was typed.
+      const name = getPlayer(state, playerId)!.name;
       return ok({ playerId, resumeToken, resumed, name });
     },
 
