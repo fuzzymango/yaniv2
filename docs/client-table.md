@@ -232,12 +232,13 @@ waiting on, and a player who gave the seat up is not somebody to wait for at all
   it must never say of a table nobody is looking at.
 - **Nothing at all is the ordinary case, and covers two seats**: somebody playing, and a
   **bot**. A bot is connected always and watching never, so it falls out of the rule rather
-  than being a case in it — which is what makes an empty slot unambiguous. No client is told
-  which seats are bots, and none needs to be.
+  than being a case in it — which is what makes an empty slot unambiguous. The slot never asks
+  `isBot` (on the wire since [ADR-0029](adr/0029-a-client-is-told-which-seats-are-bots.md)),
+  and needs no case for it.
 - **The word comes off the wire, not off the screen.** `connected` and `spectating` are sent
   for every seat, derived by the server from the sockets in the room at the moment it
-  publishes ([ADR-0013](adr/0013-connection-derived-from-the-live-sockets.md)). A client
-  that worked out "watching" for itself would have to know which seats were bots.
+  publishes ([ADR-0013](adr/0013-connection-derived-from-the-live-sockets.md)). "Watching"
+  stays the server's to derive, though `isBot` is now sent too: one rule in one place.
 - **Brighter than the marks beside it, on purpose.** An out seat is faded to a little over a
   third by `.table-seat--out`, and opacity on a parent is a ceiling its children cannot climb
   back out of — so the one thing on a dimmed seat still worth reading gets full ink and a

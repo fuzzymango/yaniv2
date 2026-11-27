@@ -17,7 +17,10 @@ import { makeState, unwrap } from "../helpers.ts";
 /** Colour is presentation; assertions read the text underneath it. */
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
-/** An open lobby with two humans and a bot seated, as seen by `viewerId`. */
+/**
+ * An open lobby with two humans and a bot seated, as seen by `viewerId`. Grace is a human
+ * who shares a bot's bare name, so a mark read off the name would land on her.
+ */
 function lobbyView(viewerId: string) {
   return serializeStateForPlayer(
     makeState({
@@ -25,7 +28,7 @@ function lobbyView(viewerId: string) {
       players: [
         { id: "p1", name: "Ada" },
         { id: "p2", name: "Grace" },
-        { id: "p3", name: "Alan (bot)", isBot: true },
+        { id: "p3", name: "Alan", isBot: true },
       ],
     }),
     viewerId,
@@ -75,6 +78,40 @@ describe("renderView", () => {
     assert.doesNotMatch(frame, /Ada \(you\)/, "another human's seat is not the viewer's");
     assert.match(frame, /Alan \(bot\)/, "a bot is still marked as one");
     assert.doesNotMatch(frame, /Alan \(bot\) \(you\)/, "and a bot is never the viewer");
+  });
+
+  /** "(bot)" is the harness's, from `isBot` — never read off a name (docs/adr/0029). */
+  it("marks a bot in the lobby, and never a human who shares a bot's name", () => {
+    for (const viewer of ["p1", "p2"]) {
+      const frame = plain(renderView(lobbyView(viewer)));
+
+      assert.match(frame, /Alan \(bot\)/, `${viewer} sees the bot marked`);
+      assert.doesNotMatch(frame, /Grace\b[^\n]*\(bot\)/, `${viewer} sees Grace unmarked`);
+      assert.doesNotMatch(frame, /Ada\b[^\n]*\(bot\)/, "nor any other human");
+    }
+  });
+
+  it("marks a bot in the opponents listed mid-round, and nobody else", () => {
+    const view = serializeStateForPlayer(
+      makeState({
+        players: [
+          { id: "p1", name: "Ada" },
+          { id: "p2", name: "Grace" },
+          { id: "p3", name: "Alan", isBot: true },
+        ],
+        hands: { p1: ["clubs-5"], p2: ["hearts-2"], p3: ["hearts-3", "hearts-4"] },
+        lastDiscard: ["hearts-8"],
+        drawPile: ["spades-2"],
+        currentTurnPlayerId: "p1",
+      }),
+      "p1",
+      NO_CONNECTIONS,
+    );
+
+    const frame = plain(renderView(view));
+
+    assert.match(frame, /Alan \(bot\)\s+2 cards/);
+    assert.match(frame, /Grace\s+1 cards/, "a human is listed bare");
   });
 
   it("marks the viewer's own seat (you) (host) when they are both", () => {
@@ -295,6 +332,43 @@ describe("renderView", () => {
 
     assert.match(frame, /Grace \(left\)\s+115/, "who left, and what they finished on");
     assert.match(frame, /Ada \(you\)\s+0/, "alongside whoever stayed");
+  });
+
+  /**
+   * A match Ada ends by busting both the others: Grace, a human with a bot's bare name, and
+   * Alan, a bot. Both screens the harness draws then — the round's result and the
+   * standings — list every seat by name.
+   */
+  it("marks a bot in the round's result and the standings, and no human", () => {
+    const ended = unwrap(
+      callYaniv(
+        makeState({
+          players: [
+            { id: "p1", name: "Ada" },
+            { id: "p2", name: "Grace", score: 95 },
+            { id: "p3", name: "Alan", score: 95, isBot: true },
+          ],
+          hands: {
+            p1: ["clubs-2", "clubs-3"],
+            p2: ["hearts-K", "spades-Q"],
+            p3: ["hearts-Q", "spades-J"],
+          },
+          lastDiscard: ["hearts-8"],
+          drawPile: ["spades-2"],
+          currentTurnPlayerId: "p1",
+        }),
+        "p1",
+      ),
+    );
+    assert.equal(ended.phase, "gameEnd", "fixture should end the match");
+
+    const frame = plain(renderView(serializeStateForPlayer(ended, "p1", NO_CONNECTIONS)));
+    const [result, standing] = frame.split(/Match over/);
+
+    assert.match(result!, /Alan \(bot\).*Q♥/, "the bot's revealed row is marked");
+    assert.match(standing!, /Alan \(bot\)\s+115/, "and so is its placing");
+    assert.doesNotMatch(frame, /Grace\b[^\n]*\(bot\)/, "Grace is a human, on both");
+    assert.doesNotMatch(frame, /Ada\b[^\n]*\(bot\)/);
   });
 
   it("still names the winner of a match the winner has walked away from", () => {

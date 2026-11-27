@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MAX_PLAYERS, normalizeDisplayName } from "@yaniv/shared";
-import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "../src/config.ts";
+import { MAX_PLAYERS } from "@yaniv/shared";
+import { BOT_NAMES, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "../src/config.ts";
 import { removePlayer, startGame } from "../src/game.ts";
 import { RoomManager } from "../src/roomManager.ts";
 import { err, ok } from "../src/result.ts";
@@ -388,10 +388,10 @@ describe("seatBots", () => {
 
   /*
    * A bot's name is the server's own label, not a name a person chose, so the display-name
-   * rule is never asked about it (#227) — which is what lets "(bot)" say so, parentheses
-   * and all, where no player could type them.
+   * rule is never asked about it (#227). It is a bare name: which seats are bots is
+   * `isBot`'s to say, on the wire (docs/adr/0029), and never a name's.
    */
-  it("seats each bot as '<Name> (bot)', a label the display-name rule is not asked about", () => {
+  it("seats each bot under a bare name from BOT_NAMES, with no '(bot)'", () => {
     const rooms = manager();
     const lobby = makeState({
       phase: "lobby",
@@ -402,10 +402,12 @@ describe("seatBots", () => {
     const bots = rooms.seatBots(lobby).players.filter((p) => p.isBot);
 
     assert.equal(bots.length, MAX_PLAYERS - 1);
-    for (const bot of bots) {
-      assert.match(bot.name, /^[A-Z][a-z]+ \(bot\)$/);
-      assert.equal(normalizeDisplayName(bot.name), null, `${bot.name} is no player's name`);
-    }
+    assert.deepEqual(
+      bots.map((p) => p.name),
+      BOT_NAMES.slice(0, MAX_PLAYERS - 1),
+      "taken in order",
+    );
+    for (const bot of bots) assert.doesNotMatch(bot.name, /bot/i, `${bot.name} is bare`);
   });
 
   it("never seats past MAX_PLAYERS even when botCount asks for more", () => {
@@ -434,7 +436,7 @@ describe("seatBots", () => {
     assert.equal(new Set(ids).size, ids.length, `not all distinct: ${ids}`);
   });
 
-  it("gives every bot a distinct name a human could not be mistaken for", () => {
+  it("gives every bot a distinct name", () => {
     const rooms = manager();
     const lobby = makeState({
       phase: "lobby",
@@ -448,9 +450,6 @@ describe("seatBots", () => {
       .map((p) => p.name);
 
     assert.equal(new Set(names).size, names.length, `not all distinct: ${names}`);
-    for (const name of names) {
-      assert.match(name, /bot/i, "a bot's name says it is a bot");
-    }
   });
 
   it("leaves the humans already seated alone", () => {

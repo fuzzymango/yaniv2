@@ -45,6 +45,7 @@ function finishedMatch(seated: Seat[]): PlayerGameView {
     opponents: opponents.map((p) => ({
       ...p,
       ...standing(p),
+      isBot: false,
       spectating: p.outInRound !== undefined && !p.departed,
       handSize: 0,
     })),

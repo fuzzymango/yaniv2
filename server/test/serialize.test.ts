@@ -1031,6 +1031,58 @@ describe("serializeStateForPlayer — watching, on every seat", () => {
   });
 });
 
+/**
+ * Which seats are bots is on the wire (docs/adr/0029): the nameplate's robot badge and the
+ * CLI's "(bot)" read it, now that a bot's name no longer says so.
+ */
+describe("serializeStateForPlayer — which seats are bots", () => {
+  const players = [
+    { id: "p1", name: "Ada" },
+    { id: "p2", name: "Grace", isBot: true },
+    { id: "p3", name: "Alan", score: 40, outInRound: 2, isBot: true },
+    { id: "p4", name: "Edsger", score: 105, outInRound: 3 },
+    { id: "p5", name: "Barbara", score: 20, outInRound: 1, departed: true },
+    { id: "p6", name: "Tony" },
+  ];
+  const bots = ["p2", "p3"];
+  /** Everybody but Tony, who has dropped, so an away seat is covered too. */
+  const connected = new Set(["p1", "p4", "p5"]);
+
+  const botsSeenBy = (state: GameState, viewer: string) =>
+    serializeStateForPlayer(state, viewer, connected)
+      .opponents.filter((p) => p.isBot)
+      .map((p) => p.id);
+
+  it("flags exactly the bot seats, in every phase", () => {
+    for (const phase of ["playing", "roundEnd", "gameEnd"] as const) {
+      const state = makeState({ phase, players, hands: { p1: ["hearts-3"] }, roundNumber: 4 });
+      assert.deepEqual(botsSeenBy(state, "p1"), bots, `in ${phase}`);
+    }
+  });
+
+  it("flags them in the lobby, before anybody is out", () => {
+    const lobby = makeState({
+      phase: "lobby",
+      players: players.map(({ id, name, isBot }) => ({ id, name, isBot: isBot ?? false })),
+    });
+    assert.deepEqual(botsSeenBy(lobby, "p1"), bots);
+  });
+
+  it("says false, not nothing, for a human out, departed or away", () => {
+    const state = makeState({ players, hands: { p1: ["hearts-3"] }, roundNumber: 4 });
+    const seats = serializeStateForPlayer(state, "p1", connected).opponents;
+
+    for (const id of ["p4", "p5", "p6"]) {
+      assert.equal(seats.find((p) => p.id === id)!.isBot, false, id);
+    }
+  });
+
+  it("tells every viewer the same, a watcher included", () => {
+    const state = makeState({ players, hands: { p1: ["hearts-3"] }, roundNumber: 4 });
+    assert.deepEqual(botsSeenBy(state, "p4"), bots);
+  });
+});
+
 describe("serializeStateForPlayer — lobby", () => {
   it("has everyone in the match and nobody departed", () => {
     const view = serializeStateForPlayer(makeState({ phase: "lobby" }), "p1", NO_CONNECTIONS);

@@ -24,7 +24,8 @@ holds across the trees, and is not discoverable by reading one file:
   being allowed to end two ways depending on who is looking, and `displayName.ts`, the one
   rule every name a player chooses goes through — trimmed, then 1–20 letters and digits of any
   script with single spaces between words, refused and never tidied (#227); a bot's
-  "(bot)" label is the server's own and never asked about. `customCall.ts` is its sibling for
+  bare name is the server's own and never asked about, and `OpponentView.isBot`, not the name,
+  says a seat is a bot (`docs/adr/0029`). `customCall.ts` is its sibling for
   a custom call — the same words plus `! ? . , ' -`, capped at 24 on the upper-cased text the
   banner draws, and empty meaning **unset** rather than refused. `account.ts` is the
   account on the wire and **types only** (`AccountView`, deliberately no stat, the `signIn`

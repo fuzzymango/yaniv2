@@ -22,8 +22,8 @@ interface SettingsValuesProps {
    * In the lobby it is what the table can actually seat right now (`effectiveBotCount`),
    * because a host asking for more than there is room for is read back down rather than
    * refused (docs/adr/0006) — so the lobby shows what starting the match would deal. Once
-   * the match is running there is no such question left and no way to ask it either: the
-   * wire does not say which seats are bots, so the modal shows the room's own number.
+   * the match is running there is no such question left, so the modal shows the room's own
+   * number — the setting the match was started under.
    */
   botCount: number;
 }

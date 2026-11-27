@@ -127,8 +127,8 @@ function selfViewOf(
  * Presence is passed in rather than asked for twice: whether somebody is behind this seat
  * is one fact, and it decides both what the standing says and whether the seat is watching
  * the match. `spectating` is worked out here for every seat by the same predicate that
- * decides the viewer's own shape — which seats are bots is not on the wire, so a client
- * could not tell a watcher from one.
+ * decides the viewer's own shape, so a client never derives a watcher for itself — though
+ * `isBot` is on the wire now (docs/adr/0029), what counts as watching stays the server's.
  */
 function opponentViewOf(
   player: Player,
@@ -144,6 +144,8 @@ function opponentViewOf(
     customYanivCall: player.customYanivCall,
     customAssafCall: player.customAssafCall,
     ...standingOf(player, connected),
+    // Public: a client marks a bot from this, never from its name (docs/adr/0029).
+    isBot: player.isBot,
     spectating: spectating(player, connected),
     handSize,
   };

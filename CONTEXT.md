@@ -557,8 +557,8 @@ account carries its own, the same in every room, changed only by renaming the ac
 rule for both: 1–20 characters of letters and digits, in any script, with single spaces
 between words — no punctuation, no symbols, no emoji. A name that breaks it is refused, never
 tidied into one that doesn't: nobody is seated under a name they did not choose. The rule is
-about names a person chooses; a bot's name is the server's own label, and its "(bot)" is what
-says so.
+about names a person chooses; a bot's name is the server's own label, a bare name a person may
+share. What says a seat is a bot is the wire's `isBot`, never the name (`docs/adr/0029`).
 **Never unique** — two players may share one, at the same table. Identity is the account id
 and never the name, which is what lets a player choose any name they like.
 

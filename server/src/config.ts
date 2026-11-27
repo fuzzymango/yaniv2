@@ -6,17 +6,13 @@
  */
 
 /**
- * Names for the server-played seats, taken in order. Every one reads as a bot, so a
- * player can never mistake one for another human at the table. Long enough to fill a
- * table alongside a single human — see MAX_PLAYERS.
+ * Names for the server-played seats, taken in order. Bare names: which seats are bots is
+ * `OpponentView.isBot`'s to say, and each client marks it its own way — the nameplate's
+ * robot badge, the CLI harness its own marker (docs/adr/0029). A person may share one of
+ * these names, and the marker is what tells them apart. Long enough to fill a table
+ * alongside a single human — see MAX_PLAYERS.
  */
-export const BOT_NAMES = [
-  "Grace (bot)",
-  "Alan (bot)",
-  "Edsger (bot)",
-  "Barbara (bot)",
-  "Tony (bot)",
-];
+export const BOT_NAMES = ["Grace", "Alan", "Edsger", "Barbara", "Tony"];
 
 /**
  * **Bot think time**: how long a bot waits before taking its turn, uniform across bots
