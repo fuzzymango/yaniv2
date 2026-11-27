@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 574" width="1240" height="574">
+  <defs>
+  <filter id="np-shadow" x="-20%" y="-30%" width="140%" height="170%">
+    <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.4"/>
+  </filter>
+  <filter id="np-glow" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.5"/></filter>
+  <linearGradient id="np-slate" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#1b3d29"/><stop offset="1" stop-color="#0e2818"/>
+  </linearGradient><radialGradient id="felt" cx="50%" cy="0%" r="120%"><stop offset="0" stop-color="#14532d"/><stop offset="1" stop-color="#0b3018"/></radialGradient></defs><rect width="1240" height="574" fill="url(#felt)"/>
+  <text x="24" y="40" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="22" font-weight="700" fill="#f8fafc">Nameplate · Slate — fixed 128×52, shown at 2×</text>
+  <g transform="translate(24 64)"><g transform="scale(2) translate(6 6)">
+    <rect width="128" height="52" rx="10" fill="url(#np-slate)" filter="url(#np-shadow)"/>
+    <rect x="0.5" y="0.5" width="127" height="51" rx="9.5" fill="none" stroke="rgb(255 255 255 / 0.09)"/>
+    <path d="M10 1.2H118" stroke="rgb(255 255 255 / 0.07)"/>
+    <text x="10" y="20" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#f8fafc">Noa</text>
+    <text x="10" y="43" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="19" font-weight="700" fill="#f8fafc" style="font-variant-numeric: tabular-nums">23<tspan font-size="10" font-weight="500" fill="#94a3b8" dx="3">pts</tspan></text></g>
+      <text x="12" y="146" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#cbd5e1">Playing</text></g><g transform="translate(328 64)"><g transform="scale(2) translate(6 6)">
+    <rect width="128" height="52" rx="10" fill="url(#np-slate)" filter="url(#np-shadow)"/>
+    <rect x="0.5" y="0.5" width="127" height="51" rx="9.5" fill="none" stroke="rgb(255 255 255 / 0.09)"/>
+    <path d="M10 1.2H118" stroke="rgb(255 255 255 / 0.07)"/>
+    <text x="10" y="20" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#f8fafc">Daniel</text>
+    <text x="10" y="43" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="19" font-weight="700" fill="#f8fafc" style="font-variant-numeric: tabular-nums">41<tspan font-size="10" font-weight="500" fill="#94a3b8" dx="3">pts</tspan></text><rect x="-1" y="-1" width="130" height="54" rx="11" fill="none" stroke="#fde047" stroke-width="3" opacity="0.55" filter="url(#np-glow)"/>
+       <rect x="-1" y="-1" width="130" height="54" rx="11" fill="none" stroke="#fde047" stroke-width="2"/></g>
+      <text x="12" y="146" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#cbd5e1">Their turn</text></g><g transform="translate(632 64)"><g transform="scale(2) translate(6 6)">
+    <rect width="128" height="52" rx="10" fill="url(#np-slate)" filter="url(#np-shadow)"/>
+    <rect x="0.5" y="0.5" width="127" height="51" rx="9.5" fill="none" stroke="rgb(255 255 255 / 0.09)"/>
+    <path d="M10 1.2H118" stroke="rgb(255 255 255 / 0.07)"/>
+    <text x="10" y="20" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#f8fafc">Bartholomew Ro…</text>
+    <text x="10" y="43" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="19" font-weight="700" fill="#f8fafc" style="font-variant-numeric: tabular-nums">7<tspan font-size="10" font-weight="500" fill="#94a3b8" dx="3">pts</tspan></text></g>
+      <text x="12" y="146" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#cbd5e1">Long name</text></g><g transform="translate(936 64)"><g transform="scale(2) translate(6 6)">
+    <rect width="128" height="52" rx="10" fill="url(#np-slate)" filter="url(#np-shadow)"/>
+    <rect x="0.5" y="0.5" width="127" height="51" rx="9.5" fill="none" stroke="rgb(255 255 255 / 0.09)"/>
+    <path d="M10 1.2H118" stroke="rgb(255 255 255 / 0.07)"/>
+    <text x="10" y="20" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#f8fafc">Bartholome…</text>
+    <text x="10" y="43" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="19" font-weight="700" fill="#f8fafc" style="font-variant-numeric: tabular-nums">57<tspan font-size="10" font-weight="500" fill="#94a3b8" dx="3">pts</tspan></text><circle cx="111" cy="15" r="9" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(105 9) scale(0.5)" fill="none" stroke="#fdba74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 8.8a15 15 0 0 1 20 0"/>
+    <path d="M5 12.6a10 10 0 0 1 14 0"/>
+    <path d="M8.5 16.3a5 5 0 0 1 7 0"/>
+    <circle cx="12" cy="20" r="1.4" fill="#fdba74" stroke="none"/>
+    <path d="M3 3l18 18"/></g></g>
+      <text x="12" y="146" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#cbd5e1">Away</text></g><g transform="translate(24 232)"><g transform="scale(2) translate(6 6)">
+    <rect width="128" height="52" rx="10" fill="url(#np-slate)" filter="url(#np-shadow)"/>
+    <rect x="0.5" y="0.5" width="127" height="51" rx="9.5" fill="none" stroke="rgb(255 255 255 / 0.09)"/>
+    <path d="M10 1.2H118" stroke="rgb(255 255 255 / 0.07)"/>
+    <text x="10" y="20" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#f8fafc">Rina</text>
+    <text x="10" y="43" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="19" font-weight="700" fill="#f8fafc" style="font-variant-numeric: tabular-nums">12<tspan font-size="10" font-weight="500" fill="#94a3b8" dx="3">pts</tspan></text><circle cx="111" cy="15" r="9" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(105 9) scale(0.5)" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="8" width="15" height="11.5" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.6" r="1.2" fill="#cbd5e1" stroke="none"/><circle cx="9.3" cy="13.6" r="1.5" fill="#cbd5e1" stroke="none"/><circle cx="14.7" cy="13.6" r="1.5" fill="#cbd5e1" stroke="none"/></g></g>
+      <text x="12" y="146" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#cbd5e1">Bot</text></g><g transform="translate(328 232)"><g transform="scale(2) translate(6 6)"><g opacity="0.4">
+    <rect width="128" height="52" rx="10" fill="url(#np-slate)" filter="url(#np-shadow)"/>
+    <rect x="0.5" y="0.5" width="127" height="51" rx="9.5" fill="none" stroke="rgb(255 255 255 / 0.09)"/>
+    <path d="M10 1.2H118" stroke="rgb(255 255 255 / 0.07)"/>
+    <text x="10" y="20" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#f8fafc">Avi</text>
+    <text x="10" y="43" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="19" font-weight="700" fill="#f8fafc" style="font-variant-numeric: tabular-nums">204<tspan font-size="10" font-weight="500" fill="#94a3b8" dx="3">pts</tspan></text></g><circle cx="90" cy="15" r="9" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(84 9) scale(0.5)" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="3" width="13" height="18" rx="2"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5"/></g><circle cx="111" cy="15" r="9" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(105 9) scale(0.5)" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12C5 7.3 8.2 5.5 12 5.5s7 1.8 9.5 6.5c-2.5 4.7-5.7 6.5-9.5 6.5S5 16.7 2.5 12z"/><circle cx="12" cy="12" r="2.8" fill="#cbd5e1" stroke="none"/></g></g>
+      <text x="12" y="146" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#cbd5e1">Out, watching</text></g><g transform="translate(632 232)"><g transform="scale(2) translate(6 6)"><g opacity="0.4">
+    <rect width="128" height="52" rx="10" fill="url(#np-slate)" filter="url(#np-shadow)"/>
+    <rect x="0.5" y="0.5" width="127" height="51" rx="9.5" fill="none" stroke="rgb(255 255 255 / 0.09)"/>
+    <path d="M10 1.2H118" stroke="rgb(255 255 255 / 0.07)"/>
+    <text x="10" y="20" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#f8fafc">Michal B…</text>
+    <text x="10" y="43" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="19" font-weight="700" fill="#f8fafc" style="font-variant-numeric: tabular-nums">211<tspan font-size="10" font-weight="500" fill="#94a3b8" dx="3">pts</tspan></text></g><circle cx="90" cy="15" r="9" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(84 9) scale(0.5)" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="3" width="13" height="18" rx="2"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5"/></g><circle cx="111" cy="15" r="9" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(105 9) scale(0.5)" fill="none" stroke="#fdba74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 8.8a15 15 0 0 1 20 0"/>
+    <path d="M5 12.6a10 10 0 0 1 14 0"/>
+    <path d="M8.5 16.3a5 5 0 0 1 7 0"/>
+    <circle cx="12" cy="20" r="1.4" fill="#fdba74" stroke="none"/>
+    <path d="M3 3l18 18"/></g></g>
+      <text x="12" y="146" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#cbd5e1">Out, away (long name)</text></g><g transform="translate(936 232)"><g transform="scale(2) translate(6 6)"><g opacity="0.4">
+    <rect width="128" height="52" rx="10" fill="url(#np-slate)" filter="url(#np-shadow)"/>
+    <rect x="0.5" y="0.5" width="127" height="51" rx="9.5" fill="none" stroke="rgb(255 255 255 / 0.09)"/>
+    <path d="M10 1.2H118" stroke="rgb(255 255 255 / 0.07)"/>
+    <text x="10" y="20" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#f8fafc">Shira</text>
+    <text x="10" y="43" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="19" font-weight="700" fill="#f8fafc" style="font-variant-numeric: tabular-nums">67<tspan font-size="10" font-weight="500" fill="#94a3b8" dx="3">pts</tspan></text></g><circle cx="111" cy="15" r="9" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(105 9) scale(0.5)" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4H6.5A1.5 1.5 0 0 0 5 5.5v13A1.5 1.5 0 0 0 6.5 20H13"/><path d="M10 12h11M17 8l4 4-4 4"/></g></g>
+      <text x="12" y="146" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#cbd5e1">Left the table</text></g>
+  <path d="M24 424H1216" stroke="rgb(255 255 255 / 0.15)"/>
+  <text x="24" y="452" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="700" letter-spacing="1.2" fill="#cbd5e1">BADGES</text>
+  <g transform="translate(24 468)">
+      <circle cx="22" cy="22" r="22" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(9 9) scale(1.0833333333333333)" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="3" width="13" height="18" rx="2"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5"/></g>
+      <text x="56" y="18" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#f8fafc">Out</text>
+      <text x="56" y="38" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#cbd5e1">Knocked out by score</text></g><g transform="translate(262.4 468)">
+      <circle cx="22" cy="22" r="22" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(9 9) scale(1.0833333333333333)" fill="none" stroke="#fdba74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 8.8a15 15 0 0 1 20 0"/>
+    <path d="M5 12.6a10 10 0 0 1 14 0"/>
+    <path d="M8.5 16.3a5 5 0 0 1 7 0"/>
+    <circle cx="12" cy="20" r="1.4" fill="#fdba74" stroke="none"/>
+    <path d="M3 3l18 18"/></g>
+      <text x="56" y="18" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#f8fafc">Away</text>
+      <text x="56" y="38" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#cbd5e1">Connection dropped</text></g><g transform="translate(500.8 468)">
+      <circle cx="22" cy="22" r="22" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(9 9) scale(1.0833333333333333)" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4H6.5A1.5 1.5 0 0 0 5 5.5v13A1.5 1.5 0 0 0 6.5 20H13"/><path d="M10 12h11M17 8l4 4-4 4"/></g>
+      <text x="56" y="18" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#f8fafc">Left</text>
+      <text x="56" y="38" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#cbd5e1">Gave up the seat</text></g><g transform="translate(739.2 468)">
+      <circle cx="22" cy="22" r="22" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(9 9) scale(1.0833333333333333)" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12C5 7.3 8.2 5.5 12 5.5s7 1.8 9.5 6.5c-2.5 4.7-5.7 6.5-9.5 6.5S5 16.7 2.5 12z"/><circle cx="12" cy="12" r="2.8" fill="#cbd5e1" stroke="none"/></g>
+      <text x="56" y="18" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#f8fafc">Watching</text>
+      <text x="56" y="38" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#cbd5e1">Out, still at the table</text></g><g transform="translate(977.6 468)">
+      <circle cx="22" cy="22" r="22" fill="rgb(255 255 255 / 0.1)"/><g transform="translate(9 9) scale(1.0833333333333333)" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="8" width="15" height="11.5" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.6" r="1.2" fill="#cbd5e1" stroke="none"/><circle cx="9.3" cy="13.6" r="1.5" fill="#cbd5e1" stroke="none"/><circle cx="14.7" cy="13.6" r="1.5" fill="#cbd5e1" stroke="none"/></g>
+      <text x="56" y="18" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#f8fafc">Bot</text>
+      <text x="56" y="38" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#cbd5e1">Replaces “(bot)” in names</text></g></svg>
