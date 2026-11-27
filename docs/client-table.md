@@ -8,7 +8,7 @@ reached its length cap; the decisions are unchanged, and `docs/architecture.md` 
 ## The table is seated, and part of every seat is off the screen
 
 Opponents are drawn round three sides of the felt (`seatZones`), each a fan of face-down
-backs — one per card they are actually holding — under an upright label, in place of a row
+backs — one per card they are actually holding — under an upright nameplate, in place of a row
 of text. The fan is the point: a hand shrinking is something to watch rather than a number
 to notice. Six decisions hold it up, in `fan.ts` and `styles.css` — five the prototype's
 variant D verdict (issue #56) rather than a re-derivation, and a sixth about what the felt
@@ -32,9 +32,9 @@ had to give up to make room for the lot:
   zones are centred in it — a lone seat on the middle of the edge, a pair either side of it,
   so a lone seat opposite a pair sits level with the gap between them. It used to stop at 56%
   of the screen, which drew a lone side seat where the upper of two would sit.
-- **Only the label is ringed on turn**, not the seat's box — which is mostly the space
+- **Only the nameplate is ringed on turn**, not the seat's box — which is mostly the space
   reserved for an arc turned inside it and hung off the edge, so a ring there reads as a box
-  near a player rather than round them.
+  near a player rather than round them. A 2px yellow ring with a soft glow (spec #293).
 - **The table's settings icon is pinned out of flow too** (`.table > .topbar`), since the
   band covers the top of the screen the column's first row would sit in: it belongs to the
   table's corner, above the band. That is now the corner in both phases (issue #78) — the
@@ -202,11 +202,14 @@ player for the life of the room, and a glance says who is still in.
   playing. The sweep anchors on the viewer's **own** seat rather than on the next player to act,
   which is what keeps it meaningful for a spectator: they are seated like everybody else and are
   not in turn order at all.
-- **Dim is the whole seat, and it is opacity.** Cards, name and score recede together, because
-  this is a standing fact about a seat rather than news about one row of it — which is what the
-  red ring on the label is, and why they are two classes (`.table-seat--out` against
-  `.table-seat--went-out`). Opacity moves nothing, so a card in flight needs to know nothing
-  about it, and a seat drawn for a hand of five keeps the box it reserved.
+- **Dim is the seat, all but its badges, and it is opacity.** Cards, name and score recede
+  together to 40%, because this is a standing fact about a seat rather than news about its
+  plate — which is what the red ring on the plate is, and why they are two classes
+  (`.table-seat--out` against `.table-seat--went-out`). The badges stay at full strength (spec
+  #293): they say *why* the seat is dim, and opacity on a parent is a ceiling no child climbs
+  back out of, so the fade is put on each part beside them rather than on the seat. Opacity
+  moves nothing, so a card in flight needs to know nothing about it, and a seat drawn for a
+  hand of five keeps the box it reserved.
 - **Dim from the next deal on, not the round they went out in.** That round is scored with them
   in it: their hand and what it cost them are exactly what a scored table is for reading, and it
   wears the `OUT` mark (issue #142) instead. `Table.tsx` asks it as one question — out, and out
@@ -219,38 +222,47 @@ player for the life of the room, and a glance says who is still in.
 - **The viewer's own row is never dimmed.** It is the row they are reading the table from, and
   the bar where their hand was already says they are out, in words (issue #143).
 
-## One slot per seat says what is up with the player behind it
+## The nameplate says who is behind a seat, in badges
 
-**A table that has gone quiet explains itself** (issue #146). Each seat's label carries one
-status slot, holding one word or nothing: **left**, **away** or **watching**, in that
-priority (`status.ts`, `seatStatus`). A player who dropped is not somebody the table is idly
-waiting on, and a player who gave the seat up is not somebody to wait for at all.
+**A table that has gone quiet explains itself** (issue #146), and since spec #293 it does so
+on the **Slate nameplate**: a fixed 120×52 tile under each opponent's cards, with the name top
+left, the score under it in large tabular digits, and up to two icon badges top right. It has
+to read at a glance on a phone at a full six-seat table: whose turn, who is out, who dropped,
+who left and who is a bot.
 
-- **A priority, not a set of badges.** A seat can be several of these at once — somebody who
-  left is out of the match and has no connection either — so the slot says the most final
-  thing that is true of it. Left beats away beats watching, and "watching" is the one thing
-  it must never say of a table nobody is looking at.
-- **Nothing at all is the ordinary case, and covers two seats**: somebody playing, and a
-  **bot**. A bot is connected always and watching never, so it falls out of the rule rather
-  than being a case in it — which is what makes an empty slot unambiguous. The slot never asks
-  `isBot` (on the wire since [ADR-0029](adr/0029-a-client-is-told-which-seats-are-bots.md)),
-  and needs no case for it.
-- **The word comes off the wire, not off the screen.** `connected` and `spectating` are sent
+- **One fixed size, whatever is in it** (`--plate-w`, `--plate-h`). A long name ends in "…"
+  and is whole in the plate's `title`; badges coming and going take room from the name, never
+  from the box; the line under the name is clipped rather than wrapped. A plate that grew with
+  its content would move the seats round it, which is the one thing a seat must never do
+  mid-round. The hand size is gone from it: the fan already says a hand is held. **120px
+  wide, not the design's 128** (#297): at 375×667 with six seats a side seat with an empty
+  hand shrinks and its column re-centres, and 128 overlapped the top seat's plate there.
+- **Badges are a short ordered list, not one word** (`status.ts`, `seatBadges`): Out first,
+  then one of Bot, Away or Watching — or Left alone, which beats everything. A seat can be
+  several things at once, and two badges say "out, and still watching" or "out, and dropped",
+  which one word could not. Out and Watching wait for `outShown` in the round that knocked the
+  seat out, so a plate never gives away the end of a milestone count; during a round being
+  played there is no count, so a live seat passes `true`.
+- **Nothing at all is the ordinary case**: somebody playing and present. A **bot** wears the
+  robot badge, read off `isBot` on the wire
+  ([ADR-0029](adr/0029-a-client-is-told-which-seats-are-bots.md)) and never off its name — the
+  plate is the one place in the browser a bot is marked.
+- **The facts come off the wire, not off the screen.** `connected` and `spectating` are sent
   for every seat, derived by the server from the sockets in the room at the moment it
-  publishes ([ADR-0013](adr/0013-connection-derived-from-the-live-sockets.md)). "Watching"
-  stays the server's to derive, though `isBot` is now sent too: one rule in one place.
-- **Brighter than the marks beside it, on purpose.** An out seat is faded to a little over a
-  third by `.table-seat--out`, and opacity on a parent is a ceiling its children cannot climb
-  back out of — so the one thing on a dimmed seat still worth reading gets full ink and a
-  stronger border. Only **away** is coloured, being the one that may yet change; a table with
-  three watchers should not look like a table with three problems.
-- **The same slot in both phases.** A scored round draws it exactly as a live one does: who
-  is there is as true while the table waits on the deal as while it waits on a turn.
-- **The lobby's roster rows carry it too**, off the same `seatStatus`. Only "away" can come
-  up there — nobody is out of a match that has not been dealt, and a player who leaves a
-  lobby is spliced out of the roster — and it is worth saying for the same reason: a room
-  waiting to start should not be waiting on a phone that locked itself.
-- **The viewer's own row has no slot**, and needs none. They are connected by definition,
+  publishes ([ADR-0013](adr/0013-connection-derived-from-the-live-sockets.md)).
+- **Icons, each named in words** (`SeatBadge.tsx`): inline SVG in `currentColor`, a crossed
+  card for out, slashed wifi for away, a door for left, an eye for watching and a robot for a
+  bot, each chip an `img` with the word as its accessible name. Only **away** is coloured
+  (`--away`, orange), being the one that may yet change; a table with three watchers should
+  not look like a table with three problems. Yellow is kept for "your turn" and selection.
+- **Badges survive the fade.** An out seat's cards, name and score are drawn at 40%; its
+  badges are not, being the reason it is dim (above).
+- **The same badges in both phases.** A scored round draws them as a live one does: who is
+  there is as true while the table waits on the deal as while it waits on a turn.
+- **The lobby keeps words** (`seatStatus`, one of left › away › watching, in a chip). Only
+  "away" can come up there — nobody is out of a match that has not been dealt, and a player
+  who leaves a lobby is spliced out of the roster — and it is orange there too.
+- **The viewer's own row has no badges yet**, and needs few. They are connected by definition,
   they have not left, and if they are watching the bar where their hand was says so in words
   (issue #143).
 
@@ -335,7 +347,7 @@ decisions, none of them about the rules of anything:
   pile, and the place it has genuinely reached has nothing to wait for. **A seat is the one
   landing nothing waits at**: the fan there stands for a count the position has already
   settled, so there is no card at the end of that journey to be drawn twice — and a back too
-  few would misstate the count its own label states in words.
+  few would misstate the count the fan is there to show.
 - **`FLIGHT_MS` is bounded by bot think time, not by the client.** 300ms, against the
   seconds a bot pauses before its move: what keeps a flight from being replaced before it
   finishes is the server's think time, not a client-side beat (issue #135, which retired the

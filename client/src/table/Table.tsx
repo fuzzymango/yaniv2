@@ -73,7 +73,7 @@ import { DECK_BOX } from "../ghosts.ts";
 import { roundOutcome } from "../score.ts";
 import type { Zone } from "../seating.ts";
 import { ZONES, byRelativeSeat, seatZones } from "../seating.ts";
-import { seatStatus } from "../status.ts";
+import { seatBadges } from "../status.ts";
 import { DEAL_HOLD_MS, SHAKE_MS } from "../timing.ts";
 import type { DrawSource } from "../turn.ts";
 import { isLegalCall, isLegalSelection, isSlapdownTarget, takeableIds } from "../turn.ts";
@@ -495,10 +495,12 @@ export function Table({
         name={opponent.name}
         isOut={isOut(opponent)}
         wentOut={outShown(opponent, row)}
-        // The same slot the live seat carries (issue #146): who is there is as true of a
-        // round being scored as of one being played, and a seat that says "away" while the
-        // table waits on the deal is saying exactly what is worth knowing.
-        status={seatStatus(opponent)}
+        // The same badges the live seat wears (spec #293): who is there is as true of a round
+        // being scored as of one being played, and a seat that says "away" while the table
+        // waits on the deal is saying exactly what is worth knowing. Out is shown here only
+        // for a seat out before this round; the round that takes a seat out says so with its
+        // `OUT` mark for now (ticket #298 moves it to the badge).
+        badges={seatBadges(opponent, { outShown: isOut(opponent) })}
         // The call over their seat, where there is one: position is what says who called
         // (issue #156), so it goes in the seat's own box rather than anywhere central.
         banner={announcedAt(opponent.id)}
