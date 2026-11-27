@@ -385,7 +385,7 @@ describe("outShownFor", () => {
     assert.equal(outShownFor(latch, true, milestone, false), false);
   });
 
-  it("agrees with the line's own OUT mark at the start of the count and at its end", () => {
+  it("agrees with the line's own outShown at the start of the count and at its end", () => {
     assert.equal(outShownFor(latch, false, milestone, true), countFrame(milestone, true, 0).outShown);
     assert.equal(
       outShownFor(latch, true, milestone, true),

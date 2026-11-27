@@ -150,13 +150,10 @@ const useCountElapsed = (clock: CountClock | null): number => {
  */
 function ScoredDetail({
   player,
-  wentOut,
   clock = null,
   still = false,
 }: {
   player: PlayerRoundResultView;
-  /** Whether this round is the one that took them out of the match — the `OUT` tag. */
-  wentOut: boolean;
   /**
    * The clock of the milestone count this seat is in, where it is counting (spec #280); null
    * for every seat that is not, which reads exactly as a count long since landed. Subscribed
@@ -172,29 +169,22 @@ function ScoredDetail({
   still?: boolean | undefined;
 }) {
   const elapsed = useCountElapsed(clock);
-  const frame = countFrame(player, wentOut, elapsed);
+  // Whether the seat may wear going out is not this line's to draw: the plate's red ring and
+  // its Out badge say it, and the table asks `outShownFor` when. So `outShown` goes unread here.
+  const frame = countFrame(player, false, elapsed);
   const counting = frame.stage === "counting";
   return (
     <>
       {/*
-        The line above the felt says who did what; these say it again where the numbers are,
+        The line above the felt says who did what; this says it again where the numbers are,
         so a seat that gained 30 or nothing can be read without going back up to find out why.
 
-        The mark for going out is one of them rather than a sentence of its own (issue #142):
-        a round that ended somebody's match and one that did not are the same screen in two
-        states, and the hand and the score below are the round they actually played, recorded
-        before they are dimmed out of the next one.
-
-        Two marks used to sit above these and no longer do (issue #156): the call and the
-        Assaf. The banner over the seat says both, far louder, at the moment they are worth
-        saying; the line above the felt names both players in a sentence once it has faded;
-        and the scorecard is the durable per-seat record of who called what. A third, quieter
-        copy in this row was repeating all of them.
-
-        A grey `MILESTONE` chip sat here too, and no longer does (spec #280): the score beside
-        it now says so itself, landing on the multiple of 50 and draining from it, and the
-        scorecard's blue cell is the record. `OUT` is the one mark left — and on a seat that
-        hit a milestone it waits for the count to land, `countFrame` deciding when.
+        No marks sit beside it any more. The call and the Assaf went first (issue #156): the
+        banner over the seat says both, far louder, the line above the felt names both players
+        once it has faded, and the scorecard is the record. The grey `MILESTONE` chip went next
+        (spec #280): the score now says so itself, landing on the multiple of 50 and draining
+        from it. The red `OUT` chip went last (spec #293): the plate it sat in says it with a
+        red ring and the Out badge, which wait, as the chip did, for a milestone count to land.
       */}
       {/*
         The burst the count begins with, round the namecard this line is drawn in — the seat's
@@ -203,9 +193,16 @@ function ScoredDetail({
         landing, and a seat that is not counting has nothing to trace.
       */}
       {counting && <MilestoneRing elapsedMs={elapsed} still={still} />}
-      {frame.outShown && <span className="seat__mark seat__mark--out">out</span>}
       <span className={`player__score ${counting ? "player__score--counting" : ""}`}>
-        {frame.lead}
+        {/*
+          The sum before the total, in a box of its own so a plate can draw it small and cut it
+          short from the left when it does not fit (spec #293) — the total is never the part
+          cut. The inner span keeps it reading left to right inside a box laid out right to
+          left, which is what puts the "…" at its start (`.table-seat__detail .player__lead`).
+        */}
+        <span className="player__lead">
+          <span className="player__lead-text">{frame.lead}</span>
+        </span>
         {/*
           The total in a box of its own, so it throbs and the sentence around it holds still
           (spec #280). A transform, so the size it beats to never moves a neighbour.
@@ -215,8 +212,8 @@ function ScoredDetail({
           style={still || frame.scale === 1 ? undefined : { transform: `scale(${frame.scale})` }}
         >
           {frame.total}
-        </span>{" "}
-        pts
+        </span>
+        <span className="player__pts">pts</span>
       </span>
     </>
   );
@@ -372,7 +369,7 @@ export function Table({
    *
    * Latched during render, React's pattern for state derived from a prop, so it is in place
    * before the frame that brought it is painted: an effect would paint one frame of the landed
-   * line first — `OUT` included, on a seat whose count is about to withhold it. `latchCount`
+   * line first — the red ring included, on a seat whose count is about to withhold it. `latchCount`
    * returns the latch it was given when nothing changed, so this converges in one pass.
    *
    * The reduced-motion preference is asked once, as the count is latched, as `CardsInFlight.tsx`
@@ -440,15 +437,16 @@ export function Table({
    *
    * Out, *and* out before the round being shown: the round that took somebody out is scored
    * with them in it, and their hand and their score in it are exactly what a scored table is
-   * for reading. So the seat wears the news that round (`wentOut`, the `OUT` tag) and is dim
-   * from the next deal on, which is the first position they are genuinely not in.
+   * for reading. So the seat wears the news that round (`wentOut`: the red ring, the Out
+   * badge) and is dim from the next deal on, which is the first position they are genuinely
+   * not in.
    */
   const isOut = (player: SelfView | OpponentView): boolean =>
     player.outInRound !== null && !wentOut(player);
 
   /**
-   * Whether the seat wears that news *yet* — the red ring on its namecard, beside the `OUT`
-   * mark `ScoredDetail` draws off the same answer. On a seat counting a milestone both wait
+   * Whether the seat wears that news *yet* — the red ring on its namecard, and the Out badge
+   * beside its name, both drawn off this one answer. On a seat counting a milestone both wait
    * for the landing (spec #280, amended on review #281): shown from the first frame, the ring
    * would give away what the count is holding back. Everywhere else, `wentOut` as it was.
    */
@@ -497,17 +495,16 @@ export function Table({
         wentOut={outShown(opponent, row)}
         // The same badges the live seat wears (spec #293): who is there is as true of a round
         // being scored as of one being played, and a seat that says "away" while the table
-        // waits on the deal is saying exactly what is worth knowing. Out is shown here only
-        // for a seat out before this round; the round that takes a seat out says so with its
-        // `OUT` mark for now (ticket #298 moves it to the badge).
-        badges={seatBadges(opponent, { outShown: isOut(opponent) })}
+        // waits on the deal is saying exactly what is worth knowing. Out is worn by a seat out
+        // before this round, and by the one this round took out from the moment its red ring
+        // is — `outShown` alone is false for the first of those, so both are asked.
+        badges={seatBadges(opponent, { outShown: isOut(opponent) || outShown(opponent, row) })}
         // The call over their seat, where there is one: position is what says who called
         // (issue #156), so it goes in the seat's own box rather than anywhere central.
         banner={announcedAt(opponent.id)}
         detail={
           <ScoredDetail
             player={row}
-            wentOut={wentOut(opponent)}
             clock={clockFor(opponent.id)}
             still={counting?.still}
           />
@@ -521,7 +518,6 @@ export function Table({
 
   /** The viewer's own row of the round, for the footer under their revealed hand. */
   const yourRound = scored(view.you.id);
-  const youWentOut = wentOut(view.you);
   const yourOutShown = yourRound !== null && outShown(view.you, yourRound);
 
   /**
@@ -869,7 +865,6 @@ export function Table({
           {result !== null && yourRound !== null ? (
             <ScoredDetail
               player={yourRound}
-              wentOut={youWentOut}
               clock={clockFor(view.you.id)}
               still={counting?.still}
             />

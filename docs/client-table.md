@@ -73,14 +73,23 @@ the page, and nobody has to be re-found. What changes is what changed:
   every one of them down the page at the one moment they must not move.
 - **The Yaniv call becomes the deal** — offered to any viewer still in the match, or the line
   saying what is being waited for, in the slot the call was in (docs/adr/0012).
-- **Anybody the round took out of the match is tagged `OUT`** (issue #142), on their label
-  beside the score, with the same ring round it that whose-turn-it-is wears — in the colour the news actually is, and the two can never be on
-  together. It is *all* that is added: no prose, and the eliminated player's hand and round
-  score are still shown, so a round that ended somebody's match and one that did not are the
-  same screen in two states. Whose round it was is the seat's own `outInRound` against the
-  round being drawn, not the viewer's `roundNumber` — the record is what the rest of the
-  screen is reading. On a seat whose milestone is still counting, both the tag and the ring
-  wait for it to land (`countFrame`'s `outShown`, below).
+- **Anybody the round took out of the match wears a red ring and the Out badge** (issue #142,
+  spec #293): the same 2px ring and glow that whose-turn-it-is wears, in the colour the news
+  actually is — the two can never be on together — and the badge that says what it means. The
+  red `OUT` text chip that used to sit beside the score is gone. It is *all* that is added: no
+  prose, and the eliminated player's hand and round score are still shown, so a round that
+  ended somebody's match and one that did not are the same screen in two states. Whose round it
+  was is the seat's own `outInRound` against the round being drawn, not the viewer's
+  `roundNumber` — the record is what the rest of the screen is reading. On a seat whose
+  milestone is still counting, the ring and the badge wait for it to land, together
+  (`outShownFor`, below). A seat out from an *earlier* round keeps its Out badge too, which is
+  why the scored seat asks `isOut || outShown`: `outShown` alone is false for it.
+- **On the plate the total stays large and the sum is drawn small** (spec #293): the total at
+  the running score's 19px with its `pts`, and `a + b =` before it at 10px and dim. A 120px
+  plate has no room for all of a three-digit line, so the sum is what gives — cut short from
+  the **left**, with "…" at its start (laid out right to left, its text isolated left to
+  right), keeping the step to the total and losing where they started. The total is never cut.
+  The viewer's own footer has room, and draws the line whole.
 
 Seats are placed by the live roster sorted by `byRelativeSeat` in **both** phases, and the
 round's own record is looked up by id against whoever is already in a zone. Two placements
@@ -212,7 +221,7 @@ player for the life of the room, and a glance says who is still in.
   hand of five keeps the box it reserved.
 - **Dim from the next deal on, not the round they went out in.** That round is scored with them
   in it: their hand and what it cost them are exactly what a scored table is for reading, and it
-  wears the `OUT` mark (issue #142) instead. `Table.tsx` asks it as one question — out, and out
+  wears the red ring and the Out badge (issue #142) instead. `Table.tsx` asks it as one question — out, and out
   before the round on the screen. At `gameEnd` that leaves the last player knocked out undimmed,
   deliberately: the round on the screen is the one that just ended the match, their hand in it is
   the reason it ended, and dimming the cards everybody has come to look at to say what the
@@ -258,7 +267,9 @@ who left and who is a bot.
 - **Badges survive the fade.** An out seat's cards, name and score are drawn at 40%; its
   badges are not, being the reason it is dim (above).
 - **The same badges in both phases.** A scored round draws them as a live one does: who is
-  there is as true while the table waits on the deal as while it waits on a turn.
+  there is as true while the table waits on the deal as while it waits on a turn. The one
+  difference is the round that knocked a seat out, whose Out (and Watching) wait for
+  `outShown`, so they arrive with the red ring after any milestone count has landed.
 - **The lobby keeps words** (`seatStatus`, one of left › away › watching, in a chip). Only
   "away" can come up there — nobody is out of a match that has not been dealt, and a player
   who leaves a lobby is spliced out of the roster — and it is orange there too.
@@ -471,8 +482,8 @@ about this table in particular:
   which names both players in a sentence, and the scorecard — which now speaks the same two
   colours, yellow for the call and red for the Assaf. The grey `milestone` chip has since gone
   too (spec #280): the score beside it now says so itself, by counting (below), and the
-  scorecard's blue cell is the record. `out` is the one mark left — and on a seat still
-  counting a milestone it waits, with the red ring, for the count to land.
+  scorecard's blue cell is the record. The `out` chip went last (spec #293): the Out badge and
+  the red ring say it, and on a seat still counting a milestone both wait for the count to land.
 
 **And the deal waits until the round has been seen** (issues #204, #205). "Deal next round"
 takes the Yaniv call's slot, so a second tap on Yaniv!, or a thumb already on its way there,
@@ -526,8 +537,8 @@ when it starts is the session's one-shot (`countdownFrom`, `docs/client-session.
   milestone it runs under the banner. Waiting for the banners would put it after the deal hold,
   where a prompt deal would cut it off before it began; starting together, the total has landed
   as the hold lifts, and the count holds nothing up.
-- **Going out waits for it.** On a seat that hit a milestone and still went out, `OUT` and the
-  red ring are withheld until the count lands (amended on review, #281): shown from the first
+- **Going out waits for it.** On a seat that hit a milestone and still went out, the red ring
+  and the Out badge are withheld until the count lands (amended on review, #281): shown from the first
   frame, either would give away how the count ends. A seat that went out with no milestone
   shows both at once, as it always has, and one the milestone saved gets nothing extra.
 - **The total throbs while it drains** (#284): a scale of 1 to 1.1 and back every
@@ -536,7 +547,7 @@ when it starts is the session's one-shot (`countdownFrom`, `docs/client-session.
   total throbs: `countFrame` hands the table the sentence before it (`lead`) so the number sits
   in a box of its own, and a transform, so nothing beside it moves. It rests at exactly 1 once
   landed. Under reduced motion there is no throb and everything else is unchanged — the drain,
-  the flip and `OUT` waiting — the preference read once as the count is latched, as a flight
+  the flip and the Out badge waiting — the preference read once as the count is latched, as a flight
   reads it, a scale set from code being out of a stylesheet's reach.
 - **A laser ring is traced round the namecard as it begins** (#285), and **it measures
   nothing.** `MilestoneRing.tsx`, drawn by `ScoredDetail` inside the namecard's own box — an

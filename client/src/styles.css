@@ -607,18 +607,6 @@ body {
 }
 
 /*
- * The one mark that is news rather than a note: this round took that player out of the
- * match (docs/rules.md §7, issue #142). The one mark left in the row since the `yaniv`,
- * `assaf` and `milestone` chips went (#156, spec #280) — and the only thing added to a scored round, so a round that eliminated
- * somebody and one that did not stay the same screen in two states.
- */
-.seat__mark--out {
-  border-color: var(--danger);
-  color: var(--danger);
-  font-weight: 700;
-}
-
-/*
  * The status slot: one word about the player rather than about their round — left, away, or
  * watching (issue #146). A chip like the marks above, because it sits in the same row and
  * reads at the same glance, but in lower case and unspaced: those are stamps on a scored
@@ -1437,12 +1425,16 @@ body {
 }
 
 /*
- * Who the round just scored took out of the match — the same ring whose turn it is wears,
- * in the colour the news actually is, and on the same one upright row (issue #142). The two
- * cannot be on at once: a scored round has no turn to be waiting on.
+ * Who the round just scored took out of the match — the same ring and glow whose turn it is
+ * wears, in the colour the news actually is (issue #142, spec #293), on with the Out badge it
+ * explains: both wait for a milestone count to land. The two rings cannot be on at once: a
+ * scored round has no turn to be waiting on.
  */
 .table-seat--went-out .table-seat__label {
-  box-shadow: inset 0 0 0 1px var(--danger);
+  box-shadow:
+    0 0 0 2px var(--danger),
+    0 0 8px 1px rgb(252 165 165 / 55%),
+    var(--plate-shadow);
 }
 
 /*
@@ -1826,13 +1818,18 @@ body {
   font-weight: 600;
 }
 
-/* The line under the name. Clipped, never wrapped, so it cannot make the plate taller. */
+/*
+ * The line under the name. Clipped, never wrapped, so it cannot make the plate taller — with a
+ * margin to the clip, so a milestone count's glow round its total spreads into the plate's
+ * padding rather than being cut to a hard-edged band (spec #280).
+ */
 .table-seat__detail {
   display: flex;
   align-items: baseline;
   gap: 0.3rem;
   min-width: 0;
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: 8px;
   white-space: nowrap;
   font-size: 11px;
 }
@@ -1851,6 +1848,77 @@ body {
   font-size: 10px;
   font-weight: 500;
   opacity: 0.75;
+}
+
+/*
+ * A scored round's line on the plate (`ScoredDetail` in `Table.tsx`, spec #293): the total
+ * and its `pts` as large as the running score they replace, and the sum before them small and
+ * dim. Three-digit totals do not leave room for all of it, so the sum is what gives: cut short
+ * from the left, so what is lost is where they started and what is kept is the step to the
+ * total. The total is never cut.
+ */
+.table-seat__detail .player__score {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+}
+
+/*
+ * Laid out right to left so it overflows, and takes its "…", at its start; the text inside it
+ * is isolated left to right, so the sum still reads `12 + 30 =` and not its mirror.
+ */
+.table-seat__detail .player__lead {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  text-overflow: ellipsis;
+  color: var(--ink-dim);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.table-seat__detail .player__lead-text {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.table-seat__detail .player__total {
+  flex: none;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.table-seat__detail .player__pts {
+  flex: none;
+  margin-left: 0;
+  color: var(--ink-dim);
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+/*
+ * A milestone count lights the whole line blue, as it does in the footer (spec #280). The sum
+ * goes without the glow: it clips itself to be cut from the left, so its glow would be cut to
+ * a hard-edged band.
+ */
+.table-seat__detail .player__score--counting .player__lead,
+.table-seat__detail .player__score--counting .player__pts {
+  color: inherit;
+}
+
+.table-seat__detail .player__score--counting .player__lead {
+  text-shadow: none;
+}
+
+/*
+ * The reduced-motion glow takes its corner from its parent, which on a plate is the detail
+ * line rather than the plate it lights; given the plate's own corner here.
+ */
+.table-seat__label .milestone-glow {
+  border-radius: var(--plate-radius);
 }
 
 /*
@@ -1940,6 +2008,10 @@ body {
 .player__total {
   display: inline-block;
   transform-origin: 50% 60%;
+}
+
+.player__pts {
+  margin-left: 0.25em;
 }
 
 .player__score--counting .player__total {

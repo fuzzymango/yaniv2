@@ -274,8 +274,8 @@ reload or a resumed seat, the scorecard's blue cell being the record.
 It differs in one way, deliberately: **a republication does not cut it off.** The session hands
 over only its start; the table latches it on the scorecard's length and the phase it was scored
 in, and lets it run until it lands, the phase moves (a deal, or a departure that ends the match)
-or the table goes. On a seat the same round took out, `OUT` waits for the
-landing. See `docs/client-table.md`.
+or the table goes. On a seat the same round took out, the red ring and the Out badge wait
+for the landing. See `docs/client-table.md`.
 
 ## Yellow is the call, red is the Assaf
 
