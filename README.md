@@ -118,9 +118,9 @@ Yaniv button becomes "deal the next round" in the same place — for anybody sti
 match, since nobody is host once the cards are out (`docs/adr/0012`).
 
 A round that takes somebody past the room's max score takes **them** out of the match rather
-than ending it for everyone (`docs/rules.md` §7): they are tagged `OUT` on the round that did
-it, and from the next deal their seat sits where it always has, darkened, while the rest play
-shorter and shorter rounds until one player is left — and that player wins, whatever they are
+than ending it for everyone (`docs/rules.md` §7): their nameplate is ringed in red and marked
+Out on the round that did it, and from the next deal their seat sits where it always has,
+darkened, while the rest play shorter and shorter rounds until one player is left — and that player wins, whatever they are
 holding. If it is you, the table stays exactly as it was and the row your hand was in says you
 are out: you go on watching the game you were playing, with the same hands hidden from you as
 before, and nothing left to play — leaving, in the same corner as ever, is the one control

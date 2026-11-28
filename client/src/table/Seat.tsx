@@ -51,8 +51,9 @@ import {
 import { PlayingCard } from "../shared/PlayingCard.tsx";
 import { seatBox } from "../ghosts.ts";
 import type { Zone } from "../seating.ts";
-import type { SeatStatus } from "../status.ts";
-import { STATUS_LABEL, seatStatus } from "../status.ts";
+import type { Badge } from "../status.ts";
+import { seatBadges } from "../status.ts";
+import { SeatBadge } from "./SeatBadge.tsx";
 
 /**
  * One side of the felt, holding the seats `seatZones` dealt it, in the order it dealt them —
@@ -69,8 +70,9 @@ interface SeatProps {
   isTurn?: boolean;
   /**
    * Whether the match has gone on without this player (docs/rules.md §7, issue #144). The
-   * seat stays exactly where it is and is drawn darkened, in every phase and whoever is
-   * behind it — a bot's seat dims like anybody else's, so a glance says who is left.
+   * seat stays exactly where it is and its cards, name and score are drawn darkened, in every
+   * phase and whoever is behind it — a bot's seat dims like anybody else's, so a glance says
+   * who is left. Its badges are not dimmed: they are what says why (spec #293).
    */
   isOut?: boolean;
   /**
@@ -80,12 +82,12 @@ interface SeatProps {
    */
   wentOut?: boolean;
   /**
-   * What is up with the player behind this seat, or null when nothing is: gone for good,
-   * away, or watching a match they are out of (issue #146). One slot per seat, said in one
-   * word, and empty for the two ordinary cases — somebody playing, and a bot.
+   * The icons in the plate's top right corner, in the order they are drawn: out, away, left,
+   * watching or a bot, at most two (spec #293). Worked out by `seatBadges` and passed straight
+   * through — this decides nothing about them.
    */
-  status?: SeatStatus | null;
-  /** What else the label says about them: their score, their count, what a round cost them. */
+  badges: readonly Badge[];
+  /** The line under the name: their score, or what a round cost them. */
   detail: ReactNode;
   /**
    * The call announcement over this seat, when the round that has just arrived turned on
@@ -109,7 +111,7 @@ export function Seat({
   isTurn = false,
   isOut = false,
   wentOut = false,
-  status = null,
+  badges,
   detail,
   banner = null,
   children,
@@ -124,20 +126,22 @@ export function Seat({
     <div className={`table-seat table-seat--${zone}${state}`}>
       {banner}
       {children}
-      <p className="table-seat__label">
-        <span className="table-seat__name">{name}</span>
-        {/*
-          Immediately after the name, and before the numbers: it is a fact about the person
-          rather than about their round, and it is the reason somebody is looking at this
-          seat at all when it is there to be read.
-        */}
-        {status && (
-          <span className={`seat__status seat__status--${status}`}>
-            {STATUS_LABEL[status]}
+      {/*
+        The nameplate: a fixed box whatever is in it, so no seat changes size while a round is
+        played (spec #293). The name and the badges share the top row, the badges taking what
+        they need and the name the rest — cut short with "…", and whole in its `title`.
+      */}
+      <div className="table-seat__label">
+        <div className="table-seat__top">
+          <span className="table-seat__name" title={name}>
+            {name}
           </span>
-        )}
-        {detail}
-      </p>
+          {badges.map((badge) => (
+            <SeatBadge badge={badge} key={badge} />
+          ))}
+        </div>
+        <div className="table-seat__detail">{detail}</div>
+      </div>
     </div>
   );
 }
@@ -203,8 +207,8 @@ export function CardFan({
   flightBox: string;
 }) {
   return (
-    // Decorative: what these cards say is how many there are, and the label below says
-    // that in words. A card back is not a card, so there is nothing here to read out.
+    // Decorative: what these cards say is that a hand is held, and roughly how big. A card
+    // back is not a card, so there is nothing here to read out.
     <div
       className={`table-seat__fan table-seat__fan--${zone}`}
       style={handSlot(zone, count)}
@@ -309,18 +313,19 @@ export function CascadeReveal({ cards, zone }: { cards: readonly Card[]; zone: Z
 
 /**
  * A seat during live play: one face-down card per card actually in that player's hand, and
- * a label saying who is holding them, how many there are and what they have scored.
+ * a nameplate saying who is holding them and what they have scored.
  *
- * The count is in words as well as in cards because most of the fan is off the edge of the
- * screen by design — the fan says *a hand*, and exactly how big it is stays a number worth
- * reading rather than counting, which is what the text row this replaces always said.
+ * The plate no longer says how many cards that is (spec #293): the fan says *a hand*, and a
+ * plate that must read at a glance at a full table on a phone has room for a name, a score
+ * and its badges, and no more.
  *
  * A seat the match has gone on without is this same seat, darkened where it has always sat
- * (issue #144): the round was dealt without them, so the fan they are holding is empty and
- * the count says zero — which is what being out looks like, not a case to draw differently.
+ * (issue #144): the round was dealt without them, so the fan they are holding is empty —
+ * which is what being out looks like, not a case to draw differently.
  *
- * What is *up* with the player behind it is the label's status slot (issue #146), read off
- * the same view by `seatStatus` — one word or none, and none is a bot or somebody playing.
+ * What is *up* with the player behind it is the plate's badges, read off the same view by
+ * `seatBadges`. A round being played has no milestone count running, so an out seat's Out
+ * badge is shown from the first frame.
  */
 export function OpponentSeat({
   zone,
@@ -339,12 +344,12 @@ export function OpponentSeat({
       name={opponent.name}
       isTurn={isTurn}
       isOut={isOut}
-      status={seatStatus(opponent)}
+      badges={seatBadges(opponent, { outShown: true })}
       detail={
-        <>
-          <span className="player__cards">{opponent.handSize} cards</span>
-          <span className="player__score">{opponent.score} pts</span>
-        </>
+        <span className="table-seat__score">
+          {opponent.score}
+          <span className="table-seat__pts">pts</span>
+        </span>
       }
     >
       <CardFan zone={zone} count={opponent.handSize} flightBox={seatBox(opponent.id)} />

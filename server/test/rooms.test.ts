@@ -466,7 +466,7 @@ describe("leave", () => {
     start(h, ada);
     const finished = playUntil(h, [ada], (v) => v.phase === "gameEnd");
     assert.ok(
-      finished.opponents.some((o) => o.name.includes("(bot)")),
+      finished.opponents.some((o) => o.isBot),
       "the table this is left with is a bot's",
     );
 

@@ -145,8 +145,9 @@ export function isCounting(latch: LatchedCount | null, playerId: string): boolea
 
 /**
  * Whether a seat's namecard may wear the news that this round took it out — the red ring
- * beside the `OUT` mark (spec #280, amended on review #281) — read at the grain the table
- * re-renders on: a count is either still running or `landed`, never a frame in between.
+ * and the Out badge beside its name (spec #280, amended on review #281) — read at the grain
+ * the table re-renders on: a count is either still running or `landed`, never a frame in
+ * between.
  *
  * `countFrame`'s own answer, asked at the count's first moment for a seat still counting and
  * after its end for every other, so the ring and the mark cannot disagree about when.
@@ -180,7 +181,7 @@ export interface CountFrame {
    * the table's, which asks the reduced-motion preference (spec #280).
    */
   readonly scale: number;
-  /** Whether the seat may wear the news that this round took it out: `OUT` and the red ring. */
+  /** Whether the seat may wear the news that this round took it out: red ring and Out badge. */
   readonly outShown: boolean;
 }
 
@@ -197,10 +198,11 @@ export interface CountFrame {
  * every other scored seat reads, never a third wording.
  *
  * **Going out waits for the landing** (spec #280, amended on plan review #281): on a seat that
- * hit a milestone and went out in the same round, `OUT` and the red ring tell the end of the
- * count before it is over — and the count is the news. A seat that went out with nothing to
- * count shows both at once, as it always has; so does any line no milestone touched, which is
- * landed from the start, so a seat that is not counting can never be drawn as one.
+ * hit a milestone and went out in the same round, the red ring and the Out badge tell the end
+ * of the count before it is over — and the count is the news. A seat that went out with
+ * nothing to count shows both at once, as it always has; so does any line no milestone
+ * touched, which is landed from the start, so a seat that is not counting can never be drawn
+ * as one.
  *
  * **The total throbs while it drains** (`pulseScale`), and rests the moment it lands.
  *

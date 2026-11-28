@@ -15,8 +15,9 @@
  * A product rule, not an injection defence — every query already binds its values as
  * parameters. What it is for is that a name reads as a name at a table: no punctuation,
  * no symbols, no emoji and nothing invisible, so what a table shows of a name is all of
- * it. A bot's name is the server's own label, not a name a person chose,
- * and never comes through here — which is what lets its "(bot)" say so.
+ * it. A bot's name is the server's own label, not a name a person chose, and never comes
+ * through here; it is a bare name a person may share, and `OpponentView.isBot`, not the
+ * name, is what says a seat is a bot (docs/adr/0029).
  *
  * What it deliberately does not hold is the sentence a refusal is worded with. Each
  * caller writes its own, as every other refusal in the repo does: the server composes

@@ -28,8 +28,8 @@ import type { RingStroke } from "../milestone.ts";
 import { ringFrame } from "../milestone.ts";
 import { MILESTONE_GLOW_MS } from "../timing.ts";
 
-/** The rect's corner, round the namecard's own (0.5rem) out to the stroke's centre. */
-const CORNER = 9.5;
+/** The rect's corner: the nameplate's own (`--plate-radius`, spec #293), so the ring traces it. */
+const CORNER = 10;
 
 /** One stroke of the ring, as a single dash along the namecard's perimeter. */
 const along = ({ from, to }: RingStroke) => ({

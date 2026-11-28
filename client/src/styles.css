@@ -3,7 +3,8 @@
  * media queries widen it for a desktop rather than the other way round. Nothing scales
  * a phone screen across a monitor — the layout is capped and centred instead.
  *
- * No images and no icon fonts. Cards, when they arrive, are drawn in CSS.
+ * No image files and no icon fonts. Cards are drawn in CSS, and icons are inline SVG in
+ * `currentColor`, written into the component that draws them.
  */
 
 :root {
@@ -13,6 +14,11 @@
   --ink-dim: #cbd5e1;
   --accent: #fde047;
   --danger: #fca5a5;
+  /*
+   * A connection that dropped (spec #293): the nameplate's Away badge and the lobby's away
+   * chip. Orange rather than `--accent`, so yellow means only "your turn" and a selection.
+   */
+  --away: #fdba74;
   --news: #86efac;
   --surface: rgb(0 0 0 / 25%);
   /* A total a milestone cut (docs/rules.md §7): the scorecard's cell and a count draining. */
@@ -37,6 +43,22 @@
    * — how many moves fit before it scrolls is arithmetic on this number.
    */
   --mini-w: min(4.0rem, 9vw);  /* scales bigger on larger screens */
+
+  /*
+   * An opponent's nameplate (spec #293): one fixed box at every seat, whatever is in it, so
+   * no seat changes size while a round is played. The milestone ring traces its corner
+   * (`CORNER` in `MilestoneRing.tsx`, which must match `--plate-radius`).
+   *
+   * 120px wide rather than the design's 128: at 375×667 with six seats, a side seat whose
+   * hand is empty (out, or left) shrinks and its column re-centres, and a 128px plate there
+   * overlapped the top seat's by 8px and slid under the Yaniv call. 120 clears both (#297).
+   */
+  --plate-w: 120px;
+  --plate-h: 52px;
+  --plate-radius: 10px;
+  --plate-top: #1b3d29;
+  --plate-bottom: #0e2818;
+  --plate-shadow: 0 2px 4px rgb(0 0 0 / 40%);
 
 
   color-scheme: dark;
@@ -585,27 +607,14 @@ body {
 }
 
 /*
- * The one mark that is news rather than a note: this round took that player out of the
- * match (docs/rules.md §7, issue #142). The one mark left in the row since the `yaniv`,
- * `assaf` and `milestone` chips went (#156, spec #280) — and the only thing added to a scored round, so a round that eliminated
- * somebody and one that did not stay the same screen in two states.
- */
-.seat__mark--out {
-  border-color: var(--danger);
-  color: var(--danger);
-  font-weight: 700;
-}
-
-/*
  * The status slot: one word about the player rather than about their round — left, away, or
  * watching (issue #146). A chip like the marks above, because it sits in the same row and
  * reads at the same glance, but in lower case and unspaced: those are stamps on a scored
  * round, this is a note about somebody.
  *
- * Brighter than a mark deliberately. A seat that is out wears `.table-seat--out`, which
- * fades the whole seat to a little over a third (issue #144), and opacity on the seat is a
- * ceiling its children cannot climb back out of — so the one thing on a dimmed seat worth
- * reading is given the full ink and a stronger border to survive the fade.
+ * The lobby's roster rows wear it; the table's seats say the same things with the
+ * nameplate's badges instead (`.seat-badge`, spec #293). Full ink and a stronger border than
+ * a mark, being a note about a person rather than a stamp on a round.
  */
 .seat__status {
   padding: 0.05rem 0.35rem;
@@ -622,8 +631,8 @@ body {
  * a table with three watchers should not look like a table with three problems.
  */
 .seat__status--away {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--away);
+  color: var(--away);
 }
 
 /*
@@ -1401,23 +1410,31 @@ body {
 }
 
 /*
- * Whose turn it is: the label alone, not the seat entire. A ring round the seat's whole
+ * Whose turn it is: the plate alone, not the seat entire. A ring round the seat's whole
  * box is mostly ringing the reserved space around a fan that is turned inside it and hung
  * off the edge of the screen, so it reads as a box drawn near a player rather than round
- * them. The label is the one part of a seat that is upright, on screen whole, and the same
- * shape in every zone. The same ring the text row it replaces used to carry.
+ * them. The plate is the one part of a seat that is upright, on screen whole, and the same
+ * shape in every zone. A 2px ring outside it with a soft glow, the way a milestone count
+ * lights a plate (spec #293), so it reads from across a full table.
  */
 .table-seat--turn .table-seat__label {
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 8px 1px rgb(253 224 71 / 55%),
+    var(--plate-shadow);
 }
 
 /*
- * Who the round just scored took out of the match — the same ring whose turn it is wears,
- * in the colour the news actually is, and on the same one upright row (issue #142). The two
- * cannot be on at once: a scored round has no turn to be waiting on.
+ * Who the round just scored took out of the match — the same ring and glow whose turn it is
+ * wears, in the colour the news actually is (issue #142, spec #293), on with the Out badge it
+ * explains: both wait for a milestone count to land. The two rings cannot be on at once: a
+ * scored round has no turn to be waiting on.
  */
 .table-seat--went-out .table-seat__label {
-  box-shadow: inset 0 0 0 1px var(--danger);
+  box-shadow:
+    0 0 0 2px var(--danger),
+    0 0 8px 1px rgb(252 165 165 / 55%),
+    var(--plate-shadow);
 }
 
 /*
@@ -1425,14 +1442,26 @@ body {
  * — the table does not close up around whoever is left, so a seat means one player for the
  * life of the room and a glance says who is still in.
  *
- * The whole seat rather than its label, which is the opposite of the ring above and is the
+ * The seat rather than its plate, which is the opposite of the ring above and is the
  * difference between news and a standing fact: the ring is a thing that just happened to one
- * row, this is the seat entire receding — cards, name and score together — behind the ones
- * still being played. Opacity alone, so nothing moves and no card in flight has to be told
- * about it.
+ * plate, this is the seat receding — cards, name and score together — behind the ones still
+ * being played. **Except its badges** (spec #293), which stay at full strength: they are what
+ * says why the seat is dim, and opacity on a parent is a ceiling no child climbs back out of,
+ * so the fade is put on each part beside them rather than on the seat. The plate's own tile
+ * fades with it. Opacity alone, so nothing moves and no card in flight has to be told about it.
  */
-.table-seat--out {
-  opacity: 0.38;
+.table-seat--out > :not(.table-seat__label),
+.table-seat--out .table-seat__name,
+.table-seat--out .table-seat__detail {
+  opacity: 0.4;
+}
+
+.table-seat--out .table-seat__label {
+  background: linear-gradient(
+    color-mix(in srgb, var(--plate-top) 40%, transparent),
+    color-mix(in srgb, var(--plate-bottom) 40%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 4%);
 }
 
 /*
@@ -1741,32 +1770,175 @@ body {
 }
 
 /*
- * Upright in every zone, and never rotated with the cards above it. Small: five of these
- * are on the screen at a full table, and none of them is what anybody is playing.
+ * The nameplate (spec #293): upright in every zone, never rotated with the cards above it,
+ * and one fixed size at every seat whatever it holds — a long name, two badges or none, a
+ * score of one digit or three. Five of these are on the screen at a full table, and none of
+ * them is what anybody is playing, so it says a name, a score and its badges and no more.
+ *
+ * The 1px edge is an inset shadow rather than a border, so the turn ring replaces it rather
+ * than being drawn outside it.
  */
 .table-seat__label {
   /* The box a milestone count's ring is traced round (`MilestoneRing.tsx`), as is `.you`. */
   position: relative;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.3rem;
-  max-width: 7.5rem;
-  margin: 0;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.5rem;
-  background: var(--surface);
-  font-size: 0.7rem;
+  flex: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.1rem;
+  width: var(--plate-w);
+  height: var(--plate-h);
+  padding: 0 10px;
+  border-radius: var(--plate-radius);
+  background: linear-gradient(var(--plate-top), var(--plate-bottom));
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 9%),
+    inset 0 1px 0 rgb(255 255 255 / 7%),
+    var(--plate-shadow);
+  color: var(--ink);
+}
+
+/* The name, and the badges at its right; a row the height of a badge, with or without one. */
+.table-seat__top {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  height: 18px;
 }
 
 .table-seat__name {
-  /* A line of its own, so a long name pushes the numbers down rather than sideways. */
-  flex: 0 0 100%;
-  /* Names are bounded server-side but not narrow; the counts keep their place. */
+  /* What the badges leave. Names are bounded server-side but not narrow. */
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13px;
   font-weight: 600;
+}
+
+/*
+ * The line under the name. Clipped, never wrapped, so it cannot make the plate taller — with a
+ * margin to the clip, so a milestone count's glow round its total spreads into the plate's
+ * padding rather than being cut to a hard-edged band (spec #280).
+ */
+.table-seat__detail {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+  overflow: clip;
+  overflow-clip-margin: 8px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+/* The running score during play: the one number on the plate, and the biggest thing on it. */
+.table-seat__score {
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.table-seat__pts {
+  margin-left: 3px;
+  color: var(--ink-dim);
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+/*
+ * A scored round's line on the plate (`ScoredDetail` in `Table.tsx`, spec #293): the total
+ * and its `pts` as large as the running score they replace, and the sum before them small and
+ * dim. Three-digit totals do not leave room for all of it, so the sum is what gives: cut short
+ * from the left, so what is lost is where they started and what is kept is the step to the
+ * total. The total is never cut.
+ */
+.table-seat__detail .player__score {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+}
+
+/*
+ * Laid out right to left so it overflows, and takes its "…", at its start; the text inside it
+ * is isolated left to right, so the sum still reads `12 + 30 =` and not its mirror.
+ */
+.table-seat__detail .player__lead {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  text-overflow: ellipsis;
+  color: var(--ink-dim);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.table-seat__detail .player__lead-text {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.table-seat__detail .player__total {
+  flex: none;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.table-seat__detail .player__pts {
+  flex: none;
+  margin-left: 0;
+  color: var(--ink-dim);
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+/*
+ * A milestone count lights the whole line blue, as it does in the footer (spec #280). The sum
+ * goes without the glow: it clips itself to be cut from the left, so its glow would be cut to
+ * a hard-edged band.
+ */
+.table-seat__detail .player__score--counting .player__lead,
+.table-seat__detail .player__score--counting .player__pts {
+  color: inherit;
+}
+
+.table-seat__detail .player__score--counting .player__lead {
+  text-shadow: none;
+}
+
+/*
+ * The reduced-motion glow takes its corner from its parent, which on a plate is the detail
+ * line rather than the plate it lights; given the plate's own corner here.
+ */
+.table-seat__label .milestone-glow {
+  border-radius: var(--plate-radius);
+}
+
+/*
+ * One badge (`SeatBadge.tsx`): a 12px icon in an 18px chip. Grey, all but one: Away is the one
+ * that may yet change, and the only one the table is arguably waiting on, so it is the one in
+ * colour — a table with three watchers should not look like a table with three problems.
+ */
+.seat-badge {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 10%);
+  color: var(--ink-dim);
+}
+
+.seat-badge--away {
+  color: var(--away);
 }
 
 .you {
@@ -1804,7 +1976,6 @@ body {
   font-weight: 600;
 }
 
-.player__cards,
 .you__value {
   color: var(--ink-dim);
   font-size: 0.8rem;
@@ -1837,6 +2008,10 @@ body {
 .player__total {
   display: inline-block;
   transform-origin: 50% 60%;
+}
+
+.player__pts {
+  margin-left: 0.25em;
 }
 
 .player__score--counting .player__total {

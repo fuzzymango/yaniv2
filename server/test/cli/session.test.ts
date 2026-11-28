@@ -941,14 +941,12 @@ describe("runSession", () => {
        * Whoever deals the next round, which any player still in the match may do
        * (docs/adr/0012). One of them has to be picked or both would ask and the loser
        * would be refused with `WRONG_PHASE` and print it — so it is the first human left
-       * in turn order, which every screen reads the same way. "(bot)" is baked into a
-       * name by the server, so it is the same answer whoever is looking.
+       * in turn order, which every screen reads the same way. Which seats are bots is on
+       * the wire (docs/adr/0029), so it is the same answer whoever is looking.
        */
       const deals = (view: PlayerGameView) => {
-        const seated = new Map([view.you, ...view.opponents].map((p) => [p.id, p.name]));
-        const humans = view.turnOrder.filter(
-          (id) => !(seated.get(id) ?? "").includes("(bot)"),
-        );
+        const bots = new Set(view.opponents.filter((o) => o.isBot).map((o) => o.id));
+        const humans = view.turnOrder.filter((id) => !bots.has(id));
         return humans[0] === view.you.id;
       };
 

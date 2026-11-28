@@ -8,7 +8,7 @@ reached its length cap; the decisions are unchanged, and `docs/architecture.md` 
 ## The table is seated, and part of every seat is off the screen
 
 Opponents are drawn round three sides of the felt (`seatZones`), each a fan of face-down
-backs — one per card they are actually holding — under an upright label, in place of a row
+backs — one per card they are actually holding — under an upright nameplate, in place of a row
 of text. The fan is the point: a hand shrinking is something to watch rather than a number
 to notice. Six decisions hold it up, in `fan.ts` and `styles.css` — five the prototype's
 variant D verdict (issue #56) rather than a re-derivation, and a sixth about what the felt
@@ -32,9 +32,9 @@ had to give up to make room for the lot:
   zones are centred in it — a lone seat on the middle of the edge, a pair either side of it,
   so a lone seat opposite a pair sits level with the gap between them. It used to stop at 56%
   of the screen, which drew a lone side seat where the upper of two would sit.
-- **Only the label is ringed on turn**, not the seat's box — which is mostly the space
+- **Only the nameplate is ringed on turn**, not the seat's box — which is mostly the space
   reserved for an arc turned inside it and hung off the edge, so a ring there reads as a box
-  near a player rather than round them.
+  near a player rather than round them. A 2px yellow ring with a soft glow (spec #293).
 - **The table's settings icon is pinned out of flow too** (`.table > .topbar`), since the
   band covers the top of the screen the column's first row would sit in: it belongs to the
   table's corner, above the band. That is now the corner in both phases (issue #78) — the
@@ -73,14 +73,23 @@ the page, and nobody has to be re-found. What changes is what changed:
   every one of them down the page at the one moment they must not move.
 - **The Yaniv call becomes the deal** — offered to any viewer still in the match, or the line
   saying what is being waited for, in the slot the call was in (docs/adr/0012).
-- **Anybody the round took out of the match is tagged `OUT`** (issue #142), on their label
-  beside the score, with the same ring round it that whose-turn-it-is wears — in the colour the news actually is, and the two can never be on
-  together. It is *all* that is added: no prose, and the eliminated player's hand and round
-  score are still shown, so a round that ended somebody's match and one that did not are the
-  same screen in two states. Whose round it was is the seat's own `outInRound` against the
-  round being drawn, not the viewer's `roundNumber` — the record is what the rest of the
-  screen is reading. On a seat whose milestone is still counting, both the tag and the ring
-  wait for it to land (`countFrame`'s `outShown`, below).
+- **Anybody the round took out of the match wears a red ring and the Out badge** (issue #142,
+  spec #293): the same 2px ring and glow that whose-turn-it-is wears, in the colour the news
+  actually is — the two can never be on together — and the badge that says what it means. The
+  red `OUT` text chip that used to sit beside the score is gone. It is *all* that is added: no
+  prose, and the eliminated player's hand and round score are still shown, so a round that
+  ended somebody's match and one that did not are the same screen in two states. Whose round it
+  was is the seat's own `outInRound` against the round being drawn, not the viewer's
+  `roundNumber` — the record is what the rest of the screen is reading. On a seat whose
+  milestone is still counting, the ring and the badge wait for it to land, together
+  (`outShownFor`, below). A seat out from an *earlier* round keeps its Out badge too, which is
+  why the scored seat asks `isOut || outShown`: `outShown` alone is false for it.
+- **On the plate the total stays large and the sum is drawn small** (spec #293): the total at
+  the running score's 19px with its `pts`, and `a + b =` before it at 10px and dim. A 120px
+  plate has no room for all of a three-digit line, so the sum is what gives — cut short from
+  the **left**, with "…" at its start (laid out right to left, its text isolated left to
+  right), keeping the step to the total and losing where they started. The total is never cut.
+  The viewer's own footer has room, and draws the line whole.
 
 Seats are placed by the live roster sorted by `byRelativeSeat` in **both** phases, and the
 round's own record is looked up by id against whoever is already in a zone. Two placements
@@ -202,14 +211,17 @@ player for the life of the room, and a glance says who is still in.
   playing. The sweep anchors on the viewer's **own** seat rather than on the next player to act,
   which is what keeps it meaningful for a spectator: they are seated like everybody else and are
   not in turn order at all.
-- **Dim is the whole seat, and it is opacity.** Cards, name and score recede together, because
-  this is a standing fact about a seat rather than news about one row of it — which is what the
-  red ring on the label is, and why they are two classes (`.table-seat--out` against
-  `.table-seat--went-out`). Opacity moves nothing, so a card in flight needs to know nothing
-  about it, and a seat drawn for a hand of five keeps the box it reserved.
+- **Dim is the seat, all but its badges, and it is opacity.** Cards, name and score recede
+  together to 40%, because this is a standing fact about a seat rather than news about its
+  plate — which is what the red ring on the plate is, and why they are two classes
+  (`.table-seat--out` against `.table-seat--went-out`). The badges stay at full strength (spec
+  #293): they say *why* the seat is dim, and opacity on a parent is a ceiling no child climbs
+  back out of, so the fade is put on each part beside them rather than on the seat. Opacity
+  moves nothing, so a card in flight needs to know nothing about it, and a seat drawn for a
+  hand of five keeps the box it reserved.
 - **Dim from the next deal on, not the round they went out in.** That round is scored with them
   in it: their hand and what it cost them are exactly what a scored table is for reading, and it
-  wears the `OUT` mark (issue #142) instead. `Table.tsx` asks it as one question — out, and out
+  wears the red ring and the Out badge (issue #142) instead. `Table.tsx` asks it as one question — out, and out
   before the round on the screen. At `gameEnd` that leaves the last player knocked out undimmed,
   deliberately: the round on the screen is the one that just ended the match, their hand in it is
   the reason it ended, and dimming the cards everybody has come to look at to say what the
@@ -219,37 +231,49 @@ player for the life of the room, and a glance says who is still in.
 - **The viewer's own row is never dimmed.** It is the row they are reading the table from, and
   the bar where their hand was already says they are out, in words (issue #143).
 
-## One slot per seat says what is up with the player behind it
+## The nameplate says who is behind a seat, in badges
 
-**A table that has gone quiet explains itself** (issue #146). Each seat's label carries one
-status slot, holding one word or nothing: **left**, **away** or **watching**, in that
-priority (`status.ts`, `seatStatus`). A player who dropped is not somebody the table is idly
-waiting on, and a player who gave the seat up is not somebody to wait for at all.
+**A table that has gone quiet explains itself** (issue #146), and since spec #293 it does so
+on the **Slate nameplate**: a fixed 120×52 tile under each opponent's cards, with the name top
+left, the score under it in large tabular digits, and up to two icon badges top right. It has
+to read at a glance on a phone at a full six-seat table: whose turn, who is out, who dropped,
+who left and who is a bot.
 
-- **A priority, not a set of badges.** A seat can be several of these at once — somebody who
-  left is out of the match and has no connection either — so the slot says the most final
-  thing that is true of it. Left beats away beats watching, and "watching" is the one thing
-  it must never say of a table nobody is looking at.
-- **Nothing at all is the ordinary case, and covers two seats**: somebody playing, and a
-  **bot**. A bot is connected always and watching never, so it falls out of the rule rather
-  than being a case in it — which is what makes an empty slot unambiguous. No client is told
-  which seats are bots, and none needs to be.
-- **The word comes off the wire, not off the screen.** `connected` and `spectating` are sent
+- **One fixed size, whatever is in it** (`--plate-w`, `--plate-h`). A long name ends in "…"
+  and is whole in the plate's `title`; badges coming and going take room from the name, never
+  from the box; the line under the name is clipped rather than wrapped. A plate that grew with
+  its content would move the seats round it, which is the one thing a seat must never do
+  mid-round. The hand size is gone from it: the fan already says a hand is held. **120px
+  wide, not the design's 128** (#297): at 375×667 with six seats a side seat with an empty
+  hand shrinks and its column re-centres, and 128 overlapped the top seat's plate there.
+- **Badges are a short ordered list, not one word** (`status.ts`, `seatBadges`): Out first,
+  then one of Bot, Away or Watching — or Left alone, which beats everything. A seat can be
+  several things at once, and two badges say "out, and still watching" or "out, and dropped",
+  which one word could not. Out and Watching wait for `outShown` in the round that knocked the
+  seat out, so a plate never gives away the end of a milestone count; during a round being
+  played there is no count, so a live seat passes `true`.
+- **Nothing at all is the ordinary case**: somebody playing and present. A **bot** wears the
+  robot badge, read off `isBot` on the wire
+  ([ADR-0029](adr/0029-a-client-is-told-which-seats-are-bots.md)) and never off its name — the
+  plate is the one place in the browser a bot is marked.
+- **The facts come off the wire, not off the screen.** `connected` and `spectating` are sent
   for every seat, derived by the server from the sockets in the room at the moment it
-  publishes ([ADR-0013](adr/0013-connection-derived-from-the-live-sockets.md)). A client
-  that worked out "watching" for itself would have to know which seats were bots.
-- **Brighter than the marks beside it, on purpose.** An out seat is faded to a little over a
-  third by `.table-seat--out`, and opacity on a parent is a ceiling its children cannot climb
-  back out of — so the one thing on a dimmed seat still worth reading gets full ink and a
-  stronger border. Only **away** is coloured, being the one that may yet change; a table with
-  three watchers should not look like a table with three problems.
-- **The same slot in both phases.** A scored round draws it exactly as a live one does: who
-  is there is as true while the table waits on the deal as while it waits on a turn.
-- **The lobby's roster rows carry it too**, off the same `seatStatus`. Only "away" can come
-  up there — nobody is out of a match that has not been dealt, and a player who leaves a
-  lobby is spliced out of the roster — and it is worth saying for the same reason: a room
-  waiting to start should not be waiting on a phone that locked itself.
-- **The viewer's own row has no slot**, and needs none. They are connected by definition,
+  publishes ([ADR-0013](adr/0013-connection-derived-from-the-live-sockets.md)).
+- **Icons, each named in words** (`SeatBadge.tsx`): inline SVG in `currentColor`, a crossed
+  card for out, slashed wifi for away, a door for left, an eye for watching and a robot for a
+  bot, each chip an `img` with the word as its accessible name. Only **away** is coloured
+  (`--away`, orange), being the one that may yet change; a table with three watchers should
+  not look like a table with three problems. Yellow is kept for "your turn" and selection.
+- **Badges survive the fade.** An out seat's cards, name and score are drawn at 40%; its
+  badges are not, being the reason it is dim (above).
+- **The same badges in both phases.** A scored round draws them as a live one does: who is
+  there is as true while the table waits on the deal as while it waits on a turn. The one
+  difference is the round that knocked a seat out, whose Out (and Watching) wait for
+  `outShown`, so they arrive with the red ring after any milestone count has landed.
+- **The lobby keeps words** (`seatStatus`, one of left › away › watching, in a chip). Only
+  "away" can come up there — nobody is out of a match that has not been dealt, and a player
+  who leaves a lobby is spliced out of the roster — and it is orange there too.
+- **The viewer's own row has no badges yet**, and needs few. They are connected by definition,
   they have not left, and if they are watching the bar where their hand was says so in words
   (issue #143).
 
@@ -334,7 +358,7 @@ decisions, none of them about the rules of anything:
   pile, and the place it has genuinely reached has nothing to wait for. **A seat is the one
   landing nothing waits at**: the fan there stands for a count the position has already
   settled, so there is no card at the end of that journey to be drawn twice — and a back too
-  few would misstate the count its own label states in words.
+  few would misstate the count the fan is there to show.
 - **`FLIGHT_MS` is bounded by bot think time, not by the client.** 300ms, against the
   seconds a bot pauses before its move: what keeps a flight from being replaced before it
   finishes is the server's think time, not a client-side beat (issue #135, which retired the
@@ -458,8 +482,8 @@ about this table in particular:
   which names both players in a sentence, and the scorecard — which now speaks the same two
   colours, yellow for the call and red for the Assaf. The grey `milestone` chip has since gone
   too (spec #280): the score beside it now says so itself, by counting (below), and the
-  scorecard's blue cell is the record. `out` is the one mark left — and on a seat still
-  counting a milestone it waits, with the red ring, for the count to land.
+  scorecard's blue cell is the record. The `out` chip went last (spec #293): the Out badge and
+  the red ring say it, and on a seat still counting a milestone both wait for the count to land.
 
 **And the deal waits until the round has been seen** (issues #204, #205). "Deal next round"
 takes the Yaniv call's slot, so a second tap on Yaniv!, or a thumb already on its way there,
@@ -513,8 +537,8 @@ when it starts is the session's one-shot (`countdownFrom`, `docs/client-session.
   milestone it runs under the banner. Waiting for the banners would put it after the deal hold,
   where a prompt deal would cut it off before it began; starting together, the total has landed
   as the hold lifts, and the count holds nothing up.
-- **Going out waits for it.** On a seat that hit a milestone and still went out, `OUT` and the
-  red ring are withheld until the count lands (amended on review, #281): shown from the first
+- **Going out waits for it.** On a seat that hit a milestone and still went out, the red ring
+  and the Out badge are withheld until the count lands (amended on review, #281): shown from the first
   frame, either would give away how the count ends. A seat that went out with no milestone
   shows both at once, as it always has, and one the milestone saved gets nothing extra.
 - **The total throbs while it drains** (#284): a scale of 1 to 1.1 and back every
@@ -523,7 +547,7 @@ when it starts is the session's one-shot (`countdownFrom`, `docs/client-session.
   total throbs: `countFrame` hands the table the sentence before it (`lead`) so the number sits
   in a box of its own, and a transform, so nothing beside it moves. It rests at exactly 1 once
   landed. Under reduced motion there is no throb and everything else is unchanged — the drain,
-  the flip and `OUT` waiting — the preference read once as the count is latched, as a flight
+  the flip and the Out badge waiting — the preference read once as the count is latched, as a flight
   reads it, a scale set from code being out of a stylesheet's reach.
 - **A laser ring is traced round the namecard as it begins** (#285), and **it measures
   nothing.** `MilestoneRing.tsx`, drawn by `ScoredDetail` inside the namecard's own box — an

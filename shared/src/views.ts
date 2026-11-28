@@ -27,8 +27,7 @@ export interface MatchStanding {
    *
    * Derived by the server from the sockets in the room at the moment it publishes and
    * never stored, so there is no flag here to go stale (docs/adr/0013). True for a bot,
-   * which is never away: the server is always there for it, and a bot's absence of any
-   * marker is what says it is one.
+   * which is never away: the server is always there for it.
    */
   connected: boolean;
 }
@@ -118,14 +117,20 @@ export interface OpponentView extends MatchStanding {
   customAssafCall: string | null;
   handSize: number;
   /**
+   * Whether the server plays this seat. Sent so a client can mark a bot as one — the
+   * nameplate's robot badge, the CLI harness's marker — rather than reading it off a name,
+   * which a person may share (docs/adr/0029). Public, fixed at seating, and in every phase.
+   *
+   * On this view and not `SelfView`: the viewer is never a bot in any client that draws
+   * one, a bot deciding from its own view having no use for the fact.
+   */
+  isBot: boolean;
+  /**
    * Whether this seat is *watching* the match rather than playing it: out of it, not gone,
    * connected, and somebody rather than a bot. The same derivation that tags the viewer's
    * own view above, made once on the server and sent for every seat, so a table cannot
-   * decide for itself who is looking at it (issue #146).
-   *
-   * Sent rather than derived here because the last of those conditions is not on the wire
-   * at all: nothing tells a client which seats are bots, and nothing should — a bot is
-   * exactly the seat that carries no marker.
+   * decide for itself who is looking at it (issue #146) — and so `isBot` beside it is never
+   * a client's ingredient for a rule the server already owns.
    */
   spectating: boolean;
 }

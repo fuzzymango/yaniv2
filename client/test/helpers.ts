@@ -117,6 +117,7 @@ export function viewOf(
         outInRound: null,
         departed: false,
         connected: true,
+        isBot: false,
         spectating: false,
         handSize: 5,
       },

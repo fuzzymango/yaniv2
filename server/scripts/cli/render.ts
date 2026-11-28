@@ -10,7 +10,7 @@ import type { PlayerGameView, RoundResultView } from "@yaniv/shared";
 import { standings } from "@yaniv/shared";
 import { bold, cyan, dim, green, pad, red, renderCard, renderHand } from "../lib/cardDisplay.ts";
 
-/** The narrowest a name column goes: wide enough for a bot's "(bot)"-suffixed name. */
+/** The narrowest a name column goes: wide enough for a bot's name with its "(bot)". */
 const NAME_WIDTH = 14;
 
 /**
@@ -25,23 +25,29 @@ const columnWidth = (names: readonly string[]) =>
   Math.max(NAME_WIDTH, ...names.map((n) => n.length));
 
 /**
- * The name a viewer reads for a seat, marked when the seat is one of theirs.
+ * The name a viewer reads for a seat, marked with what the name itself does not say.
  *
- * "(bot)" arrives already baked into the name from the server, because a bot is a bot
- * whoever is looking. "(you)" can only be added here: who "you" is depends on which
- * screen the frame is bound for, so it is never stored or sent over the wire.
+ * "(bot)" comes from the seat's `isBot`, never from its name — a bot's name is bare, and a
+ * person may share it (docs/adr/0029). A row that carries only an id (a round's result,
+ * the standings) is looked up among the opponents, the viewer never being a bot. "(you)"
+ * can only be added here: who "you" is depends on which screen the frame is bound for, so
+ * it is never stored or sent over the wire.
  *
  * `hostId` is passed only where being host is worth showing — the lobby, which is the
  * only place there is a host at all: the role retires at the first deal (docs/adr/0012),
  * and the view says so by sending null from then on.
  */
 function seatName(
+  view: PlayerGameView,
   name: string,
   id: string,
-  viewerId: string,
   hostId?: string | null,
 ): string {
-  const marks = [id === viewerId ? "(you)" : "", id === hostId ? "(host)" : ""];
+  const marks = [
+    view.opponents.some((o) => o.id === id && o.isBot) ? "(bot)" : "",
+    id === view.you.id ? "(you)" : "",
+    id === hostId ? "(host)" : "",
+  ];
   return [name, ...marks.filter(Boolean)].join(" ");
 }
 
@@ -71,7 +77,7 @@ function renderLobby(view: PlayerGameView): string[] {
   // the two are equal in a lobby nobody has gone out of, and this is what it means.
   for (const id of view.seating) {
     const name = byId.get(id)?.name ?? id;
-    lines.push(`  ${seatName(name, id, view.you.id, view.hostId)}`);
+    lines.push(`  ${seatName(view, name, id, view.hostId)}`);
   }
 
   lines.push(
@@ -117,8 +123,9 @@ function renderOwnHand(view: PlayerGameView): string {
 
 /** Opponents, one per line: what you know about them is a count and a score. */
 function renderOpponents(view: PlayerGameView): string[] {
-  const width = columnWidth(view.opponents.map((o) => o.name));
-  return view.opponents.map((o) =>
+  const rows = view.opponents.map((o) => ({ ...o, name: seatName(view, o.name, o.id) }));
+  const width = columnWidth(rows.map((o) => o.name));
+  return rows.map((o) =>
     dim(`  ${o.name.padEnd(width)} ${o.handSize} cards · ${o.score} pts`),
   );
 }
@@ -154,10 +161,10 @@ function renderSlapdown(view: PlayerGameView): string[] {
  * The hands come straight from the view — the server reveals them only at `roundEnd`
  * and `gameEnd`, so there is nothing here the harness has to decide about disclosure.
  */
-function renderRoundResult(result: RoundResultView, viewerId: string): string[] {
+function renderRoundResult(view: PlayerGameView, result: RoundResultView): string[] {
   const named = (id: string) => {
     const player = result.players.find((p) => p.playerId === id);
-    return seatName(player?.name ?? id, id, viewerId);
+    return seatName(view, player?.name ?? id, id);
   };
   const verdict =
     result.assaferId === null
@@ -169,7 +176,7 @@ function renderRoundResult(result: RoundResultView, viewerId: string): string[] 
 
   const rows = result.players.map((p) => ({
     ...p,
-    name: seatName(p.name, p.playerId, viewerId),
+    name: seatName(view, p.name, p.playerId),
   }));
   const width = columnWidth(rows.map((r) => r.name));
 
@@ -199,7 +206,7 @@ function renderStandings(view: PlayerGameView): string[] {
     score: p.score,
     name: p.departed
       ? `${p.name} ${DEPARTED}`
-      : seatName(p.name, p.playerId, view.you.id),
+      : seatName(view, p.name, p.playerId),
   }));
   const width = columnWidth(rows.map((r) => r.name));
   const lines = [`\n${bold("══ Match over ══════════════════════════════════")}`];
@@ -230,9 +237,7 @@ export function renderView(view: PlayerGameView): string {
   if (view.phase === "gameEnd") {
     // All three: the round that ended it, where everyone finished, and what is left to
     // do about it.
-    const result = view.roundResult
-      ? renderRoundResult(view.roundResult, view.you.id)
-      : [];
+    const result = view.roundResult ? renderRoundResult(view, view.roundResult) : [];
     return [
       ...result,
       ...renderStandings(view),
@@ -240,8 +245,7 @@ export function renderView(view: PlayerGameView): string {
     ].join("\n");
   }
 
-  if (view.roundResult)
-    return renderRoundResult(view.roundResult, view.you.id).join("\n");
+  if (view.roundResult) return renderRoundResult(view, view.roundResult).join("\n");
 
   // The slapdown line goes last, directly above the prompt: it is the shortest-lived
   // thing on the frame, and the closest to the cursor is the hardest to scroll past.
